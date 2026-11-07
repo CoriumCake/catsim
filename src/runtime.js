@@ -571,6 +571,15 @@ class Simulator {
       },
       noTone(pin) { delete sim.tone[+pin]; sim.touch(); },
 
+      MSBFIRST: 1, LSBFIRST: 0,
+      shiftOut(dataPin, clockPin, bitOrder, val) {
+        for (let i = 0; i < 8; i++) {
+          const bit = bitOrder === 0 ? (val >> i) & 1 : (val >> (7 - i)) & 1;
+          api.digitalWrite(dataPin, bit);
+          api.digitalWrite(clockPin, 1);
+          api.digitalWrite(clockPin, 0);
+        }
+      },
       attachInterrupt(pin, fn, mode) { pin = +pin; sim.interrupts = sim.interrupts.filter((i) => i.pin !== pin); sim.interrupts.push({ pin, fn, mode, last: sim.readPin(pin) }); },
       detachInterrupt(pin) { sim.interrupts = sim.interrupts.filter((i) => i.pin !== +pin); },
       digitalPinToInterrupt: (p) => p, interrupts() {}, noInterrupts() {},

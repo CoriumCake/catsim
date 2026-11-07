@@ -26,11 +26,12 @@ Everything is bundled, so the built site works offline (no CDN scripts).
 ## Features
 
 - **ESP32 DevKit V1 (30-pin)** with real GPIO numbering. Hover a pin to see its functions (ADC1/ADC2, touch, DAC, strapping, I2C). The on-board LED is on GPIO2.
-- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819) and an LM358 op-amp.
+- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819), an LM358 op-amp, capacitors, and logic chips with real DIP pinouts: 74HC00/02/04/08/14/32/86 gates, 74HC74 flip-flops, 74HC595 shift register, CD4017 counter and the NE555 timer.
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
 - **Analog circuit engine:** voltages and currents are solved like SPICE (modified nodal analysis, Newton–Raphson, trapezoidal integration with error control), validated against ngspice in CI. LEDs are real diodes with colour-specific forward voltages, and their brightness follows the actual current, so a resistor value or a blue LED on 3.3 V makes a visible difference. GPIOs have realistic output resistance, pull-ups and input thresholds; PWM, `tone()` and servo signals are real waveforms; `dacWrite` outputs a real voltage.
+- **Mixed-signal logic:** chip outputs drive the analog circuit through realistic output resistance; inputs read real node voltages with 74HC thresholds (so a 74HC at 5 V does not accept a 3.3 V signal). The solver stops exactly where a chip input crosses its threshold, so RC timing (a 555, a Schmitt-trigger oscillator) is accurate.
 - **Damage:** an LED driven without a resistor burns out (and stays dead until you restart), and the Console warns when a GPIO carries more than the ESP32's 40 mA limit.
 - **SPICE netlists:** `src/analog/parser.ts` reads R, C, L, V, I, D, Q, M, E, G and X elements with `.model` (diode, BJT, level-1 MOSFET) and `.subckt`.
 - **Oscilloscope:** the *Scope* tab probes up to four nets, with timebase, volts/div, edge trigger and frequency/peak readouts.
@@ -63,6 +64,7 @@ src/analog/           analog engine: circuit.ts (MNA solver), devices.ts (BJT, M
                       controlled sources), parser.ts (SPICE netlists), models.ts (part models), bridge.ts
                       (couples it to the sketch), waveform.ts, spice.ts (netlist export), nets.ts
 src/scope.ts          oscilloscope panel
+src/digital/chips.ts  logic chips: pinouts and behaviour
 src/sim-worker.js     runs the sketch in a Web Worker
 src/sim-host.js       page side: mirrors worker state, validates its messages
 src/examples.js       example projects

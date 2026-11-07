@@ -13,6 +13,11 @@ describe('normalizeProject (untrusted input)', () => {
       const n = normalizeProject(structuredClone(p), DEFS);
       expect(n.components.length).toBe(p.components.length);
       expect(n.wires.length).toBe(p.wires.length);
+      // every property must survive validation (an unlisted resistor value would silently become 220 Ω)
+      for (const c of p.components) {
+        const got = n.components.find((x) => x.id === c.id)!;
+        for (const [k, v] of Object.entries(c.props)) expect([ex.key, c.id, k, got.props[k]]).toEqual([ex.key, c.id, k, v]);
+      }
     }
   });
 

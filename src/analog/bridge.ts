@@ -14,6 +14,23 @@ import type { Component, Project, PinDef } from '../types.ts';
 import { DEFS } from '../components.js';
 import { INPUT_PULLUP, INPUT_PULLDOWN, OUTPUT } from '../pins.js';
 import { wireNets } from './nets.ts';
+import { CHIPS, type ChipDef, type ChipCtx, type Level, type Out } from '../digital/chips.ts';
+import { volt } from './circuit.ts';
+
+/** A logic chip instance during simulation. */
+interface ChipRun {
+  id: string;
+  def: ChipDef;
+  st: Record<string, unknown>;
+  outs: Map<string, VSource>;
+  node: (pin: string) => number;
+  levels: Map<string, Level>;
+  /** current input thresholds [falling, rising] per input pin, relative to the chip GND */
+  thr: Map<string, [number, number]>;
+  outKey: Map<string, string>;
+}
+const GATE_DELAY = 1e-8; // 10 ns: roughly a 74HC propagation delay
+const MAX_LOGIC_EVENTS = 4000; // per sync: beyond this a circuit is oscillating absurdly fast
 
 /** What the bridge needs from the Simulator (runtime.js). */
 export interface SimState {
@@ -63,6 +80,11 @@ export class AnalogBridge {
   readonly burnt = new Set<string>();
   private pendingBurn: string[] = [];
   private warnedPins = new Set<number>();
+  private chips: ChipRun[] = [];
+  /** true until the first circuit of a run is built: that one starts at t = 0, not at the first sync */
+  private fresh = true;
+  private logicEvents = 0;
+  private warnedOscillation = false;
   private lastLevel = new Map<number, number>();
   private probes: Array<string | null> = [];
   private probeNodes: number[] = [];
@@ -79,6 +101,7 @@ export class AnalogBridge {
   reset(): void {
     this.sim = null; this.error = null; this.topo = '';
     this.leds.clear(); this.lastLevel.clear(); this.burnt.clear(); this.pendingBurn = []; this.warnedPins.clear();
+    this.chips = []; this.warnedOscillation = false; this.fresh = true;
     this.rec = { t: [], v: this.probes.map(() => []) };
     this.rtf = { simT: 0, realT: 0, value: 1 }; this.workMs = 0;
   }
@@ -119,19 +142,28 @@ export class AnalogBridge {
       }
     }
     this.models = [];
+    const prevChips = new Map(this.chips.map((ch) => [ch.id, ch]));
+    this.chips = [];
     const prevLeds = this.leds; this.leds = new Map();
     for (const c of p.components) {
       const fn = MODELS[c.type]; if (!fn) continue;
       const m = fn(ckt, c, nodeOf(c), () => this.s.ui[c.id], () => this.comps.get(c.id) ?? c);
       this.models.push({ c, m });
+      if (m.chip) {
+        const old = prevChips.get(c.id); // keep flip-flop / counter state across rewiring
+        this.chips.push({ id: c.id, def: CHIPS[c.type], st: old?.st ?? CHIPS[c.type].init(), outs: m.chip.outs, node: m.chip.node,
+          levels: new Map(old?.levels ?? []), thr: new Map(), outKey: new Map() });
+      }
       if (m.led) {
         this.leds.set(c.id, { d: m.led, avg: prevLeds.get(c.id)?.avg ?? 0, heat: prevLeds.get(c.id)?.heat ?? 0 });
         if (this.burnt.has(c.id)) m.led.setModel(OPEN_JUNCTION);
       }
     }
-    const t = this.now();
+    const t = this.fresh ? 0 : this.now(); // a new run starts at 0 even if the first sync comes later
+    this.fresh = false;
     this.sim = new Simulation(ckt, { dtMax: this.dtMax });
     try { this.sim.dcOp(t); } catch (e) { this.fail(e); return; }
+    if (this.chips.length) { this.logicEvents = 0; this.evaluateLogic(); }
     this.resolveProbes();
     this.record();
   }
@@ -197,7 +229,18 @@ export class AnalogBridge {
     const sim = this.sim;
     try {
       const t = this.now();
-      if (t > sim.t) sim.advanceTo(t, this.onStep);
+      this.logicEvents = 0;
+      // Advance; whenever a chip input crosses its threshold the solver stops there so the logic can react.
+      while (t > sim.t + 1e-12) {
+        const useCross = this.chips.length > 0 && this.logicEvents < MAX_LOGIC_EVENTS;
+        sim.advanceTo(t, this.onStep, useCross ? this.crossing : undefined);
+        if (!sim.stoppedOnCrossing) break;
+        this.evaluateLogic();
+      }
+      if (this.logicEvents >= MAX_LOGIC_EVENTS && !this.warnedOscillation) {
+        this.warnedOscillation = true;
+        this.s.app.log('A logic circuit is oscillating faster than the simulator can follow (thousands of edges per frame). Check for an output wired back to its own input without a delay.', 'warn');
+      }
       let changed = false;
       for (const [g, src] of this.gpioSrc) {
         const d = this.drive(g);
@@ -220,7 +263,7 @@ export class AnalogBridge {
           this.s.app.log(`GPIO${g} is carrying ${Math.round(i * 1000)} mA, above the ESP32's 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
         }
       }
-      if (changed) { sim.refresh(); this.record(); }
+      if (changed) { sim.refresh(); this.record(); if (this.chips.length) this.evaluateLogic(); }
     } catch (e) {
       if (e instanceof ConvergenceError) { this.fail(e); return; }
       throw e;
@@ -230,6 +273,72 @@ export class AnalogBridge {
       if (w > 0.05) this.s.clock.stall(w);
     }
   }
+
+  // ---------- logic chips ----------
+  private chipCtx(ch: ChipRun, x: Float64Array): ChipCtx {
+    const g = volt(x, ch.node(ch.def.gnd));
+    return { level: (p) => ch.levels.get(p) ?? 0, v: (p) => volt(x, ch.node(p)) - g, vcc: volt(x, ch.node(ch.def.vcc)) - g };
+  }
+
+  private thresholdsOf(ch: ChipRun, pin: string, ctx: ChipCtx): [number, number] {
+    return ch.def.thresholds?.(pin, ctx) ?? [0.3 * ctx.vcc, 0.7 * ctx.vcc];
+  }
+
+  /** Re-read chip inputs, run their logic, and update output drivers until everything settles. */
+  private evaluateLogic(): void {
+    const sim = this.sim; if (!sim) return;
+    for (let round = 0; round < 50; round++) {
+      let changed = false;
+      for (const ch of this.chips) {
+        const ctx = this.chipCtx(ch, sim.x);
+        const powered = ctx.vcc > 1.5;
+        for (const p of ch.def.inputs) {
+          const [lo, hi] = this.thresholdsOf(ch, p, ctx);
+          ch.thr.set(p, [lo, hi]);
+          const v = ctx.v(p), cur = ch.levels.get(p);
+          const lvl: Level = cur === undefined ? (v > (lo + hi) / 2 ? 1 : 0) : cur === 0 ? (v > hi ? 1 : 0) : (v < lo ? 0 : 1);
+          ch.levels.set(p, lvl);
+        }
+        const outs: Record<string, Out> = powered ? ch.def.evaluate(ctx, ch.st) : {};
+        const rout = ch.def.rout ?? 30;
+        for (const [pin, src] of ch.outs) {
+          const o: Out = powered ? (outs[pin] ?? 'z') : 'z';
+          const od = ch.def.openDrain?.includes(pin);
+          const drive = o === 'z' || (od && o === 1) ? null : o;
+          const key = drive === null ? 'z' : `${drive}:${ctx.vcc.toFixed(3)}`;
+          if (ch.outKey.get(pin) === key) continue;
+          ch.outKey.set(pin, key);
+          src.wave = dc(drive ? ctx.vcc : 0); src.rs = drive === null ? 1e9 : rout;
+          changed = true;
+        }
+      }
+      if (!changed) return;
+      this.logicEvents++;
+      sim.markDiscontinuity();
+      sim.refresh();
+      sim.advanceTo(sim.t + GATE_DELAY, this.onStep); // let the new outputs propagate
+    }
+  }
+
+  /** Fraction of a step at which the first chip input crosses its threshold (or null). */
+  private crossing = (xOld: Float64Array, xNew: Float64Array): number | null => {
+    let first: number | null = null;
+    for (const ch of this.chips) {
+      const g0 = volt(xOld, ch.node(ch.def.gnd)), g1 = volt(xNew, ch.node(ch.def.gnd));
+      for (const p of ch.def.inputs) {
+        const thr = ch.thr.get(p); if (!thr) continue;
+        const n = ch.node(p);
+        const v0 = volt(xOld, n) - g0, v1 = volt(xNew, n) - g1;
+        const lvl = ch.levels.get(p) ?? 0;
+        const t = lvl === 0 ? thr[1] : thr[0];
+        const crosses = lvl === 0 ? (v0 <= t && v1 > t) : (v0 >= t && v1 < t);
+        if (!crosses) continue;
+        const f = v1 === v0 ? 1 : (t - v0) / (v1 - v0);
+        if (first === null || f < first) first = f;
+      }
+    }
+    return first;
+  };
 
   // ---------- readings ----------
   nodeVoltage(pinKey: string): number | null {

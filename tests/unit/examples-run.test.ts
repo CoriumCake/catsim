@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { Simulator } from '../../src/runtime.js';
 import { AnalogBridge } from '../../src/analog/bridge.ts';
 import { EXAMPLES } from '../../src/examples.js';
+import { normalizeProject } from '../../src/project.ts';
+import { DEFS } from '../../src/components.js';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SKIP = new Set(['http']); // needs the internet
@@ -12,7 +14,8 @@ const INTENTIONALLY_BROKEN = new Set(['noresistor']);
 async function runExample(key: string, ms: number) {
   const ex = EXAMPLES.find((e) => e.key === key)!;
   const host = {
-    project: { name: ex.name, code: ex.code, components: structuredClone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + i, ...w })) },
+    // load it exactly as the app does (through validation)
+    project: normalizeProject({ name: ex.name, code: ex.code, components: structuredClone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + i, ...w })) }, DEFS),
     logs: [] as Array<[string, string]>, errors: [] as unknown[],
     log(m: string, level = 'info') { host.logs.push([level, m]); }, reportError(e: unknown) { host.errors.push(e); },
     iotChanged() {}, onSimState() {}, restartSim() {},
