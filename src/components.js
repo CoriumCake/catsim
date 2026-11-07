@@ -100,6 +100,8 @@ DEFS.led = {
   props: { color: 'red' },
   controls: [{ key: 'color', label: 'Color', type: 'select', options: Object.keys(LED_COLORS) }],
   state(c, sim) {
+    // Real brightness from the analog engine (averaged diode current) when it is running.
+    if (sim.running && sim.analog && sim.analog.leds) return { b: sim.analog.leds[c.id] ?? 0 };
     const a = sim.pinLevel(c, 'A'); const k = sim.pinLevel(c, 'C');
     return { b: a != null && k != null ? clamp(a - k, 0, 1) : 0 };
   },

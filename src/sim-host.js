@@ -23,6 +23,8 @@ class SimHost extends Simulator {
     super(app);
     this.worker = null; this.snapT = 0; this.snapAt = 0; this.resolveRun = null;
     this.speed = 1; this.paused = false;
+    this.analog = null; // { leds: {id: 0..1}, rtf, error } from the worker's analog engine
+    this.probes = []; this.probeDtMax = 1e-3;
   }
 
   millis() {
@@ -61,7 +63,9 @@ class SimHost extends Simulator {
     this.worker = this.spawn();
     if (!this.worker) return Promise.resolve(false);
     this.paused = false;
+    this.analog = null;
     this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed });
+    if (this.probes.some(Boolean)) this.send({ type: 'probes', refs: this.probes, dtMax: this.probeDtMax });
     return new Promise((res) => { this.resolveRun = res; });
   }
 
@@ -84,6 +88,7 @@ class SimHost extends Simulator {
   }
   setPressed(id, on) { this.ui[id] = { ...(this.ui[id] || {}), pressed: on }; this.invalidate(); this.send({ type: 'ui', id, pressed: !!on }); }
   sendSerial(text) { this.send({ type: 'serial', text: String(text) }); }
+  setProbes(refs, dtMax = 1e-3) { this.probes = refs.slice(0, 4); this.probeDtMax = dtMax; this.send({ type: 'probes', refs: this.probes, dtMax }); }
   // The worker polls interrupts and WiFi itself.
   pollInterrupts() {}
   updateWifi() {}
@@ -119,6 +124,16 @@ class SimHost extends Simulator {
         const changed = JSON.stringify([wifi.status, wifi.ssid, mqtt]) !== JSON.stringify([this.wifi.status, this.wifi.ssid, { ...this.mqtt, queue: [] }]);
         this.wifi = wifi; this.mqtt = mqtt;
         if (typeof m.serial === 'string' && m.serial) this.serialOut += m.serial.slice(-100000);
+        const an = m.analog;
+        if (an && typeof an === 'object') {
+          const leds = {};
+          if (an.leds && typeof an.leds === 'object') for (const k of Object.keys(an.leds)) if (/^[\w-]{1,32}$/.test(k)) leds[k] = Math.min(1, Math.max(0, finite(an.leds[k])));
+          this.analog = { leds, rtf: Math.max(0, finite(an.rtf, 1)), error: an.error ? str(an.error, 300) : null, work: finite(an.work), steps: finite(an.steps), newton: finite(an.newton) };
+        }
+        const sm = m.samples;
+        if (sm && sm.t instanceof Float64Array && Array.isArray(sm.v) && sm.v.every((a) => a instanceof Float32Array && a.length === sm.t.length)) {
+          this.app.onScopeSamples?.(sm.t, sm.v);
+        }
         if (changed) this.app.iotChanged();
         break;
       }

@@ -51,6 +51,17 @@ export class SimClock {
     this.resumeWaiters.splice(0).forEach((f) => f());
   }
 
+  /**
+   * Take `realMs` of wall-clock time out of simulated time. Used after synchronous work (the analog
+   * solver) during which no sketch code ran, so nobody observed the skipped interval and millis()
+   * stays monotonic as long as `realMs` does not exceed the time the work took.
+   */
+  stall(realMs: number): void {
+    if (this.paused || !(realMs > 0)) return;
+    this.realAt += realMs;
+    this.arm();
+  }
+
   /** Resolves immediately when running, or when the clock is resumed. */
   whenRunning(): Promise<void> | undefined {
     if (!this.paused) return undefined;

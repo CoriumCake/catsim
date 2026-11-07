@@ -22,8 +22,12 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit tests
+      - name: Install ngspice (reference simulator for the analog engine)
+        run: sudo apt-get update -q && sudo apt-get install -y -q ngspice
+      - name: Unit tests (+ analog engine vs ngspice)
         run: npm test
+        env:
+          REQUIRE_NGSPICE: '1'
       - name: Build
         run: npx vite build
       - name: Install Chromium for Playwright
