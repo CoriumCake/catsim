@@ -4,7 +4,7 @@ A browser-based circuit and IoT simulator for the **ESP32 DevKit V1**. You wire 
 
 ## Run it
 
-There's no build step. Either open `index.html` directly, or serve the folder:
+There's no build step, but the folder must be served over http(s). The simulator runs sketches in a Web Worker, which browsers don't allow from `file://`:
 
 ```sh
 python3 -m http.server 8000   # then open http://localhost:8000
@@ -35,11 +35,20 @@ css/style.css     theme
 js/components.js  part definitions (SVG rendering, pins, behaviour)
 js/transpiler.js  sketch → JS
 js/runtime.js     simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
+js/sim-worker.js  runs the sketch in a Web Worker (isolated from the page)
+js/sim-host.js    page side: mirrors worker state, validates its messages
 js/canvas.js      diagram editor (drag, wire, pan/zoom)
 js/view3d.js      3D view (Three.js, loaded on demand)
 js/examples.js    example projects
 js/app.js         app shell, panels, persistence
 ```
+
+## Security
+
+Share links and imported files can contain anything, so they are treated as untrusted:
+
+- Projects are rebuilt field by field on load (`normalize()` in `js/app.js`). Ids, colours, positions and part properties are type-checked, and wires must reference real pins.
+- Sketches run in a Web Worker with no access to the page, the DOM or `localStorage`. Everything the worker sends back is validated before it reaches the UI (`js/sim-host.js`). Stopping the simulation terminates the worker.
 
 ## Deploy
 

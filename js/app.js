@@ -54,7 +54,7 @@
   const App = {
     project: null,
     init() {
-      this.sim = new NS.Simulator(this);
+      this.sim = new NS.SimHost(this); // sketch runs in a Web Worker
       this.canvas = new NS.Canvas(this, $('#canvas'));
       this.view3d = new NS.View3D(this, $('#stage'));
       this.editor = createEditor($('#code'));
@@ -81,16 +81,52 @@
       return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })) };
     },
 
+    // Projects come from share links and imported files, i.e. untrusted input. Rebuild them field by
+    // field with strict types so nothing unexpected can reach the SVG/HTML templates.
     normalize(p) {
       p = p && typeof p === 'object' ? p : {};
-      const comps = Array.isArray(p.components) ? p.components.filter((c) => c && NS.DEFS[c.type] && typeof c.id === 'string') : [];
-      if (!comps.some((c) => c.type === 'esp32')) comps.unshift({ id: 'esp', type: 'esp32', x: 300, y: 80, props: {} });
-      comps.forEach((c) => { c.x = +c.x || 0; c.y = +c.y || 0; c.props = { ...NS.DEFS[c.type].props, ...(c.props || {}) }; });
-      const ids = new Set(comps.map((c) => c.id));
-      let n = 0;
-      const wires = (Array.isArray(p.wires) ? p.wires : []).filter((w) => w && typeof w.from === 'string' && typeof w.to === 'string' && ids.has(w.from.split(':')[0]) && ids.has(w.to.split(':')[0]))
-        .map((w) => ({ id: w.id || 'w' + ++n, from: w.from, to: w.to, ...(w.color ? { color: w.color } : {}) }));
-      return { name: String(p.name || 'Untitled project'), code: typeof p.code === 'string' ? p.code : '', components: comps, wires };
+      const ID = /^[A-Za-z0-9_-]{1,32}$/, COLOR = /^#[0-9a-fA-F]{3,8}$/;
+      const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
+      const cleanProps = (d, src) => {
+        src = src && typeof src === 'object' ? src : {};
+        const out = { ...d.props };
+        for (const k of Object.keys(d.props)) {
+          if (!(k in src)) continue;
+          const ct = (d.controls || []).find((x) => x.key === k); const v = src[k];
+          if (!ct) continue;
+          if (ct.type === 'range') out[k] = Math.min(ct.max, Math.max(ct.min, num(v, d.props[k])));
+          else if (ct.type === 'select') { if (ct.options.map(String).includes(String(v))) out[k] = typeof d.props[k] === 'number' ? +v : String(v); }
+          else if (ct.type === 'toggle') out[k] = v === true;
+        }
+        return out;
+      };
+      const seen = new Set(); const comps = [];
+      for (const c of Array.isArray(p.components) ? p.components : []) {
+        if (!c || typeof c !== 'object' || !Object.prototype.hasOwnProperty.call(NS.DEFS, c.type) || typeof c.id !== 'string' || !ID.test(c.id) || seen.has(c.id)) continue;
+        if (c.type === 'esp32' && comps.some((x) => x.type === 'esp32')) continue;
+        seen.add(c.id);
+        comps.push({ id: c.id, type: c.type, x: Math.round(num(c.x)), y: Math.round(num(c.y)), props: cleanProps(NS.DEFS[c.type], c.props) });
+      }
+      if (!comps.some((c) => c.type === 'esp32')) comps.unshift({ id: seen.has('esp') ? 'esp32' : 'esp', type: 'esp32', x: 300, y: 80, props: {} });
+      const byId = new Map(comps.map((c) => [c.id, c]));
+      const validPin = (ref) => {
+        if (typeof ref !== 'string') return false;
+        const i = ref.indexOf(':'); const c = byId.get(ref.slice(0, i));
+        return !!c && NS.DEFS[c.type].pins.some((pin) => pin.id === ref.slice(i + 1));
+      };
+      const wids = new Set(); const wires = []; let n = 0;
+      for (const w of Array.isArray(p.wires) ? p.wires : []) {
+        if (!w || typeof w !== 'object' || !validPin(w.from) || !validPin(w.to) || w.from === w.to) continue;
+        let id = typeof w.id === 'string' && ID.test(w.id) && !wids.has(w.id) ? w.id : null;
+        while (!id || wids.has(id)) id = 'w' + ++n;
+        wids.add(id);
+        wires.push({ id, from: w.from, to: w.to, ...(typeof w.color === 'string' && COLOR.test(w.color) ? { color: w.color } : {}) });
+      }
+      return {
+        name: String(typeof p.name === 'string' && p.name ? p.name : 'Untitled project').slice(0, 120),
+        code: typeof p.code === 'string' ? p.code.slice(0, 200000) : '',
+        components: comps, wires,
+      };
     },
 
     load(p) {
@@ -114,6 +150,7 @@
 
     changed({ structure = true } = {}) {
       if (structure) { this.sim.invalidate(); this.canvas.renderAll(); }
+      this.sim.syncProject();
       this.view3d.dirty = true;
       this.save();
     },
@@ -176,8 +213,6 @@
 
     frame() {
       if (this.sim.running) {
-        this.sim.updateWifi();
-        this.sim.pollInterrupts();
         this.canvas.renderDynamic();
         for (const c of this.project.components) {
           if (c.type === 'buzzer') { const s = NS.DEFS.buzzer.state(c, this.sim); Audio.set(c.id, s.f); }
@@ -309,7 +344,7 @@
         const cur = this.canvas.wireColor(w, this.project.wires.indexOf(w));
         const cols = ['#5c6370', '#ff4d4d', ...NS.WIRE_COLORS];
         panel.innerHTML = `<h4>Wire</h4><div class="sub">${NS.esc(w.from)} → ${NS.esc(w.to)}</div>
-          <div class="row"><label>Color</label><div class="swatches">${cols.map((c) => `<button class="swatch${c === cur ? ' on' : ''}" style="background:${c}" data-color="${c}" aria-label="Color ${c}"></button>`).join('')}</div></div>
+          <div class="row"><label>Color</label><div class="swatches">${cols.map((c) => `<button class="swatch${c === cur ? ' on' : ''}" style="background:${NS.esc(c)}" data-color="${NS.esc(c)}" aria-label="Color ${NS.esc(c)}"></button>`).join('')}</div></div>
           <div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete wire</button></div>`;
         panel.querySelectorAll('.swatch').forEach((b) => b.onclick = () => { w.color = b.dataset.color; this.changed({ structure: false }); this.canvas.renderWires(); this.onSelection(sel); });
       } else {
@@ -317,7 +352,7 @@
         const d = NS.DEFS[c.type];
         const rows = (d.controls || []).map((ct) => {
           const v = c.props[ct.key];
-          if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${ct.fmt ? ct.fmt(v) : v}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${v}" data-key="${ct.key}"></div>`;
+          if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${NS.esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${NS.esc(v)}" data-key="${ct.key}"></div>`;
           if (ct.type === 'select') return `<div class="row"><label>${ct.label}</label><select data-key="${ct.key}">${ct.options.map((o) => `<option${String(o) === String(v) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
           if (ct.type === 'toggle') return `<div class="row"><label class="toggle"><input type="checkbox" data-key="${ct.key}"${v ? ' checked' : ''}> ${ct.label}</label></div>`;
           return '';
@@ -330,7 +365,7 @@
             const ct = d.controls.find((x) => x.key === inp.dataset.key);
             c.props[ct.key] = ct.type === 'toggle' ? inp.checked : ct.type === 'range' ? +inp.value : inp.value;
             const out = panel.querySelector(`[data-out="${ct.key}"]`); if (out) out.textContent = ct.fmt ? ct.fmt(c.props[ct.key]) : c.props[ct.key];
-            this.canvas.renderDynamic(); this.sim.pollInterrupts(); this.save();
+            this.canvas.renderDynamic(); this.sim.syncProject(); this.save();
           });
         });
       }
@@ -389,7 +424,7 @@
         e.preventDefault();
         const inp = $('#serialInput'); const end = $('#lineEnding').value.replace('\\r', '\r').replace('\\n', '\n');
         if (!this.sim.running) { this.toast('Start the simulation first'); return; }
-        this.sim.serialIn += inp.value + end; inp.value = '';
+        this.sim.sendSerial(inp.value + end); inp.value = '';
       };
       $('#mqttForm').onsubmit = (e) => {
         e.preventDefault();

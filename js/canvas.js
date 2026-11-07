@@ -96,7 +96,7 @@
         let pins = '';
         for (const p of d.pins) {
           const key = `${c.id}:${p.id}`;
-          pins += `<g class="cs-pin${connected.has(key) ? ' cs-connected' : ''}" data-ref="${key}"><circle cx="${p.x}" cy="${p.y}" r="7" class="cs-pin-hit"/><rect x="${p.x - 3}" y="${p.y - 3}" width="6" height="6" rx="1.2" class="cs-pin-dot"/><title>${NS.esc(p.title || p.label)}</title></g>`;
+          pins += `<g class="cs-pin${connected.has(key) ? ' cs-connected' : ''}" data-ref="${NS.esc(key)}"><circle cx="${p.x}" cy="${p.y}" r="7" class="cs-pin-hit"/><rect x="${p.x - 3}" y="${p.y - 3}" width="6" height="6" rx="1.2" class="cs-pin-dot"/><title>${NS.esc(p.title || p.label)}</title></g>`;
         }
         g.innerHTML = `<rect class="cs-sel" x="-6" y="-6" width="${d.w + 12}" height="${d.h + 12}" rx="6"/><g class="cs-body"></g><text class="cs-id" x="${d.w / 2}" y="${d.h + 16}">${NS.esc(c.id)}</text><g class="cs-pins">${pins}</g>`;
         this.compsG.appendChild(g);
@@ -113,7 +113,7 @@
         if (!a || !b) return;
         const d = this.wirePath(a, b); const col = this.wireColor(w, i);
         const sel = this.sel && this.sel.kind === 'wire' && this.sel.id === w.id;
-        html += `<g class="cs-wire${sel ? ' cs-selected' : ''}" data-id="${w.id}"><path d="${d}" class="cs-wire-hit"/><path d="${d}" class="cs-wire-under"/><path d="${d}" class="cs-wire-line" stroke="${col}"/></g>`;
+        html += `<g class="cs-wire${sel ? ' cs-selected' : ''}" data-id="${NS.esc(w.id)}"><path d="${d}" class="cs-wire-hit"/><path d="${d}" class="cs-wire-under"/><path d="${d}" class="cs-wire-line" stroke="${NS.esc(col)}"/></g>`;
       });
       this.wiresG.innerHTML = html;
     }
