@@ -1,4 +1,4 @@
-// Run with: node --test tests/
+// Run with: node --test tests/*.test.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
