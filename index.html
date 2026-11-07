@@ -6,8 +6,6 @@
   <title>CatSim — ESP32 IoT Simulator</title>
   <meta name="description" content="Simulate ESP32 circuits and IoT sketches in your browser: wire parts, write Arduino code, watch the serial monitor and MQTT traffic.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2322c55e'/%3E%3Cpath d='M8 24V11l4 4h8l4-4v13z' fill='%230b1220'/%3E%3Ccircle cx='13' cy='18' r='1.6' fill='%2322c55e'/%3E%3Ccircle cx='19' cy='18' r='1.6' fill='%2322c55e'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
@@ -37,7 +35,7 @@
         <button class="tab" data-tab="refPane">API reference</button>
       </div>
       <div class="editor-wrap">
-        <div id="editorPane" class="tabpane active"><textarea id="code" spellcheck="false"></textarea></div>
+        <div id="editorPane" class="tabpane active"><div id="code" class="code-host"></div></div>
   <div id="partsPane" class="tabpane palette">
         <input id="paletteSearch" class="search" placeholder="Search parts…" aria-label="Search parts">
         <div id="paletteList" class="palette-list"></div>
@@ -121,6 +119,10 @@
       <div class="float-bar">
         <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
         <button id="btnRestart" class="btn btn-icon" title="Restart simulation">↻</button>
+        <button id="btnPause" class="btn btn-icon" title="Pause simulation" aria-label="Pause" disabled>⏸</button>
+        <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
+          <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
+        </select>
         <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span></div>
         <span class="bar-sep"></span>
         <button class="btn btn-icon" id="addPart" title="Add a part">＋ Part</button>
@@ -141,17 +143,6 @@
   </main>
   <div id="toast" class="toast" role="status"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-  <script src="js/components.js"></script>
-  <script src="js/transpiler.js"></script>
-  <script src="js/runtime.js"></script>
-  <script src="js/sim-host.js"></script>
-  <script src="js/canvas.js"></script>
-  <script src="js/view3d.js"></script>
-  <script src="js/examples.js"></script>
-  <script src="js/app.js"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

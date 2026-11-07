@@ -1,10 +1,8 @@
 /* CatSim — example projects. ESP32 sits at (300, 80): left pins x=300, right pins x=450. */
-(function (NS) {
-  'use strict';
   const esp = { id: 'esp', type: 'esp32', x: 300, y: 80, props: {} };
   const W = (from, to, color) => ({ from, to, ...(color ? { color } : {}) });
 
-  NS.EXAMPLES = [
+  export const EXAMPLES = [
     {
       key: 'blink', name: 'Blink (on-board + external LED)',
       components: [esp,
@@ -362,4 +360,3 @@ void loop() {
 `,
     },
   ];
-})(window.CatSim = window.CatSim || {});
