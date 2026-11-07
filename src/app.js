@@ -100,7 +100,7 @@ const App = {
 
   // ---------- parts & wires ----------
   nextId(type) {
-    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u' }[type] || type;
+    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u', capacitor: 'c' }[type] || (DEFS[type] && DEFS[type].dip ? 'u' : type);
     let i = 1; while (this.project.components.some((c) => c.id === base + i)) i++;
     return base + i;
   },

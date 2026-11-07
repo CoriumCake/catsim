@@ -267,3 +267,4 @@ select.btn { padding-right: 6px; }
 .scope-empty[hidden] { display: none; }
 .scope-meas { padding: 4px 10px; font: 11px/1.5 var(--mono); color: var(--muted); border-top: 1px solid var(--line); min-height: 18px; }
 .sim-load { margin-left: 6px; font: 600 10.5px var(--mono); color: #b45309; background: #fef3c7; border-radius: 5px; padding: 1px 5px; }
+.cs-dip-pin { font: 600 5.5px var(--mono); fill: #aeb5c1; text-anchor: middle; dominant-baseline: middle; }

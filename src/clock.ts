@@ -1,9 +1,13 @@
 /* CatSim — virtual simulation clock.
  *
  * Simulated time is decoupled from wall-clock time: it can be paused and run slower or faster.
- * Timers fire in order of their virtual due time. When a timer fires late (the page was busy),
- * the clock is rebased to the timer's due time, so `delay(1000)` always advances millis() by
- * exactly 1000 and the simulation simply runs slower than real time under load instead of skipping. */
+ * Timers fire in order of their virtual due time. When a timer fires very late (the page was blocked
+ * for more than MAX_LATE), the clock is rebased to the timer's due time, so the simulation runs slower
+ * than real time under load instead of skipping. Ordinary timer jitter (browsers clamp nested timers
+ * to ≥ 4 ms) is not taken out of simulated time, otherwise every short delay() would slow it down. */
+
+/** Lateness (virtual ms) above which a timer is considered to have been blocked by the page. */
+export const MAX_LATE = 25;
 
 type Timer = { at: number; seq: number; fn: () => void };
 
@@ -99,7 +103,7 @@ export class SimClock {
     // Fire everything that is due, each at its exact virtual time.
     while (this.timers.length && this.timers[0].at <= now && !this.paused) {
       const t = this.timers.shift()!;
-      this.rebase(t.at);
+      if (this.millis() - t.at > MAX_LATE) this.rebase(t.at);
       t.fn();
     }
     this.arm();

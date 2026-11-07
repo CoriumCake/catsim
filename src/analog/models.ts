@@ -4,6 +4,7 @@
 import { Circuit, Diode, Resistor, Switch, VSource, VT, type DiodeModel } from './circuit.ts';
 import { dc } from './waveform.ts';
 import { Bjt, Mosfet, OpAmp, LM358, type BjtModel, type MosModel } from './devices.ts';
+import { CHIPS, type ChipDef } from '../digital/chips.ts';
 import type { Component } from '../types.ts';
 
 export const V_LOGIC = 3.3;
@@ -22,7 +23,15 @@ export const LED_VF: Record<string, number> = { red: 1.95, orange: 2.0, yellow: 
 /** Current at which an LED is drawn at full brightness. */
 export const LED_FULL = 0.01;
 
+export interface ChipPins {
+  /** driver source per output pin (referenced to the chip's GND pin) */
+  outs: Map<string, VSource>;
+  node: (pin: string) => number;
+}
+
 export interface PartModel {
+  /** logic chips: their driver sources and pin nodes (evaluated by the bridge) */
+  chip?: ChipPins;
   update?: () => boolean;
   /** LEDs: the junction whose current sets the brightness */
   led?: Diode;
@@ -41,6 +50,23 @@ export const DIODES: Record<string, DiodeModel> = {
   '1N5819': { is: 3.17e-5, n: 1.373, rs: 0.051 }, // Schottky: low forward voltage
 };
 const ACT_FULL = 0.005; // collector/drain current shown as "fully on" (5 mA)
+export const CAP_VALUES: Record<string, number> = { '100nF': 100e-9, '1µF': 1e-6, '10µF': 10e-6, '100µF': 100e-6, '470µF': 470e-6 };
+
+/** Logic chip: driver source per output (initially high-impedance) and a small supply load. */
+export function chipModel(def: ChipDef): ModelFn {
+  return (ckt, c0, pin) => {
+    ckt.resistor(pin(def.vcc), pin(def.gnd), 100_000, `${c0.id}_iq`);
+    if (def.type === 'ne555') { // internal 5k-5k-5k divider: CTRL sits at 2/3 VCC
+      const mid = ckt.node(`${c0.id}#div`);
+      ckt.resistor(pin('VCC'), pin('CTRL'), 5000, `${c0.id}_r1`);
+      ckt.resistor(pin('CTRL'), mid, 5000, `${c0.id}_r2`);
+      ckt.resistor(mid, pin('GND'), 5000, `${c0.id}_r3`);
+    }
+    const outs = new Map<string, VSource>();
+    for (const o of def.outputs) outs.set(o, ckt.vsource(pin(o), pin(def.gnd), dc(0), 1e9, `${c0.id}_${o}`));
+    return { chip: { outs, node: pin } };
+  };
+}
 
 export type PinNode = (pinId: string) => number;
 /** `cur()` returns the part as it is now: the worker receives a fresh copy of the project on every edit. */
@@ -136,6 +162,13 @@ export const MODELS: Record<string, ModelFn> = {
     ckt.resistor(pin('VCC'), pin('GND'), 7000, `${c0.id}_iq`); // ~0.7 mA quiescent current at 5 V
     return {};
   },
+  capacitor(ckt, c0, pin, ui, cur) {
+    const c = { get id() { return c0.id; }, get props() { return cur().props; } };
+    const val = () => CAP_VALUES[String(c.props.value)] ?? 1e-6;
+    let v = val();
+    const cap = ckt.capacitor(pin('+'), pin('-'), v, c.id);
+    return { update: () => { const n = val(); if (n === v) return false; v = n; cap.c = n; return true; } };
+  },
   lcd(ckt, c0, pin, ui, cur) {
     const c = { get id() { return c0.id; }, get props() { return cur().props; } };
     ckt.resistor(pin('VCC'), pin('GND'), 220, `${c.id}_backlight`);
@@ -146,3 +179,6 @@ export const MODELS: Record<string, ModelFn> = {
 };
 
 export { Resistor };
+
+// every logic chip in the library gets the generic chip model
+for (const def of Object.values(CHIPS)) MODELS[def.type] = chipModel(def);

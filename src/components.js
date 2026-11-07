@@ -3,6 +3,7 @@
  * Pin coordinates are local to the part; `dir` is the direction a wire leaves the pin (l/r/t/b). */
 import { OUTPUT } from './pins.js';
 import { esc, clamp } from './util.ts';
+import { CHIPS } from './digital/chips.ts';
 const LED_COLORS = {
   red: '#ff3b3b', green: '#22e06b', blue: '#3d8bff',
   yellow: '#ffd60a', white: '#f2f5ff', orange: '#ff8a1f',
@@ -138,7 +139,8 @@ DEFS.resistor = {
   type: 'resistor', name: 'Resistor', category: 'Passive', w: 70, h: 16,
   pins: [{ id: '1', label: '1', x: 0, y: 8, dir: 'l' }, { id: '2', label: '2', x: 70, y: 8, dir: 'r' }],
   props: { ohms: 220 },
-  controls: [{ key: 'ohms', label: 'Resistance (Ω)', type: 'select', options: ['100', '220', '330', '1000', '4700', '10000', '100000'] }],
+  // common E6/E12 values from 10 Ω to 1 MΩ (validated on load, so every value an example uses must be listed)
+  controls: [{ key: 'ohms', label: 'Resistance (Ω)', type: 'select', options: ['10', '22', '47', '100', '150', '220', '330', '470', '680', '1000', '1500', '2200', '3300', '4700', '6800', '10000', '15000', '20000', '22000', '33000', '47000', '68000', '100000', '220000', '470000', '1000000'] }],
   internal: () => [['1', '2']],
   state: () => ({}),
   render(c) {
@@ -393,6 +395,51 @@ DEFS.opamp = {
   },
 };
 
+// ---------- logic chips (DIP packages, real pinouts) ----------
+// Top view, notch on the left: pins 1…n/2 along the bottom (left→right), n…n/2+1 along the top.
+const DIP_PITCH = 16;
+function dipPart(def) {
+  const n = def.pins.length, half = n / 2, w = half * DIP_PITCH;
+  const pins = def.pins.map((label, i) => {
+    const bottom = i < half;
+    const col = bottom ? i : n - 1 - i;
+    return { id: label, label, x: 8 + col * DIP_PITCH, y: bottom ? 60 : 0, dir: bottom ? 'b' : 't', title: `Pin ${i + 1}: ${label}` };
+  });
+  const short = def.name.split(' ')[0];
+  return {
+    type: def.type, name: def.name, category: 'Logic', w, h: 60, pins, props: {}, dip: n, hint: def.hint,
+    render() {
+      let o = '';
+      for (const p of pins) o += `<rect x="${p.x - 3}" y="${p.y === 0 ? 0 : 44}" width="6" height="16" fill="#b9bec7"/>`;
+      o += `<rect x="0" y="12" width="${w}" height="36" rx="3" fill="#1d1f24" stroke="#0a0b0d"/><path d="M0 24 a6 6 0 0 1 0 12" fill="#33363d"/>`;
+      for (const p of pins) o += `<text x="${p.x}" y="${p.y === 0 ? 20 : 45}" class="cs-dip-pin">${esc(p.label)}</text>`;
+      o += `<text x="${w / 2}" y="34" class="cs-tiny cs-light">${esc(short)}</text>`;
+      return o;
+    },
+  };
+}
+for (const def of Object.values(CHIPS)) DEFS[def.type] = dipPart(def);
+
+DEFS.capacitor = {
+  type: 'capacitor', name: 'Capacitor', category: 'Passive', w: 30, h: 56,
+  pins: [{ id: '+', label: '+', x: 10, y: 56, dir: 'b', title: '+ (longer leg; polarised electrolytic)' }, { id: '-', label: '−', x: 20, y: 56, dir: 'b', title: '− (striped side)' }],
+  props: { value: '10µF' },
+  controls: [{ key: 'value', label: 'Capacitance', type: 'select', options: ['100nF', '1µF', '10µF', '100µF', '470µF'] }],
+  render(c) {
+    const ceramic = c.props.value === '100nF';
+    if (ceramic) {
+      return `<path d="M10 30 V56 M20 30 V56" stroke="#a7adb7" stroke-width="2"/>
+        <ellipse cx="15" cy="20" rx="12" ry="11" fill="#e1a93b" stroke="#a8761f"/>
+        <text x="15" y="23" class="cs-tiny cs-dark">104</text><text x="15" y="-3" class="cs-part-lbl">100nF</text>`;
+    }
+    return `<path d="M10 40 V56 M20 40 V56" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="3" y="2" width="24" height="38" rx="4" fill="#2457b8" stroke="#16397a"/>
+      <rect x="19" y="2" width="6" height="38" fill="#9db7e6"/><text x="22" y="16" class="cs-tiny cs-dark">−</text>
+      <ellipse cx="15" cy="3" rx="11" ry="2" fill="#c3cad6"/>
+      <text x="15" y="-3" class="cs-part-lbl">${esc(c.props.value)}</text>`;
+  },
+};
+
 DEFS.lcd = {
   type: 'lcd', name: 'LCD 16×2 (I2C)', category: 'Output', w: 236, h: 86,
   pins: [
@@ -437,7 +484,8 @@ const PALETTE = [
   { cat: 'Input', types: ['button', 'pot'] },
   { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },
   { cat: 'Semiconductors', types: ['npn', 'pnp', 'nmos', 'diode', 'opamp'] },
-  { cat: 'Passive', types: ['resistor'] },
+  { cat: 'Logic', types: Object.keys(CHIPS) },
+  { cat: 'Passive', types: ['resistor', 'capacitor'] },
 ];
 const ESP = { ADC1, ADC2, TOUCH };
 

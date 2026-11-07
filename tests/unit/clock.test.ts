@@ -62,4 +62,14 @@ describe('SimClock', () => {
     c.reset(); expect(c.millis()).toBe(0);
     vi.advanceTimersByTime(100); expect(n).toBe(0);
   });
+
+  it('does not lose time to ordinary timer jitter (browsers clamp short timeouts to ≥ 4 ms)', () => {
+    let now = 0; const c = new SimClock(() => now);
+    let at = -1;
+    c.schedule(2, () => { at = c.millis(); });
+    now = 4.3;                 // the 2 ms timeout really ran after 4.3 ms
+    vi.advanceTimersByTime(5); // let the (fake) setTimeout fire
+    expect(at).toBeCloseTo(4.3, 6); // the clock kept running: no time was dropped
+    expect(c.millis()).toBeCloseTo(4.3, 6);
+  });
 });

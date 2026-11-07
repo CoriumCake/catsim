@@ -183,3 +183,22 @@ test('an LED without a resistor burns out and the console explains why', async (
   await expect(page.locator('#consoleOut')).toContainText('led1 burned out');
   await expect(page.locator('.cs-comp[data-id="led1"]')).toContainText('burnt');
 });
+
+test('74HC595 walks a light across 8 LEDs', async ({ page }) => {
+  await loadExample(page, 'shiftreg'); await startSim(page);
+  const lit = async () => {
+    const leds = await partState(page, 'led');
+    return leds.map((s: { b: number }) => (s.b > 0.3 ? 1 : 0)).join('');
+  };
+  const seen = new Set<string>();
+  await expect.poll(async () => { seen.add(await lit()); return [...seen].filter((p) => p.split('1').length === 2).length; }, { timeout: 5000 }).toBeGreaterThanOrEqual(4);
+});
+
+test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
+  await loadExample(page, 'timer555'); await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 8000 }).toMatch(/period \d+ ms/);
+  const ms = [...(await serial(page)).matchAll(/period (\d+) ms/g)].map((m) => +m[1]);
+  const avg = ms.reduce((a, b) => a + b, 0) / ms.length;
+  const expected = 1000 / (1.44 / ((10_000 + 2 * 47_000) * 10e-6)); // ≈ 722 ms
+  expect(Math.abs(avg - expected) / expected).toBeLessThan(0.05);
+});

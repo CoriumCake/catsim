@@ -348,6 +348,94 @@ void loop() {
 `,
     },
     {
+      key: 'shiftreg', name: '74HC595 shift register: 8 LEDs from 3 pins',
+      components: [esp,
+        { id: 'u1', type: 'hc595', x: 520, y: 400, props: {} },
+        { id: 'r1', type: 'resistor', x: 700, y: 372, props: { ohms: 220 } },
+        { id: 'r2', type: 'resistor', x: 700, y: 398, props: { ohms: 220 } },
+        { id: 'r3', type: 'resistor', x: 700, y: 424, props: { ohms: 220 } },
+        { id: 'r4', type: 'resistor', x: 700, y: 450, props: { ohms: 220 } },
+        { id: 'r5', type: 'resistor', x: 700, y: 476, props: { ohms: 220 } },
+        { id: 'r6', type: 'resistor', x: 700, y: 502, props: { ohms: 220 } },
+        { id: 'r7', type: 'resistor', x: 700, y: 528, props: { ohms: 220 } },
+        { id: 'r8', type: 'resistor', x: 700, y: 554, props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: 820, y: 250, props: { color: 'red' } },
+        { id: 'led2', type: 'led', x: 860, y: 250, props: { color: 'red' } },
+        { id: 'led3', type: 'led', x: 900, y: 250, props: { color: 'red' } },
+        { id: 'led4', type: 'led', x: 940, y: 250, props: { color: 'red' } },
+        { id: 'led5', type: 'led', x: 980, y: 250, props: { color: 'red' } },
+        { id: 'led6', type: 'led', x: 1020, y: 250, props: { color: 'red' } },
+        { id: 'led7', type: 'led', x: 1060, y: 250, props: { color: 'red' } },
+        { id: 'led8', type: 'led', x: 1100, y: 250, props: { color: 'red' } },
+      ],
+      wires: [W('esp:3V3', 'u1:VCC', '#ff4d4d'), W('u1:GND', 'esp:GND.R'), W('u1:OE', 'esp:GND.R'), W('u1:SRCLR', 'esp:3V3', '#ff4d4d'),
+        W('esp:D23', 'u1:SER'), W('esp:D18', 'u1:SRCLK'), W('esp:D5', 'u1:RCLK'),
+        W('u1:Q0', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp:GND.R'), W('u1:Q1', 'r2:1'), W('r2:2', 'led2:A'), W('led2:C', 'esp:GND.R'), W('u1:Q2', 'r3:1'), W('r3:2', 'led3:A'), W('led3:C', 'esp:GND.R'), W('u1:Q3', 'r4:1'), W('r4:2', 'led4:A'), W('led4:C', 'esp:GND.R'), W('u1:Q4', 'r5:1'), W('r5:2', 'led5:A'), W('led5:C', 'esp:GND.R'), W('u1:Q5', 'r6:1'), W('r6:2', 'led6:A'), W('led6:C', 'esp:GND.R'), W('u1:Q6', 'r7:1'), W('r7:2', 'led7:A'), W('led7:C', 'esp:GND.R'), W('u1:Q7', 'r8:1'), W('r8:2', 'led8:A'), W('led8:C', 'esp:GND.R')],
+      code: `// 74HC595: three GPIOs drive eight LEDs.
+// shiftOut() clocks 8 bits into the chip (SER + SRCLK), then a pulse on RCLK copies them
+// to the outputs all at once. The chip runs on 3.3 V so that the ESP32's 3.3 V signals are
+// valid logic levels (powered from 5 V, a 74HC would need 3.5 V on its inputs).
+const int DATA = 23, CLOCK = 18, LATCH = 5;
+int pos = 0, dir = 1;
+
+void setup() {
+  pinMode(DATA, OUTPUT);
+  pinMode(CLOCK, OUTPUT);
+  pinMode(LATCH, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LATCH, LOW);
+  shiftOut(DATA, CLOCK, MSBFIRST, 1 << pos);
+  digitalWrite(LATCH, HIGH);
+  pos += dir;
+  if (pos == 7 || pos == 0) dir = -dir;
+  delay(120);
+}
+`,
+    },
+    {
+      key: 'timer555', name: '555 timer blinker (no code needed)',
+      components: [esp,
+        { id: 'u1', type: 'ne555', x: 110, y: 150, props: {} },
+        { id: 'r1', type: 'resistor', x: 20, y: 60, props: { ohms: 10000 } },
+        { id: 'r2', type: 'resistor', x: 140, y: 80, props: { ohms: 47000 } },
+        { id: 'c1', type: 'capacitor', x: 230, y: 120, props: { value: '10µF' } },
+        { id: 'r3', type: 'resistor', x: 40, y: 260, props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: 20, y: 300, props: { color: 'green' } },
+        { id: 'r4', type: 'resistor', x: 150, y: 260, props: { ohms: 10000 } },
+        { id: 'r5', type: 'resistor', x: 170, y: 330, props: { ohms: 20000 } }],
+      wires: [W('esp:VIN', 'u1:VCC', '#ff4d4d'), W('u1:GND', 'esp:GND.L'), W('u1:RESET', 'esp:VIN', '#ff4d4d'),
+        W('esp:VIN', 'r1:1', '#ff4d4d'), W('r1:2', 'u1:DISCH'), W('u1:DISCH', 'r2:1'), W('r2:2', 'u1:THRES'), W('u1:THRES', 'u1:TRIG'),
+        W('u1:THRES', 'c1:+'), W('c1:-', 'esp:GND.L'),
+        W('u1:OUT', 'r3:2'), W('r3:1', 'led1:A'), W('led1:C', 'esp:GND.L'),
+        W('u1:OUT', 'r4:1'), W('r4:2', 'esp:D34'), W('esp:D34', 'r5:1'), W('r5:2', 'esp:GND.L')],
+      code: `// NE555 astable blinker. The blinking needs no code: R1, R2 and C set the rate,
+// f = 1.44 / ((R1 + 2·R2) · C) ≈ 1.4 Hz. Try other values for r2 or c1.
+// Scope tip: probe the capacitor (c1.+) to see it swing between 1/3 and 2/3 of VCC.
+// The ESP32 only measures the frequency, through a 10k/20k divider (5 V → 3.3 V).
+const int IN = 34;
+int last = 0;
+unsigned long lastRise = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN, INPUT);
+}
+
+void loop() {
+  int v = digitalRead(IN);
+  if (v && !last) {
+    unsigned long now = millis();
+    if (lastRise) Serial.printf("period %lu ms (%.2f Hz)\\n", now - lastRise, 1000.0 / (now - lastRise));
+    lastRise = now;
+  }
+  last = v;
+  delay(2);
+}
+`,
+    },
+    {
       key: 'traffic', name: 'Traffic light',
       components: [esp,
         { id: 'r1', type: 'resistor', x: 500, y: 100, props: { ohms: 220 } },

@@ -240,7 +240,7 @@ class View3D {
       const d = DEFS[c.type]; if (!d) continue;
       const g = new T.Group(); g.position.set(c.x, 0, c.y); g.userData.compId = c.id;
       this.root.add(g); this.picks.push(g);
-      const build = this['build_' + c.type];
+      const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
       if (build) build.call(this, g, c, d);
       if (c.type !== 'esp32') for (const p of d.pins) {
         this.box(g, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
@@ -554,6 +554,40 @@ class View3D {
       this.box(g, x - 2.5, 48, 5, 4, 5, 7, leg); this.box(g, x - 1.5, 51, 3, 9, 0, 7, leg);
       this.box(g, x - 2.5, 8, 5, 4, 5, 7, leg); this.box(g, x - 1.5, 0, 3, 9, 0, 7, leg);
     }
+  }
+
+  /** Any DIP logic chip: body, notch, label and a leg for every pin at its real position. */
+  build_dip(g, c, d) {
+    const T = THREE, w = d.w;
+    this.box(g, 0, 12, w, 36, 4, 12, this.mat('#1d1f24', { roughness: 0.5 }));
+    this.cyl(g, 0, 30, 5, 11.9, 12.05, this.mat('#33363d'), 16);
+    const name = d.name.split(' ')[0];
+    const top = this.tex(512, 144, (x) => {
+      x.fillStyle = '#1d1f24'; x.fillRect(0, 0, 512, 144);
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 44px system-ui, sans-serif'; x.fillText(name, 256, 70);
+      x.font = '24px system-ui, sans-serif'; x.fillStyle = '#8b93a1'; x.fillText(d.name.slice(name.length + 1), 256, 112);
+    });
+    const label = this.mesh(new T.PlaneGeometry(Math.min(w - 12, 100), 26), this.mat('#ffffff', { map: top, transparent: true }), g, w / 2 + 3, 12.1, 30, false);
+    label.rotation.x = -Math.PI / 2;
+    for (const p of d.pins) {
+      const z0 = p.y === 0 ? 8 : 48;
+      this.box(g, p.x - 2.5, z0, 5, 4, 5, 7, this.M.lead);
+      this.box(g, p.x - 1.5, p.y === 0 ? 0 : 51, 3, 9, 0, 7, this.M.lead);
+    }
+  }
+
+  build_capacitor(g, c) {
+    const T = THREE;
+    const elec = this.mat('#2457b8', { roughness: 0.4 }), stripe = this.mat('#9db7e6');
+    const can = new T.Group(); g.add(can);
+    this.cyl(can, 15, 18, 11, 6, 34, elec, 28);
+    const st = this.mesh(new T.CylinderGeometry(11.1, 11.1, 28, 28, 1, true, -0.35, 0.7), stripe, can, 15, 20, 18); st.rotation.y = Math.PI / 2;
+    this.cyl(can, 15, 18, 10, 34, 34.6, this.M.metal, 28);
+    const disc = new T.Group(); g.add(disc);
+    const dm = this.mesh(new T.SphereGeometry(11, 20, 12), this.mat('#e1a93b', { roughness: 0.6 }), disc, 15, 22, 18); dm.scale.set(1, 1, 0.45);
+    for (const x of [10, 20]) { this.rod(g, [x, 1, 18], [x, 8, 18], 0.8, this.M.lead); this.leg(g, x, 18, x, 56); }
+    let last = '';
+    this.live(c, () => { const v = String(c.props.value); if (v === last) return; last = v; const ceramic = v === '100nF'; can.visible = !ceramic; disc.visible = ceramic; });
   }
 
   build_lcd(g, c) {

@@ -365,12 +365,19 @@ export class Simulation {
     return worst;
   }
 
+  /** set when the last advanceTo() stopped early at a threshold crossing */
+  stoppedOnCrossing = false;
+
   /**
    * Advance the transient solution to time `tEnd`. `onStep` is called after every accepted step.
+   * `crossing(xOld, xNew)` may report that a step crossed a threshold (digital input) at fraction
+   * 0..1 of the step: the step is then redone to land just past the crossing, and advanceTo returns
+   * early with `stoppedOnCrossing` set, so the caller can react (update logic outputs) and continue.
    * Returns the number of accepted steps.
    */
-  advanceTo(tEnd: number, onStep?: (t: number, x: Float64Array, dt: number) => void): number {
+  advanceTo(tEnd: number, onStep?: (t: number, x: Float64Array, dt: number) => void, crossing?: (xOld: Float64Array, xNew: Float64Array) => number | null): number {
     let n = 0;
+    this.stoppedOnCrossing = false;
     const eps = 1e-15 + tEnd * 1e-12;
     while (this.t < tEnd - eps) {
       const nb = this.nextBreakpoint();
@@ -417,6 +424,18 @@ export class Simulation {
         this.dt = dt * Math.max(0.1, 0.9 * Math.cbrt(1 / f));
         continue;
       }
+      let stopHere = false;
+      if (crossing) {
+        const fr = crossing(save, this.x);
+        if (fr !== null) {
+          if (fr < 0.98 && dt * fr > 1e-9) { // land just past the crossing instead of overshooting it
+            this.x.set(save);
+            this.dt = Math.max(dt * Math.max(fr, 0) * 1.002, 1e-10);
+            continue;
+          }
+          stopHere = true;
+        }
+      }
       // accept
       for (const e of this.c.elements) e.accept(this.x, dt, method, false);
       for (const r of this.reactive) { r.hist.push([tNew, r.state()]); if (r.hist.length > 4) r.hist.shift(); }
@@ -429,8 +448,9 @@ export class Simulation {
       this.broke = landedOnBreak && this.reactive.length > 0;
       if (landedOnBreak) this.dt = Math.max(this.dt, 1e-9);
       onStep?.(this.t, this.x, dt);
-    }
-    return n;
+      if (stopHere) { this.stoppedOnCrossing = true; break; }
+      }
+      return n;
   }
 
   /** Static solve at time t (used for resistive circuits). */
