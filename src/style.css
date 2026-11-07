@@ -18,8 +18,8 @@
   --term-bg: #fbfbfc;
   --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --side-w: 450px;
-  --bottom-h: 32%;
+  --side-w: 400px;
+  --bottom-h: 200px;
   color-scheme: light;
 }
 
@@ -214,7 +214,7 @@ select.btn { padding-right: 6px; }
 .part .cs-part-lbl { display: none; }
 
 /* properties panel */
-.props { position: absolute; left: 14px; bottom: 14px; width: 250px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(60, 40, 0, .12); }
+.props { position: absolute; left: 14px; top: 14px; width: 250px; z-index: 4; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(60, 40, 0, .12); }
 .props h4 { margin: 0 0 2px; font-size: 13.5px; }
 .props .sub { color: var(--muted); font: 11px var(--mono); margin-bottom: 10px; }
 .props .row { margin: 8px 0; }
@@ -252,7 +252,6 @@ select.btn { padding-right: 6px; }
   .editor-wrap { height: 55vh; flex: none; }
   .bottom { height: 40vh; }
   .tb-sim { flex-wrap: wrap; }
-  .props { width: auto; right: 14px; bottom: 64px; }
 }
 
 /* oscilloscope */
@@ -308,3 +307,14 @@ select.btn { padding-right: 6px; }
 .bottom .tabs-actions { gap: 6px; }
 .bottom .tabs-actions .check[hidden] { display: none; }
 #btnClear { width: 30px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+
+/* collapsible bottom panel */
+.bottom.collapsed { height: auto; min-height: 0; }
+.bottom.collapsed > .tabpane, .bottom.collapsed .tabs-actions > :not(#btnDock) { display: none; }
+.bottom.collapsed .tabs { border-bottom: 0; }
+.bottom.collapsed .tabs .tab.active { background: none; font-weight: 500; color: var(--muted); }
+.center.dock-collapsed > .splitter-h { pointer-events: none; }
+#btnDock { width: 30px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+#btnDock svg { transition: transform .15s; }
+.bottom.collapsed #btnDock svg { transform: rotate(180deg); }
+.tab.unseen::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; }

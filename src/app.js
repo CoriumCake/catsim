@@ -15,6 +15,7 @@ const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
 const SIDE_STORE = 'catsim.sideHidden';
+const DOCK_STORE = 'catsim.dockCollapsed';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // ---------- audio for buzzers ----------
@@ -53,6 +54,7 @@ const App = {
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
     try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
+    try { if (localStorage.getItem(DOCK_STORE)) this.toggleDock(true); } catch (_) { /* ignore */ }
     if (v === '3d') this.setView('3d');
     window.addEventListener('resize', () => this.editor.refresh());
   },
@@ -163,6 +165,15 @@ const App = {
     try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ }
     if (!hidden) requestAnimationFrame(() => this.editor.refresh());
   },
+  /** Fold the Terminal/MQTT/Scope/Console panel down to its tab bar, or open it again. Remembered. */
+  toggleDock(collapsed = !$('#bottom').classList.contains('collapsed')) {
+    $('#bottom').classList.toggle('collapsed', collapsed);
+    $('#center').classList.toggle('dock-collapsed', collapsed);
+    const b = $('#btnDock'), label = collapsed ? 'Show the panel' : 'Hide the panel';
+    b.title = label; b.setAttribute('aria-label', label); b.setAttribute('aria-expanded', String(!collapsed));
+    try { localStorage.setItem(DOCK_STORE, collapsed ? '1' : ''); } catch (_) { /* ignore */ }
+    if (!collapsed && $('#scopePane').classList.contains('active')) requestAnimationFrame(() => this.scope.render(true));
+  },
   togglePause() {
     if (!this.sim.running) return;
     if (this.sim.paused) this.sim.resume(); else this.sim.pause();
@@ -197,10 +208,37 @@ const App = {
       if (this._iotDirty) this.renderIot();
       if ($('#scopePane').classList.contains('active')) this.scope.render();
     }
+    if (!$('#props').hidden) this.positionProps(); // follows pan, zoom, drag and 3D orbit
     requestAnimationFrame(() => this.frame());
-  },
+    },
 
-  onScopeSamples(t, v) { this.scope.addSamples(t, v); },
+    /** Float the edit card just above the selected part or wire (below it if there's no room), inside the canvas. */
+    positionProps() {
+    const panel = $('#props'), sel = this.canvas.sel; if (!sel) return;
+    const stage = $('#stage').getBoundingClientRect();
+    let box = null;
+    if (this.view3d.active && sel.kind === 'comp') {
+      const c = this.project.components.find((x) => x.id === sel.id); const d = c && DEFS[c.type];
+      if (d) {
+        const a = this.view3d.screenPoint(c.x, 30, c.y), b = this.view3d.screenPoint(c.x + d.w, 0, c.y + d.h);
+        box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) };
+      }
+    } else {
+      const el = sel.kind === 'comp' ? this.canvas.compsG.querySelector(`.cs-comp[data-id="${CSS.escape(sel.id)}"] .cs-body`)
+        : this.canvas.wiresG.querySelector(`.cs-wire[data-id="${CSS.escape(sel.id)}"] .cs-wire-line`);
+      if (el) box = el.getBoundingClientRect();
+    }
+    if (!box) return;
+    const w = panel.offsetWidth, h = panel.offsetHeight, gap = 12, m = 8;
+    const cx = (box.left + box.right) / 2 - stage.left;
+    let top = box.top - stage.top - h - gap;
+    if (top < m) top = box.bottom - stage.top + gap; // no room above: show it below
+    const left = Math.min(Math.max(m, cx - w / 2), stage.width - w - m);
+    top = Math.min(Math.max(m, top), stage.height - h - m);
+    panel.style.left = `${Math.round(left)}px`; panel.style.top = `${Math.round(top)}px`;
+    },
+
+    onScopeSamples(t, v) { this.scope.addSamples(t, v); },
   /** Human-readable summary of pasted SPICE text: what it defines, or where it fails to parse. */
   spiceStatus(text) {
     const lib = spiceLib(text);
@@ -290,7 +328,9 @@ const App = {
     if (t.length > 60000) t = t.slice(-50000);
     el.textContent = t;
     if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
-  },
+    // new output you can't see (panel folded, or another tab open): mark the Terminal tab
+    if ($('#bottom').classList.contains('collapsed') || !$('#serialPane').classList.contains('active')) $('.tab[data-tab="serialPane"]').classList.add('unseen');
+    },
 
   // ---------- console ----------
   log(msg, level = 'info', line) {
@@ -368,7 +408,11 @@ const App = {
     const tabs = document.querySelector(`.tabs[data-group="${group}"]`);
     tabs.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
     const pane = $('#' + id); pane.parentElement.querySelectorAll(':scope > .tabpane').forEach((p) => p.classList.toggle('active', p === pane));
-    if (group === 'bottom') $('#autoScrollWrap').hidden = id !== 'serialPane'; // only the terminal scrolls
+    if (group === 'bottom') {
+      $('#autoScrollWrap').hidden = id !== 'serialPane'; // only the terminal scrolls
+      if (id === 'serialPane') $('.tab[data-tab="serialPane"]').classList.remove('unseen');
+      if ($('#bottom').classList.contains('collapsed')) this.toggleDock(false);
+    }
     if (id === 'consolePane') { this._unseen = 0; $('#consoleBadge').hidden = true; }
     if (id === 'editorPane') this.editor.refresh();
     if (id === 'iotPane') this.renderIot();
@@ -406,6 +450,8 @@ const App = {
     } else {
       const c = this.project.components.find((x) => x.id === sel.id); if (!c) { panel.hidden = true; return; }
       const d = DEFS[c.type];
+      // boards have no settings and can't be deleted: nothing worth a card (pin info is in the tooltips)
+      if (d.board) { panel.hidden = true; return; }
       const rows = (d.controls || []).map((ct) => {
         const v = c.props[ct.key];
         if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${esc(v)}" data-key="${ct.key}"></div>`;
@@ -419,7 +465,7 @@ const App = {
         }
         return '';
       }).join('');
-      const hint = d.hint ? `<p class="hint">${d.hint}</p>` : d.type === 'esp32' ? '<p class="hint">Hover a pin to see its GPIO number and functions. The blue LED is on GPIO2.</p>' : '';
+      const hint = d.hint ? `<p class="hint">${d.hint}</p>` : '';
       panel.innerHTML = `<h4>${esc(d.name)}</h4><div class="sub">${esc(c.id)}</div>${rows}${hint}
         ${d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
       panel.querySelectorAll('[data-key]').forEach((inp) => {
@@ -445,13 +491,15 @@ const App = {
     }));
     const del = panel.querySelector('[data-act="delete"]'); if (del) del.onclick = () => this.deleteSelection();
     panel.hidden = false;
-  },
+    this.positionProps();
+    },
 
   bindUi() {
     $('#btnRun').onclick = () => this.toggleRun();
     $('#btnRestart').onclick = () => this.restartSim();
     $('#btnPause').onclick = () => this.togglePause();
     $('#btnSide').onclick = () => this.toggleSidebar();
+    $('#btnDock').onclick = () => this.toggleDock();
 $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
     $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
@@ -490,7 +538,10 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#btnMute').onclick = (e) => { Audio.muted = !Audio.muted; e.currentTarget.textContent = Audio.muted ? '🔇' : '🔊'; if (Audio.muted) Audio.stopAll(); };
 
     document.querySelectorAll('.tabs').forEach((tabs) => tabs.addEventListener('click', (e) => {
-      const t = e.target.closest('.tab'); if (t) this.showTab(tabs.dataset.group, t.dataset.tab);
+      const t = e.target.closest('.tab'); if (!t) return;
+      // clicking the open tab of the bottom panel folds the panel away (like an IDE)
+      if (tabs.dataset.group === 'bottom' && t.classList.contains('active') && !$('#bottom').classList.contains('collapsed')) { this.toggleDock(true); return; }
+      this.showTab(tabs.dataset.group, t.dataset.tab);
     }));
     $('#btnClear').onclick = () => {
       const active = document.querySelector('.tabs[data-group="bottom"] .tab.active').dataset.tab;

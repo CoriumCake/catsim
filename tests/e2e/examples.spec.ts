@@ -281,3 +281,34 @@ test('the sidebar can be hidden with the hamburger button and comes back (rememb
   await page.keyboard.press('Control+b');
   await expect(page.locator('#side')).toBeVisible();
 });
+
+test('the bottom panel folds away and comes back; unread terminal output is flagged', async ({ page }) => {
+  const stageH = () => page.locator('#stage').evaluate((e) => e.getBoundingClientRect().height);
+  const open = await stageH();
+  await page.click('#btnDock');
+  await expect(page.locator('#bottom')).toHaveClass(/collapsed/);
+  expect(await stageH()).toBeGreaterThan(open + 100); // the canvas gets the space
+  await loadExample(page, 'blink'); await startSim(page);
+  await expect(page.locator('.tab[data-tab="serialPane"]')).toHaveClass(/unseen/);
+  await page.click('.tab[data-tab="serialPane"]'); // reopens on that tab
+  await expect(page.locator('#bottom')).not.toHaveClass(/collapsed/);
+  await expect(page.locator('.tab[data-tab="serialPane"]')).not.toHaveClass(/unseen/);
+  await page.click('.tab[data-tab="serialPane"]'); // clicking the open tab folds it again
+  await expect(page.locator('#bottom')).toHaveClass(/collapsed/);
+});
+
+test('the edit card opens next to the selected part (not for the board)', async ({ page }) => {
+  await loadExample(page, 'pot');
+  await page.waitForTimeout(300); // let the view settle after fitting
+  for (const id of ['r1', 'pot1']) {
+    await page.evaluate((i) => window.CatSim.App.canvas.select({ kind: 'comp', id: i }), id);
+    await page.waitForTimeout(100);
+    const part = await page.locator(`.cs-comp[data-id="${id}"] .cs-body`).boundingBox();
+    const card = await page.locator('#props').boundingBox();
+    expect(Math.abs((card!.x + card!.width / 2) - (part!.x + part!.width / 2))).toBeLessThan(40); // centred on it
+    const gapAbove = part!.y - (card!.y + card!.height), gapBelow = card!.y - (part!.y + part!.height);
+    expect(Math.max(gapAbove, gapBelow)).toBeGreaterThanOrEqual(0); // touching, never covering it
+  }
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
+  await expect(page.locator('#props')).toBeHidden();
+});
