@@ -362,8 +362,8 @@ class View3D {
     const glow = this.glow(g, 15, 24, 16, 60, '#ff3b3b');
     let last = '';
     this.live(c, (s) => {
-      const col = LED_COLORS[c.props.color] || LED_COLORS.red; const b = s.b || 0;
-      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); last = col; }
+      const col = s.burnt ? '#3b2f2a' : (LED_COLORS[c.props.color] || LED_COLORS.red); const b = s.b || 0;
+      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); m.opacity = s.burnt ? 1 : m.opacity; last = col; }
       m.emissiveIntensity = b * 1.4; m.opacity = 0.72 + 0.28 * b;
       glow.material.opacity = b > 0.02 ? 0.25 + 0.6 * b : 0; glow.scale.setScalar(44 + 30 * b);
     });
@@ -494,6 +494,66 @@ class View3D {
     // cable: brown/red/orange from the case to the pins
     [['#6b3e1f', 20], ['#d63b3b', 28], ['#f08a24', 36]].forEach(([col, z]) => this.rod(g, [0, PIN_TOP - 1, z], [20, 8, z], 1.4, this.mat(col)));
     this.live(c, (s) => { horn.rotation.y = -((s.angle ?? 90) - 90) * DEG; });
+  }
+
+  // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
+  build_to92(g, c, mark) {
+    const T = THREE;
+    const body = this.mesh(new T.CylinderGeometry(14, 14, 22, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#23262d', { roughness: 0.55 }), g, 20, 21, 22);
+    body.castShadow = true;
+    const face = this.tex(112, 88, (x) => {
+      x.fillStyle = '#2b2f37'; x.fillRect(0, 0, 112, 88);
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 20px system-ui, sans-serif'; x.fillText(mark, 56, 40);
+      x.font = '16px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 56, 66);
+    });
+    const plate = this.mesh(new T.PlaneGeometry(28, 22), this.mat('#ffffff', { map: face }), g, 20, 21, 22.05, false);
+    plate.rotation.y = 0; // faces +z (toward the default camera)
+    for (const x of [10, 20, 30]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.8, this.M.lead); this.leg(g, x, 22, x, 62); }
+    const dotM = this.mat('#0f3d1d', { emissive: '#22c55e', emissiveIntensity: 0 });
+    this.cyl(g, 31, 26, 1.6, 32, 32.6, dotM, 10);
+    const glow = this.glow(g, 31, 34, 26, 18, '#22c55e');
+    this.live(c, (s) => { const on = s.on || 0; dotM.emissiveIntensity = on * 2; glow.material.opacity = on * 0.8; });
+  }
+  build_npn(g, c) { this.build_to92(g, c, '2N2222'); }
+  build_pnp(g, c) { this.build_to92(g, c, '2N2907'); }
+  build_nmos(g, c) { this.build_to92(g, c, '2N7000'); }
+
+  build_diode(g, c) {
+    const T = THREE;
+    this.rod(g, [0, 7, 8], [70, 7, 8], 0.8, this.M.lead);
+    for (const x of [0, 70]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.8, this.M.lead);
+    const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.9, roughness: 0.2 });
+    const body = this.mesh(new T.CylinderGeometry(5, 5, 30, 20), bodyM, g, 35, 7, 8); body.rotation.z = Math.PI / 2;
+    const bandM = this.mat('#222');
+    const band = this.mesh(new T.CylinderGeometry(5.2, 5.2, 4, 20), bandM, g, 45, 7, 8); band.rotation.z = Math.PI / 2;
+    let last = '';
+    this.live(c, () => {
+      const m = String(c.props.model); if (m === last) return; last = m;
+      const glass = m === '1N4148';
+      bodyM.color.set(glass ? '#c98a3a' : '#1d1f24'); bodyM.opacity = glass ? 0.85 : 1; bandM.color.set(glass ? '#222' : '#cfd4dc');
+      body.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3); band.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3);
+    });
+  }
+
+  // DIP-8 chip: pins along the long edges, notch on the left.
+  build_opamp(g, c) {
+    const T = THREE;
+    this.box(g, 0, 12, 64, 36, 4, 12, this.mat('#1d1f24', { roughness: 0.5 }));
+    this.cyl(g, 0, 30, 5, 11.9, 12.05, this.mat('#33363d'), 16);
+    this.cyl(g, 9, 41, 2, 11.95, 12.1, this.mat('#33363d'), 12);
+    const top = this.tex(256, 144, (x) => {
+      x.fillStyle = '#1d1f24'; x.fillRect(0, 0, 256, 144);
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 34px system-ui, sans-serif'; x.fillText('LM358', 128, 66);
+      x.font = '20px system-ui, sans-serif'; x.fillStyle = '#8b93a1'; x.fillText('op-amp', 128, 100);
+    });
+    const label = this.mesh(new T.PlaneGeometry(40, 22), this.mat('#ffffff', { map: top, transparent: true }), g, 34, 12.1, 30, false);
+    label.rotation.x = -Math.PI / 2;
+    const leg = this.M.lead;
+    for (let i = 0; i < 4; i++) {
+      const x = 8 + i * 16;
+      this.box(g, x - 2.5, 48, 5, 4, 5, 7, leg); this.box(g, x - 1.5, 51, 3, 9, 0, 7, leg);
+      this.box(g, x - 2.5, 8, 5, 4, 5, 7, leg); this.box(g, x - 1.5, 0, 3, 9, 0, 7, leg);
+    }
   }
 
   build_lcd(g, c) {

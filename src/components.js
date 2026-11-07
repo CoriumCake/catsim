@@ -101,12 +101,21 @@ DEFS.led = {
   controls: [{ key: 'color', label: 'Color', type: 'select', options: Object.keys(LED_COLORS) }],
   state(c, sim) {
     // Real brightness from the analog engine (averaged diode current) when it is running.
-    if (sim.running && sim.analog && sim.analog.leds) return { b: sim.analog.leds[c.id] ?? 0 };
+    if (sim.running && sim.analog && sim.analog.leds) return { b: sim.analog.leds[c.id] ?? 0, burnt: !!(sim.analog.burnt && sim.analog.burnt.includes(c.id)) };
     const a = sim.pinLevel(c, 'A'); const k = sim.pinLevel(c, 'C');
     return { b: a != null && k != null ? clamp(a - k, 0, 1) : 0 };
   },
   render(c, s) {
     const col = LED_COLORS[c.props.color] || LED_COLORS.red; const b = s.b || 0;
+    if (s.burnt) {
+      return `<path d="M10 33 V45 L10 56" stroke="#a7adb7" stroke-width="2" fill="none"/>
+        <path d="M20 33 V52 L20 56" stroke="#a7adb7" stroke-width="2" fill="none"/>
+        <path d="M4 33 V16 a11 11 0 0 1 22 0 V33 Z" fill="#3b2f2a" stroke="#111"/>
+        <rect x="2" y="31" width="26" height="4" rx="1" fill="#2a211d"/>
+        <path d="M11 9 L15 17 L12 22 L17 29" stroke="#0b0b0b" stroke-width="1.6" fill="none"/>
+        <path d="M15 4 c-4 -4 4 -7 0 -11 M20 2 c-3 -3 3 -6 0 -9" stroke="#9aa1ae" stroke-width="1.6" fill="none" opacity=".7" stroke-linecap="round" class="cs-pulse"/>
+        <text x="15" y="-12" class="cs-part-lbl" fill="#dc2626">burnt</text>`;
+    }
     return `${glow(15, 16, 16 + b * 10, col, b > 0.02 ? 0.25 + 0.5 * b : 0)}
       <path d="M10 33 V45 L10 56" stroke="#a7adb7" stroke-width="2" fill="none"/>
       <path d="M20 33 V52 L20 56" stroke="#a7adb7" stroke-width="2" fill="none"/>
@@ -295,6 +304,95 @@ DEFS.servo = {
   },
 };
 
+// ---------- semiconductors ----------
+// TO-92 package seen from the flat (marked) face; legs at the bottom.
+function to92(c, s, mark, legs) {
+  const on = s.on > 0.02;
+  return `<path d="M10 44 V62 M20 44 V62 M30 44 V62" stroke="#a7adb7" stroke-width="2"/>
+    <path d="M4 44 V16 A16 16 0 0 1 36 16 V44 Z" fill="#23262d" stroke="#0c0d10"/>
+    <rect x="7" y="18" width="26" height="22" rx="2" fill="#2d3139"/>
+    <text x="20" y="27" class="cs-tiny cs-light">${mark}</text>
+    <text x="20" y="36" class="cs-tiny cs-light">${s.label}</text>
+    ${legs.map((l, i) => `<text x="${10 + i * 10}" y="56" class="cs-tiny cs-dark">${l}</text>`).join('')}
+    ${on ? `<circle cx="32" cy="10" r="2.2" fill="#22c55e" opacity="${Math.min(1, 0.4 + s.on).toFixed(2)}"/>` : ''}`;
+}
+const TRANSISTOR_HINT = 'Shows a green dot when it conducts. Base/gate needs a resistor from the GPIO.';
+
+DEFS.npn = {
+  type: 'npn', name: 'NPN Transistor (2N2222)', category: 'Semiconductors', w: 40, h: 62, hint: TRANSISTOR_HINT,
+  pins: [
+    { id: 'E', label: 'E', x: 10, y: 62, dir: 'b', title: 'Emitter' },
+    { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor, e.g. 1 kΩ)' },
+    { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
+  ],
+  props: {},
+  state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'NPN' }),
+  render: (c, s) => to92(c, s, '2N2222', ['E', 'B', 'C']),
+};
+
+DEFS.pnp = {
+  type: 'pnp', name: 'PNP Transistor (2N2907)', category: 'Semiconductors', w: 40, h: 62, hint: TRANSISTOR_HINT,
+  pins: [
+    { id: 'E', label: 'E', x: 10, y: 62, dir: 'b', title: 'Emitter (to the positive supply)' },
+    { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor)' },
+    { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
+  ],
+  props: {},
+  state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'PNP' }),
+  render: (c, s) => to92(c, s, '2N2907', ['E', 'B', 'C']),
+};
+
+DEFS.nmos = {
+  type: 'nmos', name: 'N-MOSFET (2N7000)', category: 'Semiconductors', w: 40, h: 62,
+  hint: 'Logic-level-ish N-channel MOSFET (threshold ≈ 2.1 V), up to ~200 mA. Has a body diode.',
+  pins: [
+    { id: 'S', label: 'S', x: 10, y: 62, dir: 'b', title: 'Source (to GND for a low-side switch)' },
+    { id: 'G', label: 'G', x: 20, y: 62, dir: 'b', title: 'Gate' },
+    { id: 'D', label: 'D', x: 30, y: 62, dir: 'b', title: 'Drain (to the load)' },
+  ],
+  props: {},
+  state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'N-FET' }),
+  render: (c, s) => to92(c, s, '2N7000', ['S', 'G', 'D']),
+};
+
+const DIODE_TYPES = ['1N4148', '1N4007', '1N5819'];
+DEFS.diode = {
+  type: 'diode', name: 'Diode', category: 'Semiconductors', w: 70, h: 16,
+  pins: [{ id: 'A', label: 'A', x: 0, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 70, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
+  props: { model: '1N4148' },
+  controls: [{ key: 'model', label: 'Type', type: 'select', options: DIODE_TYPES }],
+  render(c) {
+    const big = c.props.model !== '1N4148';
+    const body = big ? '#1d1f24' : '#c98a3a';
+    return `<line x1="0" y1="8" x2="70" y2="8" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="20" y="${big ? 1 : 3}" width="30" height="${big ? 14 : 10}" rx="${big ? 3 : 4}" fill="${body}" stroke="rgba(0,0,0,.35)"/>
+      <rect x="43" y="${big ? 1 : 3}" width="4" height="${big ? 14 : 10}" fill="${big ? '#cfd4dc' : '#222'}"/>
+      <text x="35" y="-3" class="cs-part-lbl">${esc(c.props.model)}</text>`;
+  },
+};
+
+DEFS.opamp = {
+  type: 'opamp', name: 'Op-amp (LM358)', category: 'Semiconductors', w: 64, h: 60,
+  hint: 'Single op-amp, DIP-8. Output swings from 0 V to about VCC − 1.5 V (not rail-to-rail).',
+  pins: [
+    { id: 'VCC', label: 'VCC', x: 8, y: 0, dir: 't', title: 'Pin 8: VCC (3–32 V)' },
+    { id: 'OUT', label: 'OUT', x: 8, y: 60, dir: 'b', title: 'Pin 1: output' },
+    { id: 'IN-', label: 'IN−', x: 24, y: 60, dir: 'b', title: 'Pin 2: inverting input' },
+    { id: 'IN+', label: 'IN+', x: 40, y: 60, dir: 'b', title: 'Pin 3: non-inverting input' },
+    { id: 'GND', label: 'GND', x: 56, y: 60, dir: 'b', title: 'Pin 4: GND' },
+  ],
+  props: {},
+  render() {
+    let legs = '';
+    for (let i = 0; i < 4; i++) legs += `<rect x="${5 + i * 16}" y="44" width="6" height="16" fill="#b9bec7"/><rect x="${5 + i * 16}" y="0" width="6" height="16" fill="${i === 0 ? '#b9bec7' : '#8a8f98'}"/>`;
+    return `${legs}<rect x="0" y="12" width="64" height="36" rx="3" fill="#1d1f24" stroke="#0a0b0d"/>
+      <path d="M0 24 a6 6 0 0 1 0 12" fill="#33363d"/>
+      <circle cx="9" cy="40" r="2" fill="#33363d"/>
+      <text x="32" y="29" class="cs-tiny cs-light">LM358</text>
+      <text x="32" y="39" class="cs-tiny cs-light">OUT − + G</text>`;
+  },
+};
+
 DEFS.lcd = {
   type: 'lcd', name: 'LCD 16×2 (I2C)', category: 'Output', w: 236, h: 86,
   pins: [
@@ -338,6 +436,7 @@ const PALETTE = [
   { cat: 'Output', types: ['led', 'buzzer', 'servo', 'lcd'] },
   { cat: 'Input', types: ['button', 'pot'] },
   { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },
+  { cat: 'Semiconductors', types: ['npn', 'pnp', 'nmos', 'diode', 'opamp'] },
   { cat: 'Passive', types: ['resistor'] },
 ];
 const ESP = { ADC1, ADC2, TOUCH };

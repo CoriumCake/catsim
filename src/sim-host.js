@@ -128,7 +128,10 @@ class SimHost extends Simulator {
         if (an && typeof an === 'object') {
           const leds = {};
           if (an.leds && typeof an.leds === 'object') for (const k of Object.keys(an.leds)) if (/^[\w-]{1,32}$/.test(k)) leds[k] = Math.min(1, Math.max(0, finite(an.leds[k])));
-          this.analog = { leds, rtf: Math.max(0, finite(an.rtf, 1)), error: an.error ? str(an.error, 300) : null, work: finite(an.work), steps: finite(an.steps), newton: finite(an.newton) };
+          const parts = {};
+          if (an.parts && typeof an.parts === 'object') for (const k of Object.keys(an.parts)) if (/^[\w-]{1,32}$/.test(k)) parts[k] = Math.min(1, Math.max(0, finite(an.parts[k])));
+          const burnt = Array.isArray(an.burnt) ? an.burnt.filter((k) => typeof k === 'string' && /^[\w-]{1,32}$/.test(k)).slice(0, 200) : [];
+          this.analog = { leds, parts, burnt, rtf: Math.max(0, finite(an.rtf, 1)), error: an.error ? str(an.error, 300) : null, work: finite(an.work), steps: finite(an.steps), newton: finite(an.newton) };
         }
         const sm = m.samples;
         if (sm && sm.t instanceof Float64Array && Array.isArray(sm.v) && sm.v.every((a) => a instanceof Float32Array && a.length === sm.t.length)) {

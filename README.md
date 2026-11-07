@@ -26,11 +26,13 @@ Everything is bundled, so the built site works offline (no CDN scripts).
 ## Features
 
 - **ESP32 DevKit V1 (30-pin)** with real GPIO numbering. Hover a pin to see its functions (ADC1/ADC2, touch, DAC, strapping, I2C). The on-board LED is on GPIO2.
-- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD.
+- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819) and an LM358 op-amp.
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
 - **Analog circuit engine:** voltages and currents are solved like SPICE (modified nodal analysis, Newton–Raphson, trapezoidal integration with error control), validated against ngspice in CI. LEDs are real diodes with colour-specific forward voltages, and their brightness follows the actual current, so a resistor value or a blue LED on 3.3 V makes a visible difference. GPIOs have realistic output resistance, pull-ups and input thresholds; PWM, `tone()` and servo signals are real waveforms; `dacWrite` outputs a real voltage.
+- **Damage:** an LED driven without a resistor burns out (and stays dead until you restart), and the Console warns when a GPIO carries more than the ESP32's 40 mA limit.
+- **SPICE netlists:** `src/analog/parser.ts` reads R, C, L, V, I, D, Q, M, E, G and X elements with `.model` (diode, BJT, level-1 MOSFET) and `.subckt`.
 - **Oscilloscope:** the *Scope* tab probes up to four nets, with timebase, volts/div, edge trigger and frequency/peak readouts.
 - **Simulation clock:** pause and resume, and run at 0.1× to 10× speed. `delay(1000)` advances simulated time by exactly 1000 ms; under heavy load the simulation runs slower than real time instead of skipping.
 - **ESP32 pitfall checks:** warnings for flash pins 6–11, output on input-only pins 34–39, missing pull-ups, ADC2 used while WiFi is on, floating inputs, and unpowered sensors.
@@ -57,7 +59,8 @@ src/view3d.js         3D view (Three.js, code-split)
 src/transpiler.js     sketch → JS
 src/runtime.js        simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
 src/clock.ts          virtual simulation clock
-src/analog/           analog engine: circuit.ts (MNA solver), models.ts (part models), bridge.ts
+src/analog/           analog engine: circuit.ts (MNA solver), devices.ts (BJT, MOSFET, op-amp,
+                      controlled sources), parser.ts (SPICE netlists), models.ts (part models), bridge.ts
                       (couples it to the sketch), waveform.ts, spice.ts (netlist export), nets.ts
 src/scope.ts          oscilloscope panel
 src/sim-worker.js     runs the sketch in a Web Worker

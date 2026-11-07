@@ -28,15 +28,15 @@ export interface StampCtx {
   limited: boolean;
 }
 
-const iv = (n: number) => n - 1; // node → unknown index (ground → -1)
-const volt = (x: Float64Array, n: number) => (n === 0 ? 0 : x[n - 1]);
+export const iv = (n: number) => n - 1; // node → unknown index (ground → -1)
+export const volt = (x: Float64Array, n: number) => (n === 0 ? 0 : x[n - 1]);
 
-function stampG(s: DenseSolver, a: number, b: number, g: number) {
+export function stampG(s: DenseSolver, a: number, b: number, g: number) {
   const ia = iv(a), ib = iv(b);
   s.add(ia, ia, g); s.add(ib, ib, g); s.add(ia, ib, -g); s.add(ib, ia, -g);
 }
 /** Constant current `i` flowing from node a through the element to node b. */
-function stampI(s: DenseSolver, a: number, b: number, i: number) {
+export function stampI(s: DenseSolver, a: number, b: number, i: number) {
   s.addRhs(iv(a), -i); s.addRhs(iv(b), i);
 }
 
@@ -51,6 +51,8 @@ export abstract class Element {
   accept(_x: Float64Array, _dt: number, _method: Method, _dc: boolean): void {}
   /** reactive elements: the quantity whose truncation error limits the step */
   isReactive(): boolean { return false; }
+  /** nonlinear devices need Newton iterations */
+  isNonlinear(): boolean { return false; }
   /** for diodes etc.: reset Newton state */
   resetNewton(): void {}
   current(_x: Float64Array): number { return 0; }
@@ -157,16 +159,8 @@ export class Diode extends Element {
   }
   get nodes() { return [this.a, this.k]; }
   resetNewton() { this.vdLast = 0; }
-  private static pnjlim(vnew: number, vold: number, nvt: number, vcrit: number): [number, boolean] {
-    if (vnew > vcrit && Math.abs(vnew - vold) > 2 * nvt) {
-      if (vold > 0) {
-        const arg = 1 + (vnew - vold) / nvt;
-        return [arg > 0 ? vold + nvt * Math.log(arg) : vcrit, true];
-      }
-      return [nvt * Math.log(vnew / nvt), true];
-    }
-    return [vnew, false];
-  }
+  isNonlinear() { return true; }
+  private static pnjlim = pnjlim;
   stamp(c: StampCtx) {
     const nvt = this.m.n * VT;
     let vd = volt(c.x, this.a) - volt(c.x, this.k);
@@ -183,6 +177,18 @@ export class Diode extends Element {
     const vd = volt(x, this.a) - volt(x, this.k);
     return this.m.is * (Math.exp(Math.min(vd / (this.m.n * VT), 700)) - 1) + GMIN * vd;
   }
+}
+
+/** SPICE junction voltage limiting: keeps Newton from overshooting into exp() overflow. */
+export function pnjlim(vnew: number, vold: number, nvt: number, vcrit: number): [number, boolean] {
+  if (vnew > vcrit && Math.abs(vnew - vold) > 2 * nvt) {
+    if (vold > 0) {
+      const arg = 1 + (vnew - vold) / nvt;
+      return [arg > 0 ? vold + nvt * Math.log(arg) : vcrit, true];
+    }
+    return [nvt * Math.log(vnew / nvt), true];
+  }
+  return [vnew, false];
 }
 
 export class ConvergenceError extends Error {}
@@ -259,7 +265,7 @@ export class Simulation {
     this.o = { reltol: 1e-3, vntol: 1e-6, abstol: 1e-12, trtol: 7, dtMax: 1e-3, dtMin: 1e-14, maxIterDc: 150, maxIterTran: 40, ...opts };
     this.reactive = c.elements.filter((e): e is Capacitor | Inductor => e.isReactive());
     this.sources = c.elements.filter((e): e is VSource | ISource => e instanceof VSource || e instanceof ISource);
-    this.nonlinear = c.elements.some((e) => e instanceof Diode);
+    this.nonlinear = c.elements.some((e) => e.isNonlinear());
   }
 
   get dtMax() { return this.o.dtMax; }

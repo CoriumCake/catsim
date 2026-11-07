@@ -88,15 +88,15 @@ describe('sketch execution', () => {
     expect(host.logs.some(([, m]) => /ADC2/.test(m))).toBe(true);
   });
 
-  it('delay() advances simulated time exactly', async () => {
+  it('delay() never returns early and lands on time', async () => {
+    // Exact timing is covered with fake timers in clock.test.ts; this checks the real event loop.
     const { sim } = makeSim([comp('esp', 'esp32')], []);
     live = sim;
-    sim.setSpeed(20);
-    sim.start('void setup() { Serial.begin(9600); delay(1000); Serial.print(millis()); delay(500); Serial.print(" "); Serial.print(millis()); }\nvoid loop() { delay(1000); }');
-    await wait(150);
+    sim.start('void setup() { Serial.begin(9600); delay(200); Serial.print(millis()); delay(100); Serial.print(" "); Serial.print(millis()); }\nvoid loop() { delay(1000); }');
+    await wait(400);
     const [a, b] = sim.serialOut.split(' ').map(Number);
-    expect(a).toBeGreaterThanOrEqual(1000); expect(a).toBeLessThan(1010);
-    expect(b - a).toBeGreaterThanOrEqual(500); expect(b - a).toBeLessThan(510);
+    expect(a).toBeGreaterThanOrEqual(200); expect(a).toBeLessThan(250);
+    expect(b - a).toBeGreaterThanOrEqual(100); expect(b - a).toBeLessThan(150);
   });
 
   it('pause() freezes the sketch and its clock', async () => {

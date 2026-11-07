@@ -10,6 +10,7 @@ import { Circuit, Simulation } from '../../src/analog/circuit.ts';
 import { toNetlist } from '../../src/analog/spice.ts';
 import { dc, square } from '../../src/analog/waveform.ts';
 import { ledModel, LED_VF, R_OUT, V_LOGIC } from '../../src/analog/models.ts';
+import { Bjt, Mosfet } from '../../src/analog/devices.ts';
 
 const have = spawnSync('ngspice', ['--version'], { encoding: 'utf8' }).status === 0;
 if (!have && process.env.REQUIRE_NGSPICE) throw new Error('ngspice is required (REQUIRE_NGSPICE=1) but was not found');
@@ -90,6 +91,45 @@ const CASES: Case[] = [
       return { c, probes };
     },
   },
+{
+  name: 'NPN low-side LED driver switched by PWM', tstop: 3e-3, tstep: 1e-6, tol: 0.02,
+  build: () => {
+    const c = new Circuit(); const g = c.node(), b = c.node(), v5 = c.node(), a = c.node(), col = c.node();
+    c.vsource(v5, 0, dc(5)); c.vsource(g, 0, square(V_LOGIC, 1000, 0.4), R_OUT);
+    c.resistor(g, b, 1000); c.resistor(v5, a, 150); c.diode(a, col, ledModel(LED_VF.green));
+    c.add(new Bjt(col, b, 0, { type: 'npn', is: 1e-14, bf: 200, br: 3, vaf: 100 }));
+    return { c, probes: [b, col] };
+  },
+},
+{
+  name: 'common-emitter amplifier (small signal, Early effect)', tstop: 5e-3, tstep: 2e-6, tol: 0.01,
+  build: () => {
+    const c = new Circuit(); const vcc = c.node(), src = c.node(), b = c.node(), col = c.node();
+    c.vsource(vcc, 0, dc(5)); c.vsource(src, 0, { kind: 'sin', vo: 0, va: 0.005, freq: 1000, td: 0 });
+    c.capacitor(src, b, 10e-6); c.resistor(vcc, b, 470_000); c.resistor(vcc, col, 2200);
+    c.add(new Bjt(col, b, 0, { type: 'npn', is: 1e-14, bf: 150, br: 1, vaf: 100 }));
+    return { c, probes: [b, col] };
+  },
+},
+{
+  name: 'NMOS low-side switch with lambda', tstop: 3e-3, tstep: 1e-6, tol: 0.02,
+  build: () => {
+    const c = new Circuit(); const g = c.node(), v5 = c.node(), d = c.node();
+    c.vsource(v5, 0, dc(5)); c.vsource(g, 0, square(V_LOGIC, 1000, 0.5), R_OUT);
+    c.resistor(v5, d, 47); c.add(new Mosfet(d, g, 0, { type: 'nmos', vto: 1.6, kp: 0.5, lambda: 0.02 }));
+    return { c, probes: [d] };
+  },
+},
+{
+  name: 'PNP high-side switch', tstop: 3e-3, tstep: 1e-6, tol: 0.02,
+  build: () => {
+    const c = new Circuit(); const g = c.node(), b = c.node(), v33 = c.node(), col = c.node();
+    c.vsource(v33, 0, dc(V_LOGIC)); c.vsource(g, 0, square(V_LOGIC, 1000, 0.5), R_OUT);
+    c.resistor(g, b, 2200); c.resistor(col, 0, 220);
+    c.add(new Bjt(col, b, v33, { type: 'pnp', is: 1e-14, bf: 180, br: 4 }));
+    return { c, probes: [col] };
+  },
+},
 ];
 
 describe.skipIf(!have)('engine matches ngspice', () => {

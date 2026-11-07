@@ -3,6 +3,7 @@
  * press…) and reports whether anything changed. */
 import { Circuit, Diode, Resistor, Switch, VSource, VT, type DiodeModel } from './circuit.ts';
 import { dc } from './waveform.ts';
+import { Bjt, Mosfet, OpAmp, LM358, type BjtModel, type MosModel } from './devices.ts';
 import type { Component } from '../types.ts';
 
 export const V_LOGIC = 3.3;
@@ -25,7 +26,21 @@ export interface PartModel {
   update?: () => boolean;
   /** LEDs: the junction whose current sets the brightness */
   led?: Diode;
+  /** 0..1 activity shown on the part (transistor conducting) */
+  activity?: (x: Float64Array) => number;
 }
+
+// Device parameters from the parts' published SPICE models (simplified to what the engine supports).
+export const Q2N2222: BjtModel = { type: 'npn', is: 14.34e-15, bf: 255.9, br: 6.092, vaf: 74.03 };
+export const Q2N2907: BjtModel = { type: 'pnp', is: 650.6e-18, bf: 231.7, br: 3.563, vaf: 115.7 };
+/** 2N7000 as a level-1 model: Vth ≈ 2.1 V, Rds(on) ≈ 1.8 Ω at Vgs = 4.5 V. */
+export const M2N7000: MosModel = { type: 'nmos', vto: 2.1, kp: 0.23, lambda: 0.01 };
+export const DIODES: Record<string, DiodeModel> = {
+  '1N4148': { is: 2.52e-9, n: 1.752, rs: 0.568 },
+  '1N4007': { is: 7.03e-9, n: 1.808, rs: 0.0342 },
+  '1N5819': { is: 3.17e-5, n: 1.373, rs: 0.051 }, // Schottky: low forward voltage
+};
+const ACT_FULL = 0.005; // collector/drain current shown as "fully on" (5 mA)
 
 export type PinNode = (pinId: string) => number;
 /** `cur()` returns the part as it is now: the worker receives a fresh copy of the project on every edit. */
@@ -92,6 +107,33 @@ export const MODELS: Record<string, ModelFn> = {
     const c = { get id() { return c0.id; }, get props() { return cur().props; } };
     ckt.resistor(pin('V+'), pin('GND'), 330, `${c.id}_motor`);
     ckt.resistor(pin('SIG'), pin('GND'), 100_000, `${c.id}_sig`);
+    return {};
+  },
+  npn(ckt, c0, pin) {
+    const q = ckt.add(new Bjt(pin('C'), pin('B'), pin('E'), Q2N2222), c0.id);
+    return { activity: (x) => Math.min(1, Math.max(0, q.collectorCurrent(x)) / ACT_FULL) };
+  },
+  pnp(ckt, c0, pin) {
+    const q = ckt.add(new Bjt(pin('C'), pin('B'), pin('E'), Q2N2907), c0.id);
+    return { activity: (x) => Math.min(1, Math.max(0, -q.collectorCurrent(x)) / ACT_FULL) };
+  },
+  nmos(ckt, c0, pin) {
+    const m = ckt.add(new Mosfet(pin('D'), pin('G'), pin('S'), M2N7000), c0.id);
+    ckt.diode(pin('S'), pin('D'), { is: 1e-14, n: 1 }, `${c0.id}_body`); // body diode
+    return { activity: (x) => Math.min(1, Math.abs(m.drainCurrent(x)) / ACT_FULL) };
+  },
+  diode(ckt, c0, pin, ui, cur) {
+    const c = { get id() { return c0.id; }, get props() { return cur().props; } };
+    const pick = () => String(c.props.model) in DIODES ? String(c.props.model) : '1N4148';
+    let name = pick();
+    // Series resistance needs an internal node, so model changes keep the original structure and only
+    // swap the junction parameters (Rs differences between these types are small).
+    const d = ckt.diode(pin('A'), pin('K'), DIODES[name], c.id);
+    return { update: () => { const n = pick(); if (n === name) return false; name = n; d.setModel(DIODES[n]); return true; } };
+  },
+  opamp(ckt, c0, pin) {
+    ckt.add(new OpAmp(pin('IN+'), pin('IN-'), pin('OUT'), pin('VCC'), pin('GND'), LM358), c0.id);
+    ckt.resistor(pin('VCC'), pin('GND'), 7000, `${c0.id}_iq`); // ~0.7 mA quiescent current at 5 V
     return {};
   },
   lcd(ckt, c0, pin, ui, cur) {
