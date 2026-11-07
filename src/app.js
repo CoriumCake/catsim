@@ -14,6 +14,7 @@ import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
+const SIDE_STORE = 'catsim.sideHidden';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // ---------- audio for buzzers ----------
@@ -51,6 +52,7 @@ const App = {
     this.editor.onChange(() => { this.project.code = this.editor.get(); this.save(); });
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
+    try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
     if (v === '3d') this.setView('3d');
     window.addEventListener('resize', () => this.editor.refresh());
   },
@@ -151,6 +153,15 @@ const App = {
   },
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
   restartSim() { this.stop(); this.start(); },
+  /** Show or hide the left sidebar (editor, parts, terminal…). The choice is remembered. */
+  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden')) {
+    $('#workspace').classList.toggle('side-hidden', hidden);
+    const b = $('#btnSide');
+    b.setAttribute('aria-expanded', String(!hidden));
+    b.title = hidden ? 'Show the sidebar (Ctrl+B)' : 'Hide the sidebar (Ctrl+B)';
+    try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ }
+    if (!hidden) requestAnimationFrame(() => this.editor.refresh());
+  },
   togglePause() {
     if (!this.sim.running) return;
     if (this.sim.paused) this.sim.resume(); else this.sim.pause();
@@ -434,6 +445,7 @@ const App = {
     $('#btnRun').onclick = () => this.toggleRun();
     $('#btnRestart').onclick = () => this.restartSim();
     $('#btnPause').onclick = () => this.togglePause();
+    $('#btnSide').onclick = () => this.toggleSidebar();
     $('#boardSelect').onchange = (e) => this.setBoard(e.target.value);
     $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
@@ -502,6 +514,7 @@ const App = {
       const typing = e.target.closest('input, textarea, select, .cm-editor');
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); this.toggleRun(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); this.save(); this.toast('Saved in this browser'); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !e.target.closest('.cm-editor')) { e.preventDefault(); this.toggleSidebar(); return; }
       if (typing) return;
       if (e.key === 'Escape') { this.canvas.cancelWire(); this.canvas.select(null); }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); this.deleteSelection(); }

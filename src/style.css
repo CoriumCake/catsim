@@ -32,7 +32,7 @@ kbd { font: 11px var(--mono); background: var(--panel-2); border: 1px solid var(
 code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; color: #9a3412; }
 
 /* ---------- top bar ---------- */
-.topbar { display: flex; align-items: center; gap: 14px; padding: 0 0 0 16px; height: 56px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 0 0 0 10px; height: 56px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .brand { display: flex; align-items: center; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); height: 100%; }
 .brand svg rect { fill: var(--accent); }
 .brand svg path { fill: #1c2230; }
@@ -40,7 +40,7 @@ code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 4px; bor
 .brand-name { font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
 .brand-name b { color: var(--accent); }
 .chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff4d1; color: #8a6400; border: 1px solid #f3dc94; }
-.proj-name { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; width: 240px; color: var(--text); font-weight: 600; }
+.proj-name { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; width: 200px; min-width: 90px; flex: 0 1 auto; color: var(--text); font-weight: 600; }
 .proj-name:hover, .proj-name:focus { border-color: var(--line-2); outline: none; background: var(--panel-2); }
 .tb-group { display: flex; align-items: center; gap: 6px; }
 .tb-files { height: 100%; gap: 6px; }
@@ -151,24 +151,24 @@ select.btn { padding-right: 6px; }
 .canvas { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; cursor: default; }
 .canvas.cs-panning { cursor: grabbing; }
 .cs-grid-dot { fill: var(--grid); }
-.float-bar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 4px 16px rgba(60, 40, 0, .08); z-index: 2; }
+.tb-sim { display: flex; align-items: center; gap: 6px; flex: none; }
 .run-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 700; cursor: pointer; }
 .run-btn:hover { background: var(--accent-2); }
 .run-btn.running { background: var(--danger); color: #fff; }
-.float-bar .btn { border-color: transparent; background: var(--panel-2); height: 34px; }
-.float-bar .btn:hover { background: #eceef2; }
+.tb-sim .btn { border-color: transparent; background: var(--panel-2); height: 34px; }
+.tb-sim .btn:hover { background: #eceef2; }
 .bar-sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 .sim-clock { display: flex; align-items: center; gap: 6px; font: 12px var(--mono); color: var(--muted); padding: 0 10px; height: 34px; border-radius: 8px; background: var(--panel-2); min-width: 110px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #c8ccd4; }
 .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: blink 1.2s infinite; }
 .dot.on.paused { background: var(--accent); box-shadow: none; animation: none; }
 .speed-select { height: 34px; border: 0; border-radius: 8px; background: var(--panel-2); color: var(--text); font: 12px var(--mono); padding: 0 6px; cursor: pointer; }
-.float-bar .btn:disabled { opacity: .45; cursor: default; }
+.tb-sim .btn:disabled { opacity: .45; cursor: default; }
 @keyframes blink { 50% { opacity: .45; } }
 .stage-tools { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 4px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 4px 16px rgba(60, 40, 0, .08); }
 .stage-tools .btn { border-color: transparent; }
 .stage-tools span { font: 11px var(--mono); color: var(--muted); width: 40px; text-align: center; }
-.stage-hint { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: #1c2230; color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .15s; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; }
+.stage-hint { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: #1c2230; color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .15s; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; }
 .stage-hint kbd { background: #2c3445; border-color: #3b4558; color: #fff; }
 .stage-hint.show { opacity: 1; }
 .view3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; touch-action: none; outline: none; }
@@ -249,7 +249,7 @@ select.btn { padding-right: 6px; }
   .side { width: 100%; max-width: none; min-width: 0; }
   .editor-wrap { height: 55vh; flex: none; }
   .bottom { height: 40vh; }
-  .float-bar { max-width: calc(100% - 32px); }
+  .tb-sim { flex-wrap: wrap; }
   .props { width: auto; right: 14px; bottom: 64px; }
 }
 
@@ -275,3 +275,27 @@ select.btn { padding-right: 6px; }
 .props details.spice textarea { width: 100%; margin-top: 6px; font: 11px/1.4 var(--mono); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px; resize: vertical; background: var(--panel); color: var(--text); }
 .props .spice-actions { display: flex; gap: 6px; margin: 6px 0 4px; }
 .props .spice-status { font: 11px/1.4 var(--mono); color: var(--muted); word-break: break-word; }
+
+/* sidebar toggle */
+.hamburger { width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-color: transparent; color: var(--text); flex: none; }
+.hamburger:hover { background: var(--panel-2); }
+.workspace.side-hidden > .side, .workspace.side-hidden > .splitter-v { display: none; }
+.tb-files { flex: none; }
+#exampleSelect { width: 150px; }
+.proj-name { width: auto; flex: 1 1 140px; max-width: 240px; }
+.btn-ilabel { display: inline-flex; align-items: center; gap: 5px; }
+/* narrower screens: icon-only buttons (labels stay as tooltips), compact brand */
+@media (max-width: 1600px) {
+  .btn-ilabel .lbl, .brand-name, .brand .chip { display: none; }
+  .brand { padding-right: 10px; }
+  .topbar, .tb-sim { gap: 6px; }
+  .sim-clock { min-width: 0; padding: 0 8px; }
+  #exampleSelect { width: 128px; }
+}
+/* too narrow for one row: the simulation controls move to a second row of the top bar */
+@media (max-width: 1180px) {
+  .topbar { height: auto; flex-wrap: wrap; row-gap: 6px; padding: 6px 10px; }
+  .tb-spacer { display: none; }
+  .tb-files { margin-left: auto; }
+  .tb-sim { order: 10; flex-basis: 100%; justify-content: center; }
+}

@@ -58,7 +58,7 @@ class View3D {
     this.el = this.renderer.domElement;
     this.el.className = 'view3d';
     this.el.hidden = true;
-    this.stage.insertBefore(this.el, this.stage.querySelector('.float-bar'));
+    this.stage.insertBefore(this.el, this.stage.querySelector('.stage-tools'));
 
     this.scene = new T.Scene();
     this.scene.background = new T.Color('#fdf5e8');

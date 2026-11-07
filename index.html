@@ -9,6 +9,9 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="btnSide" class="btn btn-icon hamburger" title="Hide the sidebar (Ctrl+B)" aria-label="Toggle sidebar" aria-controls="side" aria-expanded="true">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
     <div class="brand">
       <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M8 24V11l4 4h8l4-4v13z" fill="#0b1220"/><circle cx="13" cy="18" r="1.6" fill="var(--accent)"/><circle cx="19" cy="18" r="1.6" fill="var(--accent)"/></svg>
       <span class="brand-name">Cat<b>Sim</b></span>
@@ -19,11 +22,24 @@
     <button id="btnFirmware" class="btn" hidden title="Load compiled firmware for the Uno (.hex)">Upload .hex</button>
     <input type="file" id="firmwareFile" accept=".hex,.ihx,text/plain" hidden>
     <div class="tb-spacer"></div>
+    <div class="tb-sim" role="toolbar" aria-label="Simulation">
+      <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
+      <button id="btnRestart" class="btn btn-icon" title="Restart simulation">↻</button>
+      <button id="btnPause" class="btn btn-icon" title="Pause simulation" aria-label="Pause" disabled>⏸</button>
+      <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
+      <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
+      </select>
+      <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span><span id="simLoad" class="sim-load" hidden title="The circuit is heavy to simulate, so simulated time runs slower than real time"></span></div>
+      <span class="bar-sep"></span>
+      <button class="btn btn-icon btn-ilabel" id="addPart" title="Add a part">＋<span class="lbl">Part</span></button>
+      <div class="view-seg" role="group" aria-label="View"><button id="view2d" class="on" title="2D diagram (edit)">2D</button><button id="view3d" title="3D view">3D</button></div>
+    </div>
+    <div class="tb-spacer"></div>
     <div class="tb-group tb-files">
       <select id="exampleSelect" class="btn" aria-label="Load example"><option value="">Examples…</option></select>
-      <button id="btnNew" class="btn">New</button>
-      <button id="btnImport" class="btn">Import</button>
-      <button id="btnExport" class="btn">Export</button>
+      <button id="btnNew" class="btn btn-ilabel" title="New project"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 3h7l3 3v11H5z M12 3v3h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">New</span></button>
+      <button id="btnImport" class="btn btn-ilabel" title="Import a project file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3 M6 7l4-4 4 4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Import</span></button>
+      <button id="btnExport" class="btn btn-ilabel" title="Export the project as a file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10 M6 9l4 4 4-4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Export</span></button>
       <button id="btnMute" class="btn btn-icon" title="Toggle buzzer sound">🔊</button>
       <button id="btnShare" class="btn btn-dark">Share</button>
     </div>
@@ -121,18 +137,6 @@
           <path id="cs-temp" class="cs-temp"/>
         </g>
       </svg>
-      <div class="float-bar">
-        <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
-        <button id="btnRestart" class="btn btn-icon" title="Restart simulation">↻</button>
-        <button id="btnPause" class="btn btn-icon" title="Pause simulation" aria-label="Pause" disabled>⏸</button>
-        <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
-          <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
-        </select>
-        <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span><span id="simLoad" class="sim-load" hidden title="The circuit is heavy to simulate, so simulated time runs slower than real time"></span></div>
-        <span class="bar-sep"></span>
-        <button class="btn btn-icon" id="addPart" title="Add a part">＋ Part</button>
-        <div class="view-seg" role="group" aria-label="View"><button id="view2d" class="on" title="2D diagram (edit)">2D</button><button id="view3d" title="3D view">3D</button></div>
-      </div>
       <div class="stage-tools">
         <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
         <span id="zoomLabel">100%</span>

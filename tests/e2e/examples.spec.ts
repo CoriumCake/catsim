@@ -266,3 +266,15 @@ test('a pasted SPICE model is validated and applied from the part panel', async 
   await expect(page.locator('[data-spice-status="spice"]')).toContainText('Found .model myd (D)');
   expect(await page.evaluate(() => window.CatSim.App.project.components.find((c: { id: string }) => c.id === 'd1').props.spice)).toContain('MYD');
 });
+
+test('the sidebar can be hidden with the hamburger button and comes back (remembered, Ctrl+B)', async ({ page }) => {
+  await expect(page.locator('.topbar #btnRun')).toBeVisible(); // run controls live in the top bar
+  await page.click('#btnSide');
+  await expect(page.locator('#side')).toBeHidden();
+  await expect(page.locator('#btnSide')).toHaveAttribute('aria-expanded', 'false');
+  await page.reload();
+  await page.waitForFunction(() => window.CatSim?.App?.project);
+  await expect(page.locator('#side')).toBeHidden();
+  await page.keyboard.press('Control+b');
+  await expect(page.locator('#side')).toBeVisible();
+});
