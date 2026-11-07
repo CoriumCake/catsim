@@ -368,6 +368,7 @@ const App = {
     const tabs = document.querySelector(`.tabs[data-group="${group}"]`);
     tabs.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
     const pane = $('#' + id); pane.parentElement.querySelectorAll(':scope > .tabpane').forEach((p) => p.classList.toggle('active', p === pane));
+    if (group === 'bottom') $('#autoScrollWrap').hidden = id !== 'serialPane'; // only the terminal scrolls
     if (id === 'consolePane') { this._unseen = 0; $('#consoleBadge').hidden = true; }
     if (id === 'editorPane') this.editor.refresh();
     if (id === 'iotPane') this.renderIot();

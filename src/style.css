@@ -300,3 +300,9 @@ select.btn { padding-right: 6px; }
 }
 .part.current { border-color: var(--accent); background: #fffaeb; }
 .part.current span::after { content: " · in use"; color: var(--muted); font-weight: 400; }
+/* bottom dock: labels never wrap; contextual actions stay compact */
+.tab { white-space: nowrap; }
+.bottom .tabs .tab { padding: 6px 10px; }
+.bottom .tabs-actions { gap: 6px; }
+.bottom .tabs-actions .check[hidden] { display: none; }
+#btnClear { width: 30px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
