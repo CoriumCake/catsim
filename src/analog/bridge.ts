@@ -47,7 +47,9 @@ export interface SimState {
   ledcCh: Record<number, { freq?: number } | undefined>;
   millis(): number;
   clock: { stall(realMs: number): void };
-}
+  /** boards that run real firmware (Uno): pin drivers come from the emulated chip's port registers */
+  board?: { drive(pin: number): { wave: Waveform; rs: number; key: string }; name: string };
+  }
 
 const VIH = 0.75 * V_LOGIC, VIL = 0.25 * V_LOGIC;
 /** An LED burns out when its thermally averaged current exceeds this (typical abs. max 30 mA). */
@@ -116,7 +118,9 @@ export class AnalogBridge {
     // Nets from wires only (part-internal connections are modelled by the parts themselves).
     const { rootOf, members } = wireNets(p, DEFS);
     const esp = p.components.find((c) => c.type === 'esp32');
-    const groundRoot = esp ? rootOf.get(`${esp.id}:GND.L`) : null;
+    const boardComp = p.components.find((c) => DEFS[c.type]?.board);
+    const gndPin = boardComp && (DEFS[boardComp.type].pins as PinDef[]).find((pd) => pd.kind === 'gnd');
+    const groundRoot = boardComp && gndPin ? rootOf.get(`${boardComp.id}:${gndPin.id}`) : null;
     const rootNode = new Map<string, number>();
     this.pinNode.clear();
     for (const [key, r] of rootOf) {
@@ -138,6 +142,18 @@ export class AnalogBridge {
         if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${esp.id}:${pd.id}`)) continue;
         const d = this.drive(pd.gpio);
         this.gpioSrc.set(pd.gpio, ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `GPIO${pd.gpio}`));
+        this.gpioDrive.set(pd.gpio, d.key);
+      }
+    }
+    const uno = p.components.find((c) => c.type === 'uno');
+    if (uno) {
+      const pin = nodeOf(uno);
+      if (wired(`${uno.id}:5V`)) ckt.vsource(pin('5V'), 0, dc(5), 0.1, '5V');
+      if (wired(`${uno.id}:3V3`)) ckt.vsource(pin('3V3'), 0, dc(3.3), 0.5, '3V3');
+      for (const pd of DEFS.uno.pins as PinDef[]) {
+        if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${uno.id}:${pd.id}`)) continue;
+        const d = this.drive(pd.gpio);
+        this.gpioSrc.set(pd.gpio, ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `${pd.id}`));
         this.gpioDrive.set(pd.gpio, d.key);
       }
     }
@@ -169,6 +185,7 @@ export class AnalogBridge {
   }
 
   private drive(g: number): Drive {
+    if (this.s.board) return this.s.board.drive(g);
     const s = this.s, mode = s.mode[g];
     if (mode === OUTPUT) {
       if (s.dac[g] != null) { const v = s.dac[g] * V_LOGIC; return { wave: dc(v), rs: 1000, key: `dac${v}` }; }
@@ -260,7 +277,8 @@ export class AnalogBridge {
         const i = Math.abs(src.current(sim.x));
         if (i > GPIO_MAX_A && !this.warnedPins.has(g)) {
           this.warnedPins.add(g);
-          this.s.app.log(`GPIO${g} is carrying ${Math.round(i * 1000)} mA, above the ESP32's 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
+          const where = this.s.board ? `Pin ${g < 14 ? `D${g}` : `A${g - 14}`}` : `GPIO${g}`;
+          this.s.app.log(`${where} is carrying ${Math.round(i * 1000)} mA, above the ${this.s.board ? this.s.board.name : 'ESP32'}'s 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
         }
       }
       if (changed) { sim.refresh(); this.record(); if (this.chips.length) this.evaluateLogic(); }

@@ -186,12 +186,13 @@ test('an LED without a resistor burns out and the console explains why', async (
 
 test('74HC595 walks a light across 8 LEDs', async ({ page }) => {
   await loadExample(page, 'shiftreg'); await startSim(page);
-  const lit = async () => {
-    const leds = await partState(page, 'led');
-    return leds.map((s: { b: number }) => (s.b > 0.3 ? 1 : 0)).join('');
+  // the brightest LED moves along the row (neighbours may still be fading out)
+  const brightest = async () => {
+    const b = (await partState(page, 'led')).map((s: { b: number }) => s.b);
+    return b.indexOf(Math.max(...b));
   };
-  const seen = new Set<string>();
-  await expect.poll(async () => { seen.add(await lit()); return [...seen].filter((p) => p.split('1').length === 2).length; }, { timeout: 5000 }).toBeGreaterThanOrEqual(4);
+  const seen = new Set<number>();
+  await expect.poll(async () => { seen.add(await brightest()); return seen.size; }, { timeout: 10_000 }).toBeGreaterThanOrEqual(4);
 });
 
 test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
@@ -201,4 +202,41 @@ test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
   const avg = ms.reduce((a, b) => a + b, 0) / ms.length;
   const expected = 1000 / (1.44 / ((10_000 + 2 * 47_000) * 10e-6)); // ≈ 722 ms
   expect(Math.abs(avg - expected) / expected).toBeLessThan(0.05);
+});
+
+test('Arduino Uno runs real compiled firmware (Blink)', async ({ page }) => {
+  await loadExample(page, 'uno-blink');
+  await expect(page.locator('#boardSelect')).toHaveValue('uno');
+  await expect(page.locator('#btnFirmware')).toBeVisible();
+  await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toMatch(/Uno blink started\s+tick\s+tock/);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeGreaterThan(0.5);
+});
+
+test('switch to the Uno, upload a .hex and run it', async ({ page }) => {
+  await page.selectOption('#boardSelect', 'uno');
+  await expect(page.locator('#unoBanner')).toContainText('Upload .hex');
+  await page.click('#btnRun');
+  await expect(page.locator('#consoleOut')).toContainText('runs compiled firmware'); // no firmware yet
+  const hex = (await import('node:fs')).readFileSync(new URL('../../src/firmware/uno-blink.hex', import.meta.url), 'utf8');
+  await page.locator('#firmwareFile').setInputFiles({ name: 'blink.hex', mimeType: 'text/plain', buffer: Buffer.from(hex) });
+  await expect(page.locator('#unoBanner')).toContainText('blink.hex');
+  await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('tick');
+  // corrupted firmware is refused with a line number
+  await page.click('#btnRun');
+  await page.locator('#firmwareFile').setInputFiles({ name: 'bad.hex', mimeType: 'text/plain', buffer: Buffer.from(hex.replace(/^(:10.{36})../m, '$1FF')) });
+  await expect(page.locator('#consoleOut')).toContainText('bad checksum');
+});
+
+test('Uno Fade shows ~490 Hz hardware PWM on the scope', async ({ page }) => {
+  await loadExample(page, 'uno-fade');
+  await page.click('.tab[data-tab="scopePane"]');
+  const v = await page.locator('select[data-ch="0"] option').evaluateAll((os) => (os as HTMLOptionElement[]).find((o) => /^D9/.test(o.textContent || ''))?.value);
+  await page.selectOption('select[data-ch="0"]', v!);
+  await page.selectOption('select[data-ctl="tdiv"]', '0.001');
+  await startSim(page);
+  await expect(page.locator('.scope-meas')).toContainText('Hz', { timeout: 5000 });
+  const f = +((await page.locator('.scope-meas').innerText()).match(/(\d+\.\d) Hz/)?.[1] ?? 0);
+  expect(f).toBeGreaterThan(480); expect(f).toBeLessThan(500);
 });

@@ -3,6 +3,7 @@
  * snapshots out (see js/sim-host.js); every message from here is treated as untrusted on that side. */
 import { Simulator, topicMatch } from './runtime.js';
 import { AnalogBridge } from './analog/bridge.ts';
+import { UnoRunner } from './avr/uno.ts';
 
 let project = { components: [], wires: [] };
 const post = (m, transfer = []) => self.postMessage(m, transfer);
@@ -16,10 +17,13 @@ const host = {
   restartSim() { post({ type: 'restart' }); },
 };
 
-const sim = new Simulator(host);
-sim.analog = new AnalogBridge(sim);
+const esp = new Simulator(host);
+esp.analog = new AnalogBridge(esp);
+let uno = null;
+/** the active board runtime: the ESP32 sketch simulator or the Uno firmware emulator */
+let sim = esp;
 // The MQTT broker and its log live on the page; the device side only forwards what it publishes.
-sim.brokerPublish = (topic, payload, from) => {
+esp.brokerPublish = (topic, payload, from) => {
   const m = { t: sim.millis(), topic: String(topic), payload: String(payload), from };
   if (from === 'device') post({ type: 'pub', m });
   if (sim.mqtt.connected && sim.mqtt.subs.some((f) => topicMatch(f, m.topic))) sim.mqtt.queue.push(m);
@@ -53,7 +57,14 @@ self.onmessage = (e) => {
   const m = e.data || {};
   switch (m.type) {
     case 'start':
-      project = m.project; sim.invalidate();
+      project = m.project;
+      if (m.board === 'uno') {
+        sim = uno || (uno = new UnoRunner(host));
+        if (m.speed) sim.clock.speed = m.speed;
+        if (!sim.start(String(m.firmware || ''))) post({ type: 'done', ok: false });
+        break;
+      }
+      sim = esp; sim.invalidate();
       if (m.speed) sim.clock.speed = m.speed;
       sim.start(m.code).then((ok) => { snapshot(); post({ type: 'done', ok }); });
       break;
@@ -63,7 +74,7 @@ self.onmessage = (e) => {
     case 'probes': sim.analog.setProbes(Array.isArray(m.refs) ? m.refs.map((r) => (typeof r === 'string' ? r : null)) : [], +m.dtMax); break;
     case 'resume': sim.resume(); snapshot(); break;
     case 'speed': sim.setSpeed(m.speed); snapshot(); break;
-    case 'serial': sim.serialIn += String(m.text); break;
+    case 'serial': if (sim.sendSerial) sim.sendSerial(String(m.text)); else sim.serialIn += String(m.text); break;
     case 'pub': if (sim.mqtt.connected && sim.mqtt.subs.some((f) => topicMatch(f, m.topic))) sim.mqtt.queue.push({ t: sim.millis(), topic: m.topic, payload: m.payload, from: 'dashboard' }); break;
     default: break;
   }

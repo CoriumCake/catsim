@@ -1,6 +1,20 @@
 /* CatSim — example projects. ESP32 sits at (300, 80): left pins x=300, right pins x=450. */
+import unoBlinkHex from './firmware/uno-blink.hex?raw';
+import unoBlinkIno from './firmware/uno-blink.ino?raw';
+import unoFadeHex from './firmware/uno-fade.hex?raw';
+import unoFadeIno from './firmware/uno-fade.ino?raw';
+import unoButtonHex from './firmware/uno-button.hex?raw';
+import unoButtonIno from './firmware/uno-button.ino?raw';
+import unoPotHex from './firmware/uno-pot.hex?raw';
+import unoPotIno from './firmware/uno-pot.ino?raw';
   const esp = { id: 'esp', type: 'esp32', x: 300, y: 80, props: {} };
   const W = (from, to, color) => ({ from, to, ...(color ? { color } : {}) });
+  const unoBoard = { id: 'uno', type: 'uno', x: 300, y: 80, props: {} };
+  const unoLed = [
+    { id: 'r1', type: 'resistor', x: 430, y: -60, props: { ohms: 220 } },
+    { id: 'led1', type: 'led', x: 520, y: -130, props: { color: 'red' } },
+  ];
+  const unoLedWires = [W('uno:D9', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'uno:GND1')];
 
   export const EXAMPLES = [
     {
@@ -434,6 +448,31 @@ void loop() {
   delay(2);
 }
 `,
+    },
+    // ---------- Arduino Uno: real compiled firmware (see src/firmware/) ----------
+    {
+      key: 'uno-blink', name: 'Arduino Uno: Blink (real firmware)',
+      components: [unoBoard, ...unoLed],
+      wires: [...unoLedWires],
+      code: unoBlinkIno, firmware: { name: 'uno-blink.ino.hex', hex: unoBlinkHex },
+    },
+    {
+      key: 'uno-fade', name: 'Arduino Uno: Fade (hardware PWM)',
+      components: [unoBoard, ...unoLed],
+      wires: [...unoLedWires],
+      code: unoFadeIno, firmware: { name: 'uno-fade.ino.hex', hex: unoFadeHex },
+    },
+    {
+      key: 'uno-button', name: 'Arduino Uno: Button + LED',
+      components: [unoBoard, ...unoLed, { id: 'btn1', type: 'button', x: 600, y: -60, props: { color: 'blue' } }],
+      wires: [...unoLedWires, W('uno:D2', 'btn1:1'), W('btn1:2', 'uno:GND1')],
+      code: unoButtonIno, firmware: { name: 'uno-button.ino.hex', hex: unoButtonHex },
+    },
+    {
+      key: 'uno-pot', name: 'Arduino Uno: Pot → ADC → PWM',
+      components: [unoBoard, ...unoLed, { id: 'pot1', type: 'pot', x: 440, y: 300, props: { value: 0.4 } }],
+      wires: [...unoLedWires, W('uno:5V', 'pot1:VCC', '#ff4d4d'), W('pot1:GND', 'uno:GND3'), W('pot1:SIG', 'uno:A0')],
+      code: unoPotIno, firmware: { name: 'uno-pot.ino.hex', hex: unoPotHex },
     },
     {
       key: 'traffic', name: 'Traffic light',

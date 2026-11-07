@@ -21,6 +21,8 @@ export interface Project {
   code: string;
   components: Component[];
   wires: Wire[];
+  /** compiled firmware (Intel HEX) for boards that run machine code, e.g. the Arduino Uno */
+  firmware?: { name: string; hex: string };
 }
 
 /** Direction a wire leaves the pin: left, right, top, bottom. */
@@ -71,6 +73,8 @@ export interface PartDef {
   props: Record<string, unknown>;
   controls?: ControlDef[];
   fixed?: boolean;
+  /** a microcontroller board (exactly one per project) */
+  board?: boolean;
   interactive?: 'press';
   hint?: string;
   // ---- electrical model (logic-level today; Phase 1 adds an analog model reference here) ----

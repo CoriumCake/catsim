@@ -1,6 +1,6 @@
-# CatSim: ESP32 IoT Simulator
+# CatSim: ESP32 & Arduino Simulator
 
-A browser-based circuit and IoT simulator for the **ESP32 DevKit V1**. You wire parts on a canvas, write an Arduino sketch, and watch the result in the Terminal (serial monitor) and the built-in MQTT dashboard.
+A browser-based circuit and IoT simulator for the **ESP32 DevKit V1** and the **Arduino Uno**. You wire parts on a canvas, write an Arduino sketch, and watch the result in the Terminal (serial monitor) and the built-in MQTT dashboard.
 
 Live at **https://sim.catcodehq.com**.
 
@@ -25,6 +25,7 @@ Everything is bundled, so the built site works offline (no CDN scripts).
 
 ## Features
 
+- **Arduino Uno running real firmware:** pick *Arduino Uno* as the board and upload a compiled `.hex` (Arduino IDE: Sketch → Export Compiled Binary). An ATmega328P is emulated instruction by instruction at 16 MHz ([avr8js](https://github.com/wokwi/avr8js)), so timers, PWM, `millis()`, interrupts, Serial and the 10-bit ADC are the real Arduino core running on the real chip model, wired into the analog circuit.
 - **ESP32 DevKit V1 (30-pin)** with real GPIO numbering. Hover a pin to see its functions (ADC1/ADC2, touch, DAC, strapping, I2C). The on-board LED is on GPIO2.
 - **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819), an LM358 op-amp, capacitors, and logic chips with real DIP pinouts: 74HC00/02/04/08/14/32/86 gates, 74HC74 flip-flops, 74HC595 shift register, CD4017 counter and the NE555 timer.
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
@@ -65,6 +66,8 @@ src/analog/           analog engine: circuit.ts (MNA solver), devices.ts (BJT, M
                       (couples it to the sketch), waveform.ts, spice.ts (netlist export), nets.ts
 src/scope.ts          oscilloscope panel
 src/digital/chips.ts  logic chips: pinouts and behaviour
+src/avr/              Arduino Uno: uno.ts (ATmega328P emulation + circuit coupling), hex.ts (Intel HEX)
+src/firmware/         compiled firmware for the Uno examples (+ the .ino sources)
 src/sim-worker.js     runs the sketch in a Web Worker
 src/sim-host.js       page side: mirrors worker state, validates its messages
 src/examples.js       example projects

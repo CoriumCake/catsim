@@ -193,6 +193,7 @@ class View3D {
 
   pinTop(c, p) {
     if (c.type === 'esp32') return { x: c.x + (p.x === 0 ? 5 : 145), y: ESP_PIN_TOP, z: c.y + p.y };
+    if (c.type === 'uno') return { x: c.x + p.x, y: 17, z: c.y + (p.y === 0 ? 4 : 176) }; // into the header sockets
     return { x: c.x + p.x, y: PIN_TOP, z: c.y + p.y };
   }
 
@@ -242,7 +243,7 @@ class View3D {
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
       if (build) build.call(this, g, c, d);
-      if (c.type !== 'esp32') for (const p of d.pins) {
+      if (!d.board) for (const p of d.pins) {
         this.box(g, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
         this.cyl(g, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
       }
@@ -588,6 +589,40 @@ class View3D {
     for (const x of [10, 20]) { this.rod(g, [x, 1, 18], [x, 8, 18], 0.8, this.M.lead); this.leg(g, x, 18, x, 56); }
     let last = '';
     this.live(c, () => { const v = String(c.props.value); if (v === last) return; last = v; const ceramic = v === '100nF'; can.visible = !ceramic; disc.visible = ceramic; });
+  }
+
+  build_uno(g, c, d) {
+    const T = THREE;
+    const pcbTop = this.tex(1056, 720, (x) => {
+      x.scale(4, 4);
+      x.fillStyle = '#0b6d8c'; x.fillRect(0, 0, 264, 180);
+      x.fillStyle = '#e6f3f7'; x.textAlign = 'center'; x.font = '800 22px system-ui, sans-serif'; x.fillText('UNO', 90, 74);
+      x.font = '600 7px system-ui, sans-serif'; x.fillText('R3 · ATmega328P · 16 MHz', 90, 88);
+      x.font = '600 5.5px ui-monospace, monospace';
+      for (const p of d.pins) x.fillText(p.label.replace('GND', 'G'), p.x, p.y === 0 ? 16 : 166);
+      for (const [lx, ly, l] of [[118, 30, 'L'], [118, 42, 'TX'], [118, 54, 'RX'], [222, 150, 'ON']]) { x.textAlign = 'left'; x.fillText(l, lx + 8, ly + 2); }
+    });
+    const side = this.mat('#0b6d8c');
+    this.mesh(new T.BoxGeometry(264, 3, 168), [side, side, this.mat('#ffffff', { map: pcbTop }), side, side, side], g, 132, 5.5, 90);
+    for (const [x, z, w, dd] of [[8, 14, 6, 6], [256, 14, 6, 6], [8, 166, 6, 6], [256, 166, 6, 6]]) this.box(g, x - 3, z - 3, w, dd, 0, 4, this.M.header); // standoffs
+    // female headers: black sockets with a hole per pin
+    const sock = this.mat('#1d1f24', { roughness: 0.7 });
+    for (const [x0, x1, z] of [[34, 154, -2], [160, 256, -2], [70, 154, 172], [166, 238, 172]]) this.box(g, x0, z, x1 - x0, 10, 7, 17, sock);
+    for (const p of d.pins) this.box(g, p.x - 1.4, (p.y === 0 ? 3 : 177) - 1.4, 2.8, 2.8, 16.95, 17.05, this.mat('#050506'));
+    // ATmega328P (DIP-28), USB-B, barrel jack
+    this.box(g, 120, 96, 132, 34, 7, 14, this.mat('#1d1f24', { roughness: 0.5 }));
+    const chipTop = this.tex(528, 136, (x) => { x.fillStyle = '#1d1f24'; x.fillRect(0, 0, 528, 136); x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 38px system-ui, sans-serif'; x.fillText('ATmega328P', 264, 82); });
+    const cl = this.mesh(new T.PlaneGeometry(120, 30), this.mat('#ffffff', { map: chipTop }), g, 186, 14.05, 113, false); cl.rotation.x = -Math.PI / 2;
+    for (let i = 0; i < 14; i++) for (const z of [94, 130]) this.box(g, 124 + i * 9, z - 1, 3, 3, 4, 10, this.M.lead);
+    this.box(g, -14, 32, 46, 36, 7, 28, this.M.metal);
+    this.box(g, -10, 120, 40, 30, 7, 26, this.mat('#1d1f24'));
+    // on-board LEDs
+    const leds = [[118, 30, '#ffb020', 'L'], [118, 42, '#ffb020', 'tx'], [118, 54, '#ffb020', 'rx'], [222, 150, '#22c55e', 'on']].map(([x, z, col, k]) => {
+      const m = this.mat('#2a3238', { emissive: col, emissiveIntensity: 0 });
+      this.box(g, x - 4, z - 2, 8, 4, 7, 8.5, m);
+      return { k, m, glow: this.glow(g, x, 11, z, 18, col) };
+    });
+    this.live(c, (s) => { for (const l of leds) { const on = l.k === 'L' ? s.L : l.k === 'tx' ? s.tx : l.k === 'on' ? s.on : 0; l.m.emissiveIntensity = on ? 1.8 : 0; l.glow.material.opacity = on ? 0.7 : 0; } });
   }
 
   build_lcd(g, c) {

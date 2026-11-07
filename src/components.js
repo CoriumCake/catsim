@@ -57,7 +57,7 @@ const glow = (cx, cy, r, color, o) =>
 const DEFS = {};
 
 DEFS.esp32 = {
-  type: 'esp32', name: 'ESP32 DevKit V1', category: 'Boards', w: ESP_W, h: 274, fixed: true,
+  type: 'esp32', name: 'ESP32 DevKit V1', category: 'Boards', w: ESP_W, h: 274, fixed: true, board: true,
   pins: espPins, props: {},
   internal: () => [['GND.L', 'GND.R']],
   state(c, sim) {
@@ -303,6 +303,59 @@ DEFS.servo = {
       <circle cx="44" cy="28" r="12" fill="#e9ecf1" stroke="#9aa3b0"/>
       <g transform="rotate(${a.toFixed(1)} 44 28)"><path d="M41 28 L44 2 L47 28 Z" fill="#fff" stroke="#9aa3b0"/><circle cx="44" cy="28" r="5" fill="#fff" stroke="#9aa3b0"/></g>
       <text x="74" y="31" class="cs-tiny cs-light">${Math.round(s.angle)}°</text>`;
+  },
+};
+
+// ---------- Arduino Uno R3 (ATmega328P) ----------
+const UNO_PWM = [3, 5, 6, 9, 10, 11];
+function unoPin(id, x, y, dir) {
+  const m = /^D(\d+)$/.exec(id) || /^A(\d)$/.exec(id);
+  let gpio = null, kind = 'gpio', title;
+  if (/^GND/.test(id)) { kind = 'gnd'; title = 'GND'; }
+  else if (id === '5V' || id === '3V3' || id === 'VIN') { kind = 'vcc'; title = { '5V': '5 V supply (USB)', '3V3': '3.3 V supply (50 mA max)', VIN: 'VIN (barrel jack input)' }[id]; }
+  else if (id === 'SDA' || id === 'SCL') { kind = 'alias'; title = `${id}: same pin as ${id === 'SDA' ? 'A4' : 'A5'} (I2C)`; }
+  else if (!m) { kind = 'nc'; title = { AREF: 'AREF: ADC reference', IOREF: 'IOREF (5 V)', RESET: 'RESET (active low)' }[id]; }
+  else {
+    gpio = id[0] === 'A' ? 14 + +m[1] : +m[1];
+    const f = [`digital pin ${gpio}`];
+    if (id[0] === 'A') f.unshift(`analog input ${m[1]} (10-bit ADC)`);
+    if (UNO_PWM.includes(gpio)) f.push(`PWM (Timer${gpio === 5 || gpio === 6 ? 0 : gpio === 9 || gpio === 10 ? 1 : 2})`);
+    if (gpio === 0 || gpio === 1) f.push(gpio ? 'TX (USB serial)' : 'RX (USB serial)');
+    if (gpio === 2 || gpio === 3) f.push(`interrupt INT${gpio - 2}`);
+    if (gpio === 13) f.push('on-board LED "L"');
+    if (gpio >= 10 && gpio <= 13) f.push(['SS', 'MOSI', 'MISO', 'SCK'][gpio - 10]);
+    title = `${id}: ${f.join(', ')}`;
+  }
+  return { id, label: id.replace(/^GND\d/, 'GND'), x, y, dir, gpio, kind, title };
+}
+const UNO_TOP = ['SCL', 'SDA', 'AREF', 'GND1', 'D13', 'D12', 'D11', 'D10', 'D9', 'D8'];
+const UNO_TOP2 = ['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'];
+const UNO_BOT = ['IOREF', 'RESET', '3V3', '5V', 'GND2', 'GND3', 'VIN'];
+const UNO_BOT2 = ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+const unoPins = [
+  ...UNO_TOP.map((id, i) => unoPin(id, 40 + i * 12, 0, 't')), ...UNO_TOP2.map((id, i) => unoPin(id, 166 + i * 12, 0, 't')),
+  ...UNO_BOT.map((id, i) => unoPin(id, 76 + i * 12, 180, 'b')), ...UNO_BOT2.map((id, i) => unoPin(id, 172 + i * 12, 180, 'b')),
+];
+DEFS.uno = {
+  type: 'uno', name: 'Arduino Uno R3', category: 'Boards', w: 264, h: 180, fixed: true, board: true,
+  hint: 'Runs real compiled firmware on an emulated ATmega328P (16 MHz). Upload a .hex file (Arduino IDE: Sketch → Export Compiled Binary).',
+  pins: unoPins, props: {},
+  internal: () => [['GND1', 'GND2'], ['GND2', 'GND3'], ['A4', 'SDA'], ['A5', 'SCL']],
+  state: (c, sim) => ({ L: sim.running && sim.out && sim.out[13] ? 1 : 0, on: !!sim.running, tx: sim.running && sim.txAt && performance.now() - sim.txAt < 80 }),
+  render(c, s) {
+    let o = `<rect x="0" y="6" width="264" height="168" rx="6" fill="#0b6d8c" stroke="#064457" stroke-width="1.5"/>`;
+    o += `<rect x="-14" y="32" width="46" height="36" rx="2" fill="#c9ced6" stroke="#8b929c"/><rect x="-10" y="40" width="20" height="20" fill="#9ea5af"/>`;
+    o += `<rect x="-10" y="120" width="40" height="30" rx="3" fill="#1d1f24"/><circle cx="10" cy="135" r="6" fill="#3a3d44"/>`;
+    o += `<rect x="34" y="-6" width="120" height="12" fill="#1d1f24"/><rect x="160" y="-6" width="96" height="12" fill="#1d1f24"/>`;
+    o += `<rect x="70" y="174" width="84" height="12" fill="#1d1f24"/><rect x="166" y="174" width="72" height="12" fill="#1d1f24"/>`;
+    o += `<rect x="120" y="96" width="132" height="34" rx="2" fill="#1d1f24" stroke="#0a0b0d"/><path d="M120 106 a6 6 0 0 1 0 14" fill="#33363d"/>`;
+    o += `<text x="186" y="117" class="cs-tiny cs-light">ATmega328P</text>`;
+    o += `<text x="90" y="74" class="cs-uno-title">UNO</text><text x="90" y="88" class="cs-tiny cs-light">R3 · 16 MHz</text>`;
+    const led = (x, y, col, on, lbl) => `${glow(x, y, 7, col, on ? 0.75 : 0)}<rect x="${x - 4}" y="${y - 2}" width="8" height="4" rx="1" fill="${on ? col : '#2a3238'}"/><text x="${x + 10}" y="${y + 2}" class="cs-tiny cs-light" text-anchor="start">${lbl}</text>`;
+    o += led(118, 30, '#ffb020', s.L, 'L') + led(118, 42, '#ffb020', s.tx, 'TX') + led(118, 54, '#ffb020', false, 'RX') + led(222, 150, '#22c55e', s.on, 'ON');
+    const short = { IOREF: 'IO', RESET: 'RS', AREF: 'AR', GND: 'G', '3V3': '3V' };
+    for (const p of unoPins) o += `<text x="${p.x}" y="${p.y === 0 ? 14 : 168}" class="cs-dip-pin" fill="#e6f3f7">${esc(short[p.label] || p.label)}</text>`;
+    return o;
   },
 };
 

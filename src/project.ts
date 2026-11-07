@@ -38,12 +38,12 @@ export function normalizeProject(p: unknown, defs: Record<string, PartDef>): Pro
     if (!c || typeof c !== 'object') continue;
     const { id, type } = c as Record<string, unknown>;
     if (typeof type !== 'string' || !has(defs, type) || typeof id !== 'string' || !ID.test(id) || seen.has(id)) continue;
-    if (type === 'esp32' && comps.some((x) => x.type === 'esp32')) continue;
+    if (defs[type].board && comps.some((x) => defs[x.type].board)) continue; // one board per project
     seen.add(id);
     const cc = c as Record<string, unknown>;
     comps.push({ id, type, x: Math.round(num(cc.x)), y: Math.round(num(cc.y)), props: cleanProps(defs[type], cc.props) });
   }
-  if (!comps.some((c) => c.type === 'esp32')) comps.unshift({ id: seen.has('esp') ? 'esp32' : 'esp', type: 'esp32', x: 300, y: 80, props: {} });
+  if (!comps.some((c) => defs[c.type].board)) comps.unshift({ id: seen.has('esp') ? 'esp32' : 'esp', type: 'esp32', x: 300, y: 80, props: {} });
 
   const byId = new Map(comps.map((c) => [c.id, c]));
   const validPin = (ref: unknown): ref is string => {
@@ -66,12 +66,18 @@ export function normalizeProject(p: unknown, defs: Record<string, PartDef>): Pro
     if (typeof ww.color === 'string' && COLOR.test(ww.color)) wire.color = ww.color;
     wires.push(wire);
   }
-  return {
+  const out: Project = {
     name: String(typeof src.name === 'string' && src.name ? src.name : 'Untitled project').slice(0, 120),
     code: typeof src.code === 'string' ? src.code.slice(0, MAX_CODE) : '',
     components: comps,
     wires,
   };
+  // compiled firmware for boards that run real machine code (Arduino Uno): Intel HEX text only
+  const fw = src.firmware as Record<string, unknown> | undefined;
+  if (fw && typeof fw === 'object' && typeof fw.hex === 'string' && fw.hex.length <= 200_000 && /^[:0-9A-Fa-f\r\n]*$/.test(fw.hex)) {
+    out.firmware = { name: String(typeof fw.name === 'string' ? fw.name : 'firmware.hex').slice(0, 120), hex: fw.hex };
+  }
+  return out;
 }
 
 // ---------- share links ----------
