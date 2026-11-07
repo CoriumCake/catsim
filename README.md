@@ -18,7 +18,7 @@ npm run dev          # http://localhost:5173 with hot reload
 | `npm run dev` | Vite dev server |
 | `npm run build` | Typecheck, then build the static site into `dist/` |
 | `npm run typecheck` | TypeScript check only |
-| `npm test` | Unit tests (Vitest) |
+| `npm test` | Unit tests (Vitest). The analog engine is also compared with ngspice when it is installed (`pacman -S ngspice` / `apt install ngspice`). |
 | `npm run test:e2e` | End-to-end tests (Playwright) against `wrangler dev`, i.e. the real Cloudflare server with the CSP headers. Run `npm run build` first. Set `CHROMIUM_PATH` to use a system Chromium. |
 
 Everything is bundled, so the built site works offline (no CDN scripts).
@@ -30,6 +30,8 @@ Everything is bundled, so the built site works offline (no CDN scripts).
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
+- **Analog circuit engine:** voltages and currents are solved like SPICE (modified nodal analysis, Newton–Raphson, trapezoidal integration with error control), validated against ngspice in CI. LEDs are real diodes with colour-specific forward voltages, and their brightness follows the actual current, so a resistor value or a blue LED on 3.3 V makes a visible difference. GPIOs have realistic output resistance, pull-ups and input thresholds; PWM, `tone()` and servo signals are real waveforms; `dacWrite` outputs a real voltage.
+- **Oscilloscope:** the *Scope* tab probes up to four nets, with timebase, volts/div, edge trigger and frequency/peak readouts.
 - **Simulation clock:** pause and resume, and run at 0.1× to 10× speed. `delay(1000)` advances simulated time by exactly 1000 ms; under heavy load the simulation runs slower than real time instead of skipping.
 - **ESP32 pitfall checks:** warnings for flash pins 6–11, output on input-only pins 34–39, missing pull-ups, ADC2 used while WiFi is on, floating inputs, and unpowered sensors.
 - **3D view:** switch the stage to *3D* to orbit a full 360° (including under the boards) around a live 3D model of the circuit (LEDs glow, the servo turns, the LCD shows text, and you can press buttons). Wiring and moving parts still happen in 2D. Three.js loads only when you first open it.
@@ -55,6 +57,9 @@ src/view3d.js         3D view (Three.js, code-split)
 src/transpiler.js     sketch → JS
 src/runtime.js        simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
 src/clock.ts          virtual simulation clock
+src/analog/           analog engine: circuit.ts (MNA solver), models.ts (part models), bridge.ts
+                      (couples it to the sketch), waveform.ts, spice.ts (netlist export), nets.ts
+src/scope.ts          oscilloscope panel
 src/sim-worker.js     runs the sketch in a Web Worker
 src/sim-host.js       page side: mirrors worker state, validates its messages
 src/examples.js       example projects

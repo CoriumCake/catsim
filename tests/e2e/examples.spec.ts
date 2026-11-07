@@ -20,9 +20,9 @@ test('button press lights the LED and release turns it off', async ({ page }) =>
   await loadExample(page, 'button'); await startSim(page);
   const id = await page.evaluate(() => window.CatSim.App.project.components.find((c: { type: string }) => c.type === 'button').id);
   await page.evaluate((i) => window.CatSim.App.sim.setPressed(i, true), id);
-  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBe(1);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBeGreaterThan(0.3); // real LED current, not just on/off
   await page.evaluate((i) => window.CatSim.App.sim.setPressed(i, false), id);
-  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBe(0);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBeLessThan(0.05);
 });
 
 test('potentiometer dims the LED with PWM', async ({ page }) => {
@@ -44,7 +44,7 @@ test('MQTT: dashboard publish switches the LED', async ({ page }) => {
   await page.fill('#mqttTopic', 'catsim/esp32/led');
   await page.fill('#mqttPayload', 'ON');
   await page.locator('#mqttForm').evaluate((f: HTMLFormElement) => f.requestSubmit());
-  await expect.poll(async () => (await partState(page, 'led')).some((s: { b: number }) => s.b === 1)).toBe(true);
+  await expect.poll(async () => (await partState(page, 'led')).some((s: { b: number }) => s.b > 0.3)).toBe(true);
 });
 
 test('alarm: PIR motion makes the buzzer sound', async ({ page }) => {
@@ -126,9 +126,9 @@ test('3D view renders and a 3D button press works', async ({ page }) => {
     return A.view3d.screenPoint(c.x + 22, 18, c.y + 22);
   });
   await page.mouse.move(pt.x, pt.y); await page.mouse.down();
-  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBe(1);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBeGreaterThan(0.3); // real LED current, not just on/off
   await page.mouse.up();
-  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBe(0);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBeLessThan(0.05);
   expect(await page.locator('canvas.view3d').count()).toBe(1);
 });
 
@@ -141,4 +141,21 @@ test('Ctrl+Enter in the editor starts the simulation (once)', async ({ page }) =
   await page.keyboard.press('Control+Enter');
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => window.CatSim.App.sim.running)).toBe(false);
+});
+
+test('scope shows the PWM square wave and the LED forward voltage', async ({ page }) => {
+  await loadExample(page, 'pot');
+  await page.click('.tab[data-tab="scopePane"]');
+  const pick = async (ch: number, re: RegExp) => {
+    const v = await page.locator(`select[data-ch="${ch}"] option`).evaluateAll((os, src) => (os as HTMLOptionElement[]).find((o) => new RegExp(src).test(o.textContent || ''))?.value, re.source);
+    await page.selectOption(`select[data-ch="${ch}"]`, v!);
+  };
+  await pick(0, /^D25/);
+  await pick(1, /led1\.A/);
+  await startSim(page);
+  await expect(page.locator('.scope-meas')).toContainText('kHz', { timeout: 5000 });
+  const meas = await page.locator('.scope-meas').innerText();
+  expect(meas).toMatch(/CH1 max 3\.\d+ V · min 0\.00 V · 5\.00 kHz/);
+  const vf = +(meas.match(/CH2 max (\d\.\d+) V/)?.[1] ?? 0);
+  expect(vf).toBeGreaterThan(1.8); expect(vf).toBeLessThan(2.05); // red LED forward voltage
 });

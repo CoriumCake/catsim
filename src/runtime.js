@@ -95,11 +95,12 @@ class Simulator {
   constructor(app) {
     this.app = app; this.running = false; this.runId = 0; this.ui = {};
     this.clock = new SimClock(); this.sleeps = new Set(); // pending delay() promises, rejected on stop
+    this.analog = null; // AnalogBridge (set in the worker); null = logic-level simulation only
     this.resetHw();
   }
 
   resetHw() {
-    this.mode = {}; this.out = {}; this.pwm = {}; this.servo = {}; this.tone = {};
+    this.mode = {}; this.out = {}; this.pwm = {}; this.servo = {}; this.tone = {}; this.dac = {};
     this.interrupts = []; this.serialIn = ''; this.serialOut = ''; this.lcd = null;
     this.wifi = { status: 0, ssid: '', connectAt: 0, mode: 'off' };
     this.mqtt = { connected: false, clientId: '', host: '', subs: [], queue: [] };
@@ -172,8 +173,16 @@ class Simulator {
   pinGpios(c, pinId) { const n = this.netOf(c.id + ':' + pinId); return n ? n.gpios : []; }
   powered(c, vcc = 'VCC', gnd = 'GND') { return this.pinLevel(c, vcc) === 1 && this.pinLevel(c, gnd) === 0; }
 
+  /** Pin state changed (or is about to be read): bring the analog solution up to date. */
+  touch() { if (this.analog && this.running) this.analog.sync(); }
+
   readPin(g) {
     if (this.mode[g] === OUTPUT) return this.out[g] ? 1 : 0;
+    if (this.analog && this.running) {
+      this.analog.sync();
+      const a = this.analog.readDigital(g);
+      if (a != null) return a;
+    }
     let v = this.level(this.netOfGpio(g), g);
     if (v == null) v = (this.mode[g] === INPUT_PULLUP && g < 34) ? 1 : 0;
     return v >= 0.5 ? 1 : 0;
@@ -243,6 +252,7 @@ class Simulator {
       return false;
     }
     this.clock.reset(); this.running = true; this.lastYield = performance.now();
+    if (this.analog) this.analog.reset();
     this.app.onSimState(true);
     try {
       const mod = await factory(api);
@@ -291,6 +301,7 @@ class Simulator {
     };
     const setPwm = (pin, frac) => {
       sim.mode[pin] = OUTPUT; sim.pwm[pin] = Math.min(1, Math.max(0, frac));
+      sim.touch();
     };
 
     const Serial = {
@@ -416,8 +427,8 @@ class Simulator {
     }
 
     class Servo {
-      attach(pin) { pin = +pin; gpioCheck(pin, 'Servo'); this.pin = pin; sim.mode[pin] = OUTPUT; if (sim.servo[pin] == null) sim.servo[pin] = 90; return 1; }
-      write(a) { if (this.pin == null) return; a = +a; if (a > 200) return this.writeMicroseconds(a); sim.servo[this.pin] = Math.min(180, Math.max(0, a)); }
+      attach(pin) { pin = +pin; gpioCheck(pin, 'Servo'); this.pin = pin; sim.mode[pin] = OUTPUT; if (sim.servo[pin] == null) sim.servo[pin] = 90; sim.touch(); return 1; }
+      write(a) { if (this.pin == null) return; a = +a; if (a > 200) return this.writeMicroseconds(a); sim.servo[this.pin] = Math.min(180, Math.max(0, a)); sim.touch(); }
       writeMicroseconds(us) { this.write(((+us - 544) / (2400 - 544)) * 180); }
       read() { return Math.round(sim.servo[this.pin] ?? 90); }
       attached() { return this.pin != null; } detach() { this.pin = null; } setPeriodHertz() {}
@@ -494,6 +505,7 @@ class Simulator {
         if (pin >= 34 && (m === INPUT_PULLUP || m === INPUT_PULLDOWN)) sim.warnOnce('pu' + pin, `GPIO${pin} has no internal pull-up/pull-down on ESP32 — add an external resistor.`);
         sim.mode[pin] = pin >= 34 && m === OUTPUT ? INPUT : m;
         if (m === OUTPUT && sim.out[pin] === undefined) sim.out[pin] = 0;
+        sim.touch();
         sim.interrupts.forEach((it) => { if (it.pin === pin) it.last = sim.readPin(pin); });
       },
       digitalWrite(pin, v) {
@@ -503,7 +515,8 @@ class Simulator {
           sim.warnOnce('dw' + pin, `digitalWrite(${pin}) on a pin that is not an OUTPUT — call pinMode(${pin}, OUTPUT) first.`);
           return;
         }
-        delete sim.pwm[pin]; sim.out[pin] = v && v !== '0' ? 1 : 0;
+        delete sim.pwm[pin]; delete sim.dac[pin]; sim.out[pin] = v && v !== '0' ? 1 : 0;
+        sim.touch();
       },
       digitalRead(pin) {
         pin = +pin;
@@ -518,7 +531,13 @@ class Simulator {
           sim.warnOnce('adc2' + pin, `GPIO${pin} is on ADC2, which is unavailable while WiFi is on. Use an ADC1 pin (32–39).`, 'error');
           return 0;
         }
-        const max = (1 << sim.adcBits) - 1; const n = sim.netOfGpio(pin);
+        const max = (1 << sim.adcBits) - 1;
+        if (sim.analog && sim.running) {
+          sim.analog.sync();
+          const v = sim.analog.gpioVoltage(pin);
+          if (v != null) return Math.round(Math.min(1, Math.max(0, v / 3.3)) * max);
+        }
+        const n = sim.netOfGpio(pin);
         if (n && n.analog.length) return Math.round(Math.min(1, Math.max(0, n.analog[0].fn(n.analog[0].c, sim))) * max);
         const lv = sim.level(n, pin);
         return lv == null ? Math.round(Math.random() * 40) : Math.round(lv * max);
@@ -528,7 +547,7 @@ class Simulator {
       analogSetAttenuation() {}, analogSetPinAttenuation() {}, analogSetWidth(b) { sim.adcBits = b | 0; },
       analogWrite(pin, v) { pin = +pin; if (!gpioCheck(pin, 'analogWrite')) return; setPwm(pin, v / ((1 << sim.pwmBits) - 1)); },
       analogWriteResolution(b) { sim.pwmBits = b | 0; }, analogWriteFrequency() {},
-      dacWrite(pin, v) { if (pin !== 25 && pin !== 26) { sim.warnOnce('dac' + pin, `dacWrite: GPIO${pin} is not a DAC pin (only 25 and 26).`, 'error'); return; } setPwm(+pin, v / 255); },
+      dacWrite(pin, v) { if (pin !== 25 && pin !== 26) { sim.warnOnce('dac' + pin, `dacWrite: GPIO${pin} is not a DAC pin (only 25 and 26).`, 'error'); return; } sim.dac[+pin] = Math.min(255, Math.max(0, +v)) / 255; setPwm(+pin, v / 255); },
       touchRead(pin) { return 60 + Math.round(Math.random() * 8); },
       hallRead() { return Math.round(Math.random() * 10 - 5); },
       temperatureRead() { return 46 + Math.random(); },
@@ -541,14 +560,16 @@ class Simulator {
       ledcWriteTone(x, freq) {
         const pins = sim.ledcPin[x] && sim.ledcPin[x].direct ? [x] : (sim.ledcCh[x] ? sim.ledcCh[x].pins : [x]);
         pins.forEach((p) => { sim.mode[p] = OUTPUT; if (freq > 0) sim.tone[p] = freq; else delete sim.tone[p]; });
+        sim.touch();
         return freq;
       },
-      ledcDetach(pin) { delete sim.ledcPin[pin]; delete sim.pwm[pin]; return true; }, ledcDetachPin(pin) { api.ledcDetach(pin); },
+      ledcDetach(pin) { delete sim.ledcPin[pin]; delete sim.pwm[pin]; sim.touch(); return true; }, ledcDetachPin(pin) { api.ledcDetach(pin); },
       tone(pin, freq, dur) {
         pin = +pin; sim.mode[pin] = OUTPUT; sim.tone[pin] = +freq;
-        if (dur) sim.clock.schedule(+dur, () => { if (sim.tone[pin] === +freq) delete sim.tone[pin]; });
+        sim.touch();
+        if (dur) sim.clock.schedule(+dur, () => { if (sim.tone[pin] === +freq) { delete sim.tone[pin]; sim.touch(); } });
       },
-      noTone(pin) { delete sim.tone[+pin]; },
+      noTone(pin) { delete sim.tone[+pin]; sim.touch(); },
 
       attachInterrupt(pin, fn, mode) { pin = +pin; sim.interrupts = sim.interrupts.filter((i) => i.pin !== pin); sim.interrupts.push({ pin, fn, mode, last: sim.readPin(pin) }); },
       detachInterrupt(pin) { sim.interrupts = sim.interrupts.filter((i) => i.pin !== +pin); },

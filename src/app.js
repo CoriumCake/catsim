@@ -7,6 +7,8 @@ import { Canvas, WIRE_COLORS } from './canvas.js';
 import { View3D } from './view3d.js';
 import { createEditor } from './editor.ts';
 import { normalizeProject, encodeShare, decodeShare } from './project.ts';
+import { Scope } from './scope.ts';
+import { wireNets } from './analog/nets.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
@@ -37,6 +39,10 @@ const App = {
     this.sim = new SimHost(this); // sketch runs in a Web Worker
     this.canvas = new Canvas(this, $('#canvas'));
     this.view3d = new View3D(this, $('#stage'));
+    this.scope = new Scope($('#scopePane'), {
+      setProbes: (refs, dtMax) => this.sim.setProbes(refs, dtMax),
+      simTime: () => this.sim.millis() / 1000,
+    });
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
     this.buildPalette(); this.bindUi(); this.bindSplitters();
     this.load(await this.initialProject());
@@ -76,6 +82,7 @@ const App = {
     requestAnimationFrame(() => this.canvas.fit());
     this.view3d.dirty = true; this.view3d.camFitted = false;
     if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
+    this.refreshScopeNets(); this.scope.clear();
     this.renderIot(); this.save();
   },
 
@@ -85,7 +92,7 @@ const App = {
   },
 
   changed({ structure = true } = {}) {
-    if (structure) { this.sim.invalidate(); this.canvas.renderAll(); }
+    if (structure) { this.sim.invalidate(); this.canvas.renderAll(); this.refreshScopeNets(); }
     this.sim.syncProject();
     this.view3d.dirty = true;
     this.save();
@@ -169,11 +176,30 @@ const App = {
       }
       this.flushSerial(); this.updateClock();
       if (this._iotDirty) this.renderIot();
+      if ($('#scopePane').classList.contains('active')) this.scope.render();
     }
     requestAnimationFrame(() => this.frame());
   },
 
+  onScopeSamples(t, v) { this.scope.addSamples(t, v); },
+  /** Net choices for the scope, labelled by the pins on each net (ESP32 pins first). */
+  refreshScopeNets() {
+    const { members } = wireNets(this.project, DEFS);
+    const espId = (this.project.components.find((c) => c.type === 'esp32') || {}).id;
+    const isEsp = (k) => k.startsWith(espId + ':');
+    const opts = [];
+    for (const keys0 of members.values()) {
+      if (keys0.length < 2) continue; // only nets with something wired
+      const keys = [...keys0].sort((a, b) => Number(isEsp(b)) - Number(isEsp(a)));
+      const label = keys.map((k) => { const [id, pin] = k.split(':'); return isEsp(k) ? pin : `${id}.${pin}`; }).join(' · ');
+      opts.push({ value: keys[0], label: label.length > 42 ? label.slice(0, 41) + '…' : label, wired: 1 });
+    }
+    opts.sort((a, b) => (b.wired - a.wired) || a.label.localeCompare(b.label, undefined, { numeric: true }));
+    this.scope.setNets(opts);
+  },
   updateClock() {
+    const rtf = this.sim.running && this.sim.analog ? this.sim.analog.rtf / (this.sim.speed || 1) : 1;
+    const load = $('#simLoad'); load.hidden = !(rtf < 0.9); if (!load.hidden) load.textContent = `${Math.max(1, Math.round(rtf * 100))}% speed`;
     const ms = Math.floor(this.sim.millis());
     const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60;
     $('#simTime').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
@@ -267,6 +293,7 @@ const App = {
     if (id === 'consolePane') { this._unseen = 0; $('#consoleBadge').hidden = true; }
     if (id === 'editorPane') this.editor.refresh();
     if (id === 'iotPane') this.renderIot();
+    if (id === 'scopePane') this.scope.render(true);
   },
 
   buildPalette() {

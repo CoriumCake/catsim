@@ -69,6 +69,7 @@
         <div class="tabs" data-group="bottom">
           <button class="tab active" data-tab="serialPane">Terminal</button>
           <button class="tab" data-tab="iotPane">IoT · MQTT <span id="iotDot" class="mini-dot"></span></button>
+          <button class="tab" data-tab="scopePane">Scope</button>
           <button class="tab" data-tab="consolePane">Console <span id="consoleBadge" class="badge" hidden>0</span></button>
           <div class="tabs-actions">
             <label class="check"><input type="checkbox" id="autoScroll" checked> Autoscroll</label>
@@ -98,6 +99,7 @@
           </form>
           <div id="iotLog" class="iot-log"></div>
         </div>
+        <div id="scopePane" class="tabpane scope"></div>
         <div id="consolePane" class="tabpane console"><div id="consoleOut"></div></div>
       </div>
     </section>
@@ -123,7 +125,7 @@
         <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
           <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
         </select>
-        <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span></div>
+        <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span><span id="simLoad" class="sim-load" hidden title="The circuit is heavy to simulate, so simulated time runs slower than real time"></span></div>
         <span class="bar-sep"></span>
         <button class="btn btn-icon" id="addPart" title="Add a part">＋ Part</button>
         <div class="view-seg" role="group" aria-label="View"><button id="view2d" class="on" title="2D diagram (edit)">2D</button><button id="view3d" title="3D view">3D</button></div>
