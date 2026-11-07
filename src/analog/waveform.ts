@@ -38,15 +38,21 @@ export function nextBreak(w: Waveform, t: number): number {
   if (w.kind !== 'pulse') return w.kind === 'sin' && t < w.td ? w.td : Infinity;
   const eps = 1e-15 + Math.abs(t) * 1e-12;
   if (t + eps < w.td) return w.td;
-  const corners = [w.tr, w.tr + w.pw, w.tr + w.pw + w.tf];
+  // corners within one period, relative to its start: 0, tr, tr+pw, tr+pw+tf (no allocation: hot path)
+  const c1 = w.tr, c2 = w.tr + w.pw, c3 = c2 + w.tf;
   if (!(w.per > 0)) {
-    for (const c of corners) if (w.td + c > t + eps) return w.td + c;
+    if (w.td + c1 > t + eps) return w.td + c1;
+    if (w.td + c2 > t + eps) return w.td + c2;
+    if (w.td + c3 > t + eps) return w.td + c3;
     return Infinity;
   }
   const k = Math.floor((t - w.td) / w.per);
   for (let m = k; m <= k + 1; m++) {
     const base = w.td + m * w.per;
-    for (const c of [0, ...corners]) if (base + c > t + eps) return base + c;
+    if (base > t + eps) return base;
+    if (base + c1 > t + eps) return base + c1;
+    if (base + c2 > t + eps) return base + c2;
+    if (base + c3 > t + eps) return base + c3;
   }
   return Infinity;
 }

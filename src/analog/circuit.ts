@@ -230,12 +230,15 @@ export class Simulation {
   dt = 1e-6;
   private readonly s: DenseSolver;
   private readonly xNew: Float64Array;
+  private readonly xSave: Float64Array;
   private readonly o: Required<TranOptions>;
   private readonly reactive: Array<Capacitor | Inductor>;
   private readonly sources: Array<VSource | ISource>;
   private readonly nonlinear: boolean;
   /** next transient step uses backward Euler from a small dt (after a discontinuity) */
   private broke = true;
+  /** time of the last source corner we landed on */
+  private lastBreak = 0;
   stats = { steps: 0, rejected: 0, newton: 0, cacheHits: 0 };
   /**
    * Resistive circuits only: solutions keyed by the source values. The solution is then a pure function
@@ -252,6 +255,7 @@ export class Simulation {
     this.s = new DenseSolver(this.size);
     this.x = new Float64Array(this.size);
     this.xNew = new Float64Array(this.size);
+    this.xSave = new Float64Array(this.size);
     this.o = { reltol: 1e-3, vntol: 1e-6, abstol: 1e-12, trtol: 7, dtMax: 1e-3, dtMin: 1e-14, maxIterDc: 150, maxIterTran: 40, ...opts };
     this.reactive = c.elements.filter((e): e is Capacitor | Inductor => e.isReactive());
     this.sources = c.elements.filter((e): e is VSource | ISource => e instanceof VSource || e instanceof ISource);
@@ -372,15 +376,19 @@ export class Simulation {
         if (this.sourcesConstant(this.t, target)) {
           const dt = target - this.t;
           this.t = target;
+          if (Math.abs(target - nb) <= eps) this.lastBreak = nb;
           onStep?.(this.t, this.x, dt); n++;
           continue;
         }
       }
       let dt = this.broke ? Math.min(this.dt, 1e-6, (target - this.t)) : this.dt;
       dt = Math.min(dt, this.stepLimit(), target - this.t);
+      // Nonlinear resistive circuits: resolve the inside of a source ramp (a PWM edge) in 8 steps, since
+      // the response is not a straight line. After the first period these come from the solution cache.
+      if (!this.reactive.length && this.nonlinear && Number.isFinite(nb)) dt = Math.min(dt, Math.max((nb - this.lastBreak) / 8, this.o.dtMin));
       if (dt < this.o.dtMin) dt = Math.min(this.o.dtMin, target - this.t);
       const method: Method = this.broke ? 'be' : 'trap';
-      const save = Float64Array.from(this.x);
+      const save = this.xSave; save.set(this.x);
       const tNew = this.t + dt;
       let ok: boolean;
       const key = this.reactive.length ? '' : this.sourceKey(tNew);
@@ -410,6 +418,7 @@ export class Simulation {
       const grow = f > 0 ? Math.min(2, Math.max(0.3, 0.9 * Math.cbrt(1 / f))) : 2;
       this.dt = Math.min(dt * grow, this.stepLimit());
       const landedOnBreak = Math.abs(this.t - nb) <= eps;
+      if (landedOnBreak) this.lastBreak = nb;
       // Restart integration (backward Euler) at source corners; resistive circuits have no state to reset.
       this.broke = landedOnBreak && this.reactive.length > 0;
       if (landedOnBreak) this.dt = Math.max(this.dt, 1e-9);
@@ -427,8 +436,9 @@ export class Simulation {
 
   private sourceKey(t: number): string {
     let k = '';
-    // rounded to 1 µV: values at PWM corners differ by float rounding from period to period
-    for (const s of this.sources) k += Math.round(valueAt(s.wave, t) * 1e6) + ',';
+    // Only time-varying sources: DC values cannot change without refresh(), which clears the cache.
+    // Rounded to 1 µV: values at PWM corners differ by float rounding from period to period.
+    for (const s of this.sources) if (s.wave.kind !== 'dc') k += Math.round(valueAt(s.wave, t) * 1e6) + ',';
     return k;
   }
 
