@@ -2,15 +2,26 @@
 
 A browser-based circuit and IoT simulator for the **ESP32 DevKit V1**. You wire parts on a canvas, write an Arduino sketch, and watch the result in the Terminal (serial monitor) and the built-in MQTT dashboard.
 
-## Run it
+Live at **https://sim.catcodehq.com**.
 
-There's no build step, but the folder must be served over http(s). The simulator runs sketches in a Web Worker, which browsers don't allow from `file://`:
+## Develop
+
+Requires Node.js 22 or newer.
 
 ```sh
-python3 -m http.server 8000   # then open http://localhost:8000
+npm install
+npm run dev          # http://localhost:5173 with hot reload
 ```
 
-An internet connection is needed for the CodeMirror editor (loaded from cdnjs). Without it, the app falls back to a plain textarea.
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server |
+| `npm run build` | Typecheck, then build the static site into `dist/` |
+| `npm run typecheck` | TypeScript check only |
+| `npm test` | Unit tests (Vitest) |
+| `npm run test:e2e` | End-to-end tests (Playwright) against `wrangler dev`, i.e. the real Cloudflare server with the CSP headers. Run `npm run build` first. Set `CHROMIUM_PATH` to use a system Chromium. |
+
+Everything is bundled, so the built site works offline (no CDN scripts).
 
 ## Features
 
@@ -19,45 +30,56 @@ An internet connection is needed for the CodeMirror editor (loaded from cdnjs). 
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
+- **Simulation clock:** pause and resume, and run at 0.1× to 10× speed. `delay(1000)` advances simulated time by exactly 1000 ms; under heavy load the simulation runs slower than real time instead of skipping.
 - **ESP32 pitfall checks:** warnings for flash pins 6–11, output on input-only pins 34–39, missing pull-ups, ADC2 used while WiFi is on, floating inputs, and unpowered sensors.
 - **3D view:** switch the stage to *3D* to orbit a full 360° (including under the boards) around a live 3D model of the circuit (LEDs glow, the servo turns, the LCD shows text, and you can press buttons). Wiring and moving parts still happen in 2D. Three.js loads only when you first open it.
-- **Projects** auto-save in the browser. You can also export or import JSON, or copy a share link (the whole project is encoded in the URL).
+- **Projects** auto-save in the browser. You can also export or import JSON, or copy a compressed share link (the whole project is encoded in the URL; older `#p=` links still open).
 
 Keyboard shortcuts: `Ctrl+Enter` starts or stops the simulation, `Del` deletes the selection, `Esc` cancels a wire.
 
 ## How it works
 
-`js/transpiler.js` rewrites the common Arduino C++ subset (typed declarations, functions, arrays, enums, casts, `#define`) into async JavaScript. `delay()` becomes `await`, and the loops yield to the browser so the page never freezes. `js/runtime.js` provides the simulated ESP32 API and the net solver. Not supported: `class`/`struct`, templates, pointer arithmetic, FreeRTOS tasks.
+`src/transpiler.js` rewrites the common Arduino C++ subset (typed declarations, functions, arrays, enums, casts, `#define`) into async JavaScript. `delay()` becomes `await`, and loops yield so nothing freezes. `src/runtime.js` provides the simulated ESP32 API and the net solver, and runs in a Web Worker. Not supported: `class`/`struct`, templates, pointer arithmetic, FreeRTOS tasks.
 
 ```
-index.html        layout
-css/style.css     theme
-js/components.js  part definitions (SVG rendering, pins, behaviour)
-js/transpiler.js  sketch → JS
-js/runtime.js     simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
-js/sim-worker.js  runs the sketch in a Web Worker (isolated from the page)
-js/sim-host.js    page side: mirrors worker state, validates its messages
-js/canvas.js      diagram editor (drag, wire, pan/zoom)
-js/view3d.js      3D view (Three.js, loaded on demand)
-js/examples.js    example projects
-js/app.js         app shell, panels, persistence
+index.html            layout
+public/_headers       Cloudflare headers: CSP, caching
+src/main.ts           entry point
+src/app.js            app shell, panels, persistence
+src/editor.ts         CodeMirror 6 sketch editor
+src/project.ts        project validation (untrusted input) and share links
+src/types.ts          shared types, including PartDef (the part definition format)
+src/components.js     part definitions (pins, behaviour, SVG)
+src/canvas.js         2D diagram editor (drag, wire, pan/zoom)
+src/view3d.js         3D view (Three.js, code-split)
+src/transpiler.js     sketch → JS
+src/runtime.js        simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
+src/clock.ts          virtual simulation clock
+src/sim-worker.js     runs the sketch in a Web Worker
+src/sim-host.js       page side: mirrors worker state, validates its messages
+src/examples.js       example projects
+tests/unit/           Vitest
+tests/e2e/            Playwright
 ```
+
+New code is written in TypeScript. The older modules are still JavaScript ES modules and are being converted one at a time.
 
 ## Security
 
 Share links and imported files can contain anything, so they are treated as untrusted:
 
-- Projects are rebuilt field by field on load (`normalize()` in `js/app.js`). Ids, colours, positions and part properties are type-checked, and wires must reference real pins.
-- Sketches run in a Web Worker with no access to the page, the DOM or `localStorage`. Everything the worker sends back is validated before it reaches the UI (`js/sim-host.js`). Stopping the simulation terminates the worker.
+- Projects are rebuilt field by field on load (`normalizeProject()` in `src/project.ts`). Ids, colours, positions and part properties are type-checked, and wires must reference real pins.
+- Sketches run in a Web Worker with no access to the page, the DOM or `localStorage`. Everything the worker sends back is validated before it reaches the UI (`src/sim-host.js`). Stopping the simulation terminates the worker.
+- A Content Security Policy (`public/_headers`) blocks inline and third-party scripts on the page. Only the sketch worker may compile code (`unsafe-eval`), and it can load no other scripts.
 
 ## Deploy
 
 The site is hosted on Cloudflare Workers as static assets at **https://sim.catcodehq.com**.
 
-GitHub Actions (`.github/workflows/ci-cd.yml`) runs the tests (`node --test tests/*.test.js`) on every push and pull request, and deploys every push to `main` that passes. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+GitHub Actions (`.github/workflows/ci-cd.yml`) typechecks, runs the unit and end-to-end tests, and builds on every push and pull request. Pushes to `main` then deploy exactly the build that passed. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 
 To deploy by hand instead:
 
 ```sh
-npx wrangler deploy
+npm run build && npx wrangler deploy
 ```
