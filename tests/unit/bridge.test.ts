@@ -100,7 +100,7 @@ describe('analog bridge', () => {
     await wait(40); sim.touch();
     expect(sim.analog.gpioVoltage(34)).toBeCloseTo(0.825, 1);
     const copy = structuredClone(host.project);
-    copy.components.find((c: Comp) => c.id === 'p1').props.value = 0.75;
+    copy.components.find((c: Comp) => c.id === 'p1')!.props.value = 0.75;
     host.project = copy; sim.invalidate();
     sim.touch();
     expect(sim.analog.gpioVoltage(34)).toBeCloseTo(2.475, 1);
