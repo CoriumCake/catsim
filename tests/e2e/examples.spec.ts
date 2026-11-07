@@ -250,8 +250,9 @@ test('DC motor spins up under PWM through a MOSFET', async ({ page }) => {
 test('relay alternates its NO and NC contacts', async ({ page }) => {
   await loadExample(page, 'relay'); await startSim(page);
   const state = () => page.evaluate(() => { const a = window.CatSim.App.sim.analog; return a ? `${a.mech.relays.k1}${a.leds.led1 > 0.3 ? 'G' : ''}${a.leds.led2 > 0.3 ? 'R' : ''}` : ''; });
-  await expect.poll(state, { timeout: 4000 }).toBe('1G');
-  await expect.poll(state, { timeout: 4000 }).toBe('0R');
+  // sample fast: the relay flips every second, so default 1 s poll intervals can alias onto one phase
+  await expect.poll(state, { timeout: 6000, intervals: [100] }).toBe('1G');
+  await expect.poll(state, { timeout: 6000, intervals: [100] }).toBe('0R');
 });
 
 test('a pasted SPICE model is validated and applied from the part panel', async ({ page }) => {
