@@ -10,6 +10,7 @@ import { normalizeProject, encodeShare, decodeShare } from './project.ts';
 import { Scope } from './scope.ts';
 import { wireNets } from './analog/nets.ts';
 import { parseIntelHex } from './avr/hex.ts';
+import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
@@ -101,7 +102,7 @@ const App = {
 
   // ---------- parts & wires ----------
   nextId(type) {
-    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u', capacitor: 'c' }[type] || (DEFS[type] && DEFS[type].dip ? 'u' : type);
+    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u', capacitor: 'c', motor: 'mot', relay: 'k' }[type] || (DEFS[type] && DEFS[type].dip ? 'u' : type);
     let i = 1; while (this.project.components.some((c) => c.id === base + i)) i++;
     return base + i;
   },
@@ -188,6 +189,14 @@ const App = {
   },
 
   onScopeSamples(t, v) { this.scope.addSamples(t, v); },
+  /** Human-readable summary of pasted SPICE text: what it defines, or where it fails to parse. */
+  spiceStatus(text) {
+    const lib = spiceLib(text);
+    if (!lib) return 'Using the built-in model. Paste a .model or .subckt from a datasheet or vendor library.';
+    if (lib instanceof Error) return `Not valid: ${lib.message}`;
+    const found = [...[...lib.models.entries()].map(([n, m]) => `.model ${n} (${m.type.toUpperCase()})`), ...[...lib.subckts.values()].map((s) => `.subckt ${s.name} (${s.ports.length} pins)`)];
+    return found.length ? `Found ${found.join(', ')}` : 'No .model or .subckt found.';
+  },
   boardType() { const b = this.project.components.find((c) => DEFS[c.type] && DEFS[c.type].board); return b ? b.type : 'esp32'; },
   /** Switch the project's microcontroller board. Wires to the old board's pins are removed. */
   setBoard(type) {
@@ -385,6 +394,12 @@ const App = {
         if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${esc(v)}" data-key="${ct.key}"></div>`;
         if (ct.type === 'select') return `<div class="row"><label>${ct.label}</label><select data-key="${ct.key}">${ct.options.map((o) => `<option${String(o) === String(v) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
         if (ct.type === 'toggle') return `<div class="row"><label class="toggle"><input type="checkbox" data-key="${ct.key}"${v ? ' checked' : ''}> ${ct.label}</label></div>`;
+        if (ct.type === 'spice') {
+          return `<details class="row spice"${v ? ' open' : ''}><summary>${ct.label}</summary>
+            <textarea data-spice="${ct.key}" spellcheck="false" rows="5" placeholder="${esc(ct.accepts)}">${esc(v || '')}</textarea>
+            <div class="spice-actions"><button class="btn btn-sm" data-spice-apply="${ct.key}">Apply</button><button class="btn btn-sm" data-spice-clear="${ct.key}">Clear</button></div>
+            <div class="spice-status" data-spice-status="${ct.key}">${esc(this.spiceStatus(v))}</div></details>`;
+        }
         return '';
       }).join('');
       const hint = d.hint ? `<p class="hint">${d.hint}</p>` : d.type === 'esp32' ? '<p class="hint">Hover a pin to see its GPIO number and functions. The blue LED is on GPIO2.</p>' : '';
@@ -399,6 +414,18 @@ const App = {
         });
       });
     }
+    panel.querySelectorAll('[data-spice-apply], [data-spice-clear]').forEach((b) => b.addEventListener('click', () => {
+      const key = b.dataset.spiceApply || b.dataset.spiceClear;
+      const part = this.project.components.find((x) => x.id === sel.id); if (!part) return;
+      const ct = DEFS[part.type].controls.find((x) => x.key === key);
+      const ta = panel.querySelector(`[data-spice="${key}"]`);
+      if (b.dataset.spiceClear) ta.value = '';
+      const text = ta.value.slice(0, ct.maxLength);
+      part.props[key] = text;
+      panel.querySelector(`[data-spice-status="${key}"]`).textContent = this.spiceStatus(text);
+      this.changed({ structure: false });
+      this.toast(text ? 'Custom SPICE model applied' : 'Back to the built-in model');
+    }));
     const del = panel.querySelector('[data-act="delete"]'); if (del) del.onclick = () => this.deleteSelection();
     panel.hidden = false;
   },

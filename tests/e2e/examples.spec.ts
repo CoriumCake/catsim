@@ -240,3 +240,29 @@ test('Uno Fade shows ~490 Hz hardware PWM on the scope', async ({ page }) => {
   const f = +((await page.locator('.scope-meas').innerText()).match(/(\d+\.\d) Hz/)?.[1] ?? 0);
   expect(f).toBeGreaterThan(480); expect(f).toBeLessThan(500);
 });
+
+test('DC motor spins up under PWM through a MOSFET', async ({ page }) => {
+  await loadExample(page, 'motor'); await startSim(page);
+  await expect.poll(() => page.evaluate(() => window.CatSim.App.sim.analog?.mech?.motors?.mot1?.[0] ?? 0), { timeout: 8000 }).toBeGreaterThan(500);
+  await expect(page.locator('#consoleOut')).not.toContainText('spike'); // the flyback diode is fitted
+});
+
+test('relay alternates its NO and NC contacts', async ({ page }) => {
+  await loadExample(page, 'relay'); await startSim(page);
+  const state = () => page.evaluate(() => { const a = window.CatSim.App.sim.analog; return a ? `${a.mech.relays.k1}${a.leds.led1 > 0.3 ? 'G' : ''}${a.leds.led2 > 0.3 ? 'R' : ''}` : ''; });
+  await expect.poll(state, { timeout: 4000 }).toBe('1G');
+  await expect.poll(state, { timeout: 4000 }).toBe('0R');
+});
+
+test('a pasted SPICE model is validated and applied from the part panel', async ({ page }) => {
+  await loadExample(page, 'motor');
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'd1' }));
+  await page.locator('#props details.spice summary').click();
+  await page.fill('[data-spice="spice"]', '.model BAD D(IS=oops)');
+  await page.click('[data-spice-apply="spice"]');
+  await expect(page.locator('[data-spice-status="spice"]')).toContainText('Not valid: line 1: bad value for IS');
+  await page.fill('[data-spice="spice"]', '* datasheet model\n.model MYD D(IS=2.5n N=1.75 RS=0.5)');
+  await page.click('[data-spice-apply="spice"]');
+  await expect(page.locator('[data-spice-status="spice"]')).toContainText('Found .model myd (D)');
+  expect(await page.evaluate(() => window.CatSim.App.project.components.find((c: { id: string }) => c.id === 'd1').props.spice)).toContain('MYD');
+});

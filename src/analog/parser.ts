@@ -88,6 +88,14 @@ function parseSource(toks: string[], line: number): Waveform {
   return dc(v);
 }
 
+export interface SpiceLibrary {
+  models: Map<string, { type: string; p: Record<string, number> }>;
+  subckts: Map<string, Subckt>;
+  /** top-level element lines */
+  top: Line[];
+  title: string;
+}
+
 export interface ParsedNetlist {
   circuit: Circuit;
   /** node name (lower case) → node index; "0" and "gnd" are ground */
@@ -95,7 +103,7 @@ export interface ParsedNetlist {
   title: string;
 }
 
-export function parseNetlist(src: string, opts: { firstLineIsTitle?: boolean } = {}): ParsedNetlist {
+export function parseLibrary(src: string, opts: { firstLineIsTitle?: boolean } = {}): SpiceLibrary {
   let lines = logicalLines(src);
   let title = '';
   // A .cir file's first line is its title (SPICE convention); model libraries have none.
@@ -128,7 +136,76 @@ export function parseNetlist(src: string, opts: { firstLineIsTitle?: boolean } =
     (cur ? cur.body : top).push(l);
   }
   if (cur) throw new SpiceError(`.subckt ${cur.name} is missing .ends`, lines[lines.length - 1]?.n ?? 0);
+  return { models, subckts, top, title };
+}
 
+function emit(c: Circuit, lib: SpiceLibrary, node: (name: string) => number, body: Line[], map: (n: string) => string, prefix: string, depth: number): void {
+  const { models, subckts } = lib;
+  if (depth > MAX_DEPTH) throw new SpiceError('subcircuits nested too deeply', body[0]?.n ?? 0);
+  for (const l of body) {
+    if (c.elements.length > MAX_ELEMENTS) throw new SpiceError(`too many elements (over ${MAX_ELEMENTS})`, l.n);
+    const tk = tokens(l.text);
+    const name = prefix + tk[0];
+    const kind = tk[0][0].toUpperCase();
+    const nd = (i: number) => { if (!tk[i] || tk[i] === '(' || tk[i] === '=') throw new SpiceError(`${tk[0]}: missing node`, l.n); return node(map(tk[i])); };
+    const val = (i: number) => { const v = spiceNumber(tk[i] ?? ''); if (Number.isNaN(v)) throw new SpiceError(`${tk[0]}: bad value "${tk[i] ?? ''}"`, l.n); return v; };
+    const model = (name: string, kinds: string[]) => {
+      const m = models.get((name ?? '').toLowerCase());
+      if (!m) throw new SpiceError(`${tk[0]}: unknown model "${name}"`, l.n);
+      if (!kinds.includes(m.type)) throw new SpiceError(`${tk[0]}: model "${name}" is a ${m.type}, expected ${kinds.join('/')}`, l.n);
+      return m;
+    };
+    switch (kind) {
+      case 'R': c.resistor(nd(1), nd(2), val(3), name); break;
+      case 'C': c.capacitor(nd(1), nd(2), val(3), name); break;
+      case 'L': c.inductor(nd(1), nd(2), val(3), name); break;
+      case 'V': c.vsource(nd(1), nd(2), parseSource(tk.slice(3), l.n), 0, name); break;
+      case 'I': c.isource(nd(1), nd(2), parseSource(tk.slice(3), l.n), name); break;
+      case 'D': {
+        const m = model(tk[3], ['d']).p;
+        const dm: DiodeModel = { is: m.is ?? 1e-14, n: m.n ?? 1, rs: m.rs ?? 0 };
+        c.diode(nd(1), nd(2), dm, name); break;
+      }
+      case 'Q': {
+        // Q c b e [substrate] model
+        const mi = models.has((tk[5] ?? '').toLowerCase()) ? 5 : 4;
+        const m = model(tk[mi], ['npn', 'pnp']);
+        const bm: BjtModel = { type: m.type as 'npn' | 'pnp', is: m.p.is ?? 1e-16, bf: m.p.bf ?? 100, br: m.p.br ?? 1, nf: m.p.nf ?? 1, nr: m.p.nr ?? 1, vaf: m.p.vaf || m.p.va || Infinity };
+        c.add(new Bjt(nd(1), nd(2), nd(3), bm), name); break;
+      }
+      case 'M': {
+        // M d g s b model [W= L=]
+        const m = model(tk[5], ['nmos', 'pmos']);
+        if ((m.p.level ?? 1) !== 1) throw new SpiceError(`${tk[0]}: only LEVEL=1 MOSFET models are supported`, l.n);
+        const inst = parseParams(tk.slice(6), l.n);
+        const mm: MosModel = { type: m.type as 'nmos' | 'pmos', vto: m.p.vto ?? 0, kp: m.p.kp ?? 2e-5, lambda: m.p.lambda ?? 0, w: inst.w ?? 1, l: inst.l ?? 1 };
+        if (nd(4) !== nd(3)) throw new SpiceError(`${tk[0]}: the bulk must be tied to the source`, l.n);
+        c.add(new Mosfet(nd(1), nd(2), nd(3), mm), name); break;
+      }
+      case 'E': c.add(new Vcvs(nd(1), nd(2), nd(3), nd(4), val(5)), name); break;
+      case 'G': c.add(new Vccs(nd(1), nd(2), nd(3), nd(4), val(5)), name); break;
+      case 'X': {
+        const sub = subckts.get(tk[tk.length - 1].toLowerCase());
+        if (!sub) throw new SpiceError(`${tk[0]}: unknown subcircuit "${tk[tk.length - 1]}"`, l.n);
+        const args = tk.slice(1, -1);
+        if (args.length !== sub.ports.length) throw new SpiceError(`${tk[0]}: ${sub.name} has ${sub.ports.length} pins, got ${args.length}`, l.n);
+        const outer = args.map((a) => map(a));
+        const inner = (n: string) => {
+          const k = n.toLowerCase();
+          const i = sub.ports.indexOf(k);
+          if (i >= 0) return outer[i];
+          return k === '0' || k === 'gnd' ? '0' : `${name}.${k}`;
+        };
+        emit(c, lib, node, sub.body, inner, `${name}.`, depth + 1);
+        break;
+      }
+      default: throw new SpiceError(`unsupported element "${tk[0]}"`, l.n);
+    }
+  }
+}
+
+export function parseNetlist(src: string, opts: { firstLineIsTitle?: boolean } = {}): ParsedNetlist {
+  const lib = parseLibrary(src, opts);
   const c = new Circuit();
   const nodes = new Map<string, number>([['0', 0], ['gnd', 0]]);
   const node = (name: string) => {
@@ -137,70 +214,32 @@ export function parseNetlist(src: string, opts: { firstLineIsTitle?: boolean } =
     if (n === undefined) { n = c.node(k); nodes.set(k, n); }
     return n;
   };
-
-  const expand = (body: Line[], map: (n: string) => string, prefix: string, depth: number) => {
-    if (depth > MAX_DEPTH) throw new SpiceError('subcircuits nested too deeply', body[0]?.n ?? 0);
-    for (const l of body) {
-      if (c.elements.length > MAX_ELEMENTS) throw new SpiceError(`too many elements (over ${MAX_ELEMENTS})`, l.n);
-      const tk = tokens(l.text);
-      const name = prefix + tk[0];
-      const kind = tk[0][0].toUpperCase();
-      const nd = (i: number) => { if (!tk[i] || tk[i] === '(' || tk[i] === '=') throw new SpiceError(`${tk[0]}: missing node`, l.n); return node(map(tk[i])); };
-      const val = (i: number) => { const v = spiceNumber(tk[i] ?? ''); if (Number.isNaN(v)) throw new SpiceError(`${tk[0]}: bad value "${tk[i] ?? ''}"`, l.n); return v; };
-      const model = (name: string, kinds: string[]) => {
-        const m = models.get((name ?? '').toLowerCase());
-        if (!m) throw new SpiceError(`${tk[0]}: unknown model "${name}"`, l.n);
-        if (!kinds.includes(m.type)) throw new SpiceError(`${tk[0]}: model "${name}" is a ${m.type}, expected ${kinds.join('/')}`, l.n);
-        return m;
-      };
-      switch (kind) {
-        case 'R': c.resistor(nd(1), nd(2), val(3), name); break;
-        case 'C': c.capacitor(nd(1), nd(2), val(3), name); break;
-        case 'L': c.inductor(nd(1), nd(2), val(3), name); break;
-        case 'V': c.vsource(nd(1), nd(2), parseSource(tk.slice(3), l.n), 0, name); break;
-        case 'I': c.isource(nd(1), nd(2), parseSource(tk.slice(3), l.n), name); break;
-        case 'D': {
-          const m = model(tk[3], ['d']).p;
-          const dm: DiodeModel = { is: m.is ?? 1e-14, n: m.n ?? 1, rs: m.rs ?? 0 };
-          c.diode(nd(1), nd(2), dm, name); break;
-        }
-        case 'Q': {
-          // Q c b e [substrate] model
-          const mi = models.has((tk[5] ?? '').toLowerCase()) ? 5 : 4;
-          const m = model(tk[mi], ['npn', 'pnp']);
-          const bm: BjtModel = { type: m.type as 'npn' | 'pnp', is: m.p.is ?? 1e-16, bf: m.p.bf ?? 100, br: m.p.br ?? 1, nf: m.p.nf ?? 1, nr: m.p.nr ?? 1, vaf: m.p.vaf || m.p.va || Infinity };
-          c.add(new Bjt(nd(1), nd(2), nd(3), bm), name); break;
-        }
-        case 'M': {
-          // M d g s b model [W= L=]
-          const m = model(tk[5], ['nmos', 'pmos']);
-          if ((m.p.level ?? 1) !== 1) throw new SpiceError(`${tk[0]}: only LEVEL=1 MOSFET models are supported`, l.n);
-          const inst = parseParams(tk.slice(6), l.n);
-          const mm: MosModel = { type: m.type as 'nmos' | 'pmos', vto: m.p.vto ?? 0, kp: m.p.kp ?? 2e-5, lambda: m.p.lambda ?? 0, w: inst.w ?? 1, l: inst.l ?? 1 };
-          if (nd(4) !== nd(3)) throw new SpiceError(`${tk[0]}: the bulk must be tied to the source`, l.n);
-          c.add(new Mosfet(nd(1), nd(2), nd(3), mm), name); break;
-        }
-        case 'E': c.add(new Vcvs(nd(1), nd(2), nd(3), nd(4), val(5)), name); break;
-        case 'G': c.add(new Vccs(nd(1), nd(2), nd(3), nd(4), val(5)), name); break;
-        case 'X': {
-          const sub = subckts.get(tk[tk.length - 1].toLowerCase());
-          if (!sub) throw new SpiceError(`${tk[0]}: unknown subcircuit "${tk[tk.length - 1]}"`, l.n);
-          const args = tk.slice(1, -1);
-          if (args.length !== sub.ports.length) throw new SpiceError(`${tk[0]}: ${sub.name} has ${sub.ports.length} pins, got ${args.length}`, l.n);
-          const outer = args.map((a) => map(a));
-          const inner = (n: string) => {
-            const k = n.toLowerCase();
-            const i = sub.ports.indexOf(k);
-            if (i >= 0) return outer[i];
-            return k === '0' || k === 'gnd' ? '0' : `${name}.${k}`;
-          };
-          expand(sub.body, inner, `${name}.`, depth + 1);
-          break;
-        }
-        default: throw new SpiceError(`unsupported element "${tk[0]}"`, l.n);
-      }
-    }
-  };
-  expand(top, (n) => n, '', 0);
-  return { circuit: c, nodes, title };
+  emit(c, lib, node, lib.top, (n) => n, '', 0);
+  return { circuit: c, nodes, title: lib.title };
 }
+
+/**
+ * Place an instance of a library subcircuit into an existing circuit: `ports` are the circuit nodes
+ * for the subcircuit's pins (in its .subckt order); internal nodes are private to the instance.
+ */
+export function instantiateSubckt(c: Circuit, lib: SpiceLibrary, name: string, ports: number[], prefix: string): void {
+  const sub = lib.subckts.get(name.toLowerCase());
+  if (!sub) throw new SpiceError(`no subcircuit named "${name}"`, 0);
+  if (ports.length !== sub.ports.length) throw new SpiceError(`${sub.name} has ${sub.ports.length} pins, the part has ${ports.length}`, 0);
+  const local = new Map<string, number>();
+  const node = (g: string) => {
+    const m = /^\u0000p(\d+)$/.exec(g);
+    if (m) return ports[+m[1]];
+    if (g === '0' || g === 'gnd') return 0;
+    let n = local.get(g);
+    if (n === undefined) { n = c.node(g); local.set(g, n); }
+    return n;
+  };
+  const map = (n: string) => {
+    const k = n.toLowerCase(), i = sub.ports.indexOf(k);
+    if (i >= 0) return `\u0000p${i}`;
+    return k === '0' || k === 'gnd' ? '0' : `${prefix}.${k}`;
+  };
+  emit(c, lib, node, sub.body, map, `${prefix}.`, 1);
+}
+

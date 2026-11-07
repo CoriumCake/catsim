@@ -22,6 +22,7 @@ function cleanProps(d: PartDef, src: unknown): Record<string, unknown> {
     else if (ct.type === 'select') {
       if (ct.options.map(String).includes(String(v))) out[k] = typeof d.props[k] === 'number' ? Number(v) : String(v);
     } else if (ct.type === 'toggle') out[k] = v === true;
+    else if (ct.type === 'spice') out[k] = typeof v === 'string' && v.length <= ct.maxLength ? v : '';
   }
   return out;
 }

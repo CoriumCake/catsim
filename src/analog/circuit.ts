@@ -394,6 +394,7 @@ export class Simulation {
           continue;
         }
       }
+      // After a discontinuity restart with a small step: inductive spikes happen in the first microseconds.
       let dt = this.broke ? Math.min(this.dt, 1e-6, (target - this.t)) : this.dt;
       dt = Math.min(dt, this.stepLimit(), target - this.t);
       // Nonlinear resistive circuits: resolve the inside of a source ramp (a PWM edge) in 8 steps, since
