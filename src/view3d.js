@@ -625,6 +625,27 @@ class View3D {
     this.live(c, (s) => { for (const l of leds) { const on = l.k === 'L' ? s.L : l.k === 'tx' ? s.tx : l.k === 'on' ? s.on : 0; l.m.emissiveIntensity = on ? 1.8 : 0; l.glow.material.opacity = on ? 0.7 : 0; } });
   }
 
+  build_motor(g, c) {
+    const T = THREE;
+    const can = this.mesh(new T.CylinderGeometry(15, 15, 40, 28), this.M.metal, g, 30, 18, 30); can.rotation.x = Math.PI / 2;
+    this.box(g, 8, 44, 44, 6, 3, 33, this.mat('#2b2f37'));
+    const shaft = new T.Group(); shaft.position.set(30, 18, 8); g.add(shaft);
+    this.cyl(shaft, 0, 0, 1.2, 0, 10, this.M.lead, 10).rotation.x = Math.PI / 2;
+    const blade = this.mesh(new T.BoxGeometry(34, 4, 1.5), this.mat('#e5484d'), shaft, 0, 0, -8);
+    for (const x of [22, 38]) { this.rod(g, [x, 6, 50], [x, 1, 50], 0.8, this.M.lead); this.leg(g, x, 50, x, 72); }
+    this.live(c, (s) => { blade.rotation.z = -(s.angle || 0); });
+  }
+
+  build_relay(g, c) {
+    this.box(g, 1, 4, 64, 44, 0, 30, this.mat('#2163d6', { roughness: 0.45 }));
+    const label = this.tex(256, 176, (x) => { x.fillStyle = '#2163d6'; x.fillRect(0, 0, 256, 176); x.fillStyle = '#e8eefc'; x.textAlign = 'center'; x.font = '600 34px system-ui, sans-serif'; x.fillText('RELAY', 128, 74); x.font = '24px system-ui, sans-serif'; x.fillText('5V DC · 10A 250VAC', 128, 116); });
+    const top = this.mesh(new THREE.PlaneGeometry(60, 40), this.mat('#ffffff', { map: label }), g, 33, 30.05, 26, false); top.rotation.x = -Math.PI / 2;
+    for (const x of [8, 20, 34, 46, 58]) this.leg(g, x, 48, x, 60);
+    const dot = this.mat('#0f3d1d', { emissive: '#22c55e', emissiveIntensity: 0 });
+    this.cyl(g, 58, 10, 2, 30, 30.6, dot, 10);
+    this.live(c, (s) => { dot.emissiveIntensity = s.on ? 2 : 0; });
+  }
+
   build_lcd(g, c) {
     const T = THREE;
     // underside: PCF8574 I2C "backpack" (texture rows are 86 - z because the -Y face is flipped)

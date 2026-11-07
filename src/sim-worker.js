@@ -33,7 +33,7 @@ function snapshot() {
   let serial = sim.serialOut; sim.serialOut = '';
   const a = sim.analog;
   const samples = a.takeSamples();
-  const analog = { parts: a.partActivity(), burnt: [...a.burnt], leds: a.ledBrightness(), rtf: sim.running ? a.realTimeFactor() : 1, error: a.error, work: a.workMs, steps: a.sim ? a.sim.stats.steps : 0, newton: a.sim ? a.sim.stats.newton : 0 };
+  const analog = { mech: a.mechanics(), parts: a.partActivity(), burnt: [...a.burnt], leds: a.ledBrightness(), rtf: sim.running ? a.realTimeFactor() : 1, error: a.error, work: a.workMs, steps: a.sim ? a.sim.stats.steps : 0, newton: a.sim ? a.sim.stats.newton : 0 };
   if (serial.length > 100000) serial = serial.slice(-100000);
   post({
     type: 'snap', t: sim.millis(), running: sim.running, serial, speed: sim.clock.speed, paused: sim.clock.paused,

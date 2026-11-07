@@ -133,7 +133,12 @@ class SimHost extends Simulator {
           const parts = {};
           if (an.parts && typeof an.parts === 'object') for (const k of Object.keys(an.parts)) if (/^[\w-]{1,32}$/.test(k)) parts[k] = Math.min(1, Math.max(0, finite(an.parts[k])));
           const burnt = Array.isArray(an.burnt) ? an.burnt.filter((k) => typeof k === 'string' && /^[\w-]{1,32}$/.test(k)).slice(0, 200) : [];
-          this.analog = { leds, parts, burnt, rtf: Math.max(0, finite(an.rtf, 1)), error: an.error ? str(an.error, 300) : null, work: finite(an.work), steps: finite(an.steps), newton: finite(an.newton) };
+          const mech = { motors: {}, relays: {} };
+          if (an.mech && typeof an.mech === 'object') {
+            for (const [k, v] of Object.entries(an.mech.motors || {})) if (/^[\w-]{1,32}$/.test(k) && Array.isArray(v)) mech.motors[k] = [finite(v[0]), finite(v[1])];
+            for (const [k, v] of Object.entries(an.mech.relays || {})) if (/^[\w-]{1,32}$/.test(k)) mech.relays[k] = v ? 1 : 0;
+          }
+          this.analog = { mech, leds, parts, burnt, rtf: Math.max(0, finite(an.rtf, 1)), error: an.error ? str(an.error, 300) : null, work: finite(an.work), steps: finite(an.steps), newton: finite(an.newton) };
         }
         const sm = m.samples;
         if (sm && sm.t instanceof Float64Array && Array.isArray(sm.v) && sm.v.every((a) => a instanceof Float32Array && a.length === sm.t.length)) {

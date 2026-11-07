@@ -9,7 +9,7 @@
  *   so heavy circuits make the simulation run slower than real time rather than fall behind. */
 import { Circuit, Simulation, ConvergenceError, VSource, type Diode } from './circuit.ts';
 import { dc, square, type Waveform } from './waveform.ts';
-import { MODELS, R_OUT, R_PULL, R_FLOAT, V_LOGIC, LED_FULL, type PartModel } from './models.ts';
+import { MODELS, R_OUT, R_PULL, R_FLOAT, V_LOGIC, LED_FULL, RELAY, modelLog, type PartModel } from './models.ts';
 import type { Component, Project, PinDef } from '../types.ts';
 import { DEFS } from '../components.js';
 import { INPUT_PULLUP, INPUT_PULLDOWN, OUTPUT } from '../pins.js';
@@ -58,13 +58,16 @@ const LED_THERMAL_TAU = 0.3;
 /** ESP32 absolute maximum source/sink current per GPIO. */
 export const GPIO_MAX_A = 0.04;
 const OPEN_JUNCTION = { is: 1e-30, n: 2 };
+/** Voltage across a coil/motor above which we explain the inductive kick (and the missing flyback diode). */
+const KICK_V = 30;
 const LED_TAU = 0.02; // brightness averaging time constant (s), roughly what the eye integrates
 const MAX_PROBE_POINTS = 50_000;
 
 type Drive = { wave: Waveform; rs: number; key: string };
 
 function topologyKey(p: Project): string {
-  return JSON.stringify([p.components.map((c) => [c.id, c.type]), p.wires.map((w) => [w.from, w.to])]);
+  // pasted SPICE models change a part's internal structure, so they count as topology
+  return JSON.stringify([p.components.map((c) => [c.id, c.type, typeof c.props.spice === 'string' ? c.props.spice : '']), p.wires.map((w) => [w.from, w.to])]);
 }
 
 export class AnalogBridge {
@@ -83,6 +86,10 @@ export class AnalogBridge {
   private pendingBurn: string[] = [];
   private warnedPins = new Set<number>();
   private chips: ChipRun[] = [];
+  private motors = new Map<string, { node: number; angle: number; kickNodes: [number, number] }>();
+  private relays = new Map<string, NonNullable<PartModel['relay']>>();
+  private kick = new Map<string, number>();
+  private warnedKick = new Set<string>();
   /** true until the first circuit of a run is built: that one starts at t = 0, not at the first sync */
   private fresh = true;
   private logicEvents = 0;
@@ -104,6 +111,7 @@ export class AnalogBridge {
     this.sim = null; this.error = null; this.topo = '';
     this.leds.clear(); this.lastLevel.clear(); this.burnt.clear(); this.pendingBurn = []; this.warnedPins.clear();
     this.chips = []; this.warnedOscillation = false; this.fresh = true;
+    this.motors.clear(); this.relays.clear(); this.kick.clear(); this.warnedKick.clear();
     this.rec = { t: [], v: this.probes.map(() => []) };
     this.rtf = { simT: 0, realT: 0, value: 1 }; this.workMs = 0;
   }
@@ -158,13 +166,23 @@ export class AnalogBridge {
       }
     }
     this.models = [];
+    const prevMotors = this.motors, prevRelays = this.relays;
+    this.motors = new Map(); this.relays = new Map();
     const prevChips = new Map(this.chips.map((ch) => [ch.id, ch]));
     this.chips = [];
     const prevLeds = this.leds; this.leds = new Map();
+    const reported = new Set<string>();
+    modelLog.fn = (msg) => { if (!reported.has(msg)) { reported.add(msg); this.s.app.log(msg, 'error'); } };
     for (const c of p.components) {
       const fn = MODELS[c.type]; if (!fn) continue;
       const m = fn(ckt, c, nodeOf(c), () => this.s.ui[c.id], () => this.comps.get(c.id) ?? c);
       this.models.push({ c, m });
+      if (m.motor) this.motors.set(c.id, { node: m.motor.speedNode, angle: prevMotors.get(c.id)?.angle ?? 0, kickNodes: [nodeOf(c)('+'), nodeOf(c)('-')] });
+      if (m.relay) {
+        const was = prevRelays.get(c.id)?.closed ?? false;
+        m.relay.closed = was; m.relay.contacts.forEach((s) => { s.closed = was; }); m.relay.nc.forEach((s) => { s.closed = !was; });
+        this.relays.set(c.id, m.relay);
+      }
       if (m.chip) {
         const old = prevChips.get(c.id); // keep flip-flop / counter state across rewiring
         this.chips.push({ id: c.id, def: CHIPS[c.type], st: old?.st ?? CHIPS[c.type].init(), outs: m.chip.outs, node: m.chip.node,
@@ -227,8 +245,20 @@ export class AnalogBridge {
         if (l.heat > LED_BURN_A && !this.burnt.has(id) && !this.pendingBurn.includes(id)) this.pendingBurn.push(id);
       }
     }
+    if (this.motors.size || this.relays.size) {
+      const x = this.sim!.x, v = (n: number) => (n === 0 ? 0 : x[n - 1]);
+      for (const [id, mo] of this.motors) {
+        mo.angle = (mo.angle + v(mo.node) * dt) % (2 * Math.PI);
+        const vv = Math.abs(v(mo.kickNodes[0]) - v(mo.kickNodes[1]));
+        if (vv > (this.kick.get(id) ?? 0)) this.kick.set(id, vv);
+      }
+      for (const [id, r] of this.relays) {
+        const vv = Math.abs(r.coilVolts(x));
+        if (vv > (this.kick.get(id) ?? 0)) this.kick.set(id, vv);
+      }
+    }
     this.record();
-  };
+    };
 
   /** Bring the analog solution up to the current simulated time and apply any pin/part changes. */
   sync(): void {
@@ -249,9 +279,10 @@ export class AnalogBridge {
       this.logicEvents = 0;
       // Advance; whenever a chip input crosses its threshold the solver stops there so the logic can react.
       while (t > sim.t + 1e-12) {
-        const useCross = this.chips.length > 0 && this.logicEvents < MAX_LOGIC_EVENTS;
+        const useCross = (this.chips.length > 0 || this.relays.size > 0) && this.logicEvents < MAX_LOGIC_EVENTS;
         sim.advanceTo(t, this.onStep, useCross ? this.crossing : undefined);
         if (!sim.stoppedOnCrossing) break;
+        if (this.updateRelays()) { sim.refresh(); this.record(); }
         this.evaluateLogic();
       }
       if (this.logicEvents >= MAX_LOGIC_EVENTS && !this.warnedOscillation) {
@@ -273,6 +304,13 @@ export class AnalogBridge {
       }
       this.pendingBurn = [];
       for (const id of this.burnt) this.leds.get(id)?.d.setModel(OPEN_JUNCTION);
+      if (this.updateRelays()) changed = true;
+      for (const [id, vmax] of this.kick) {
+        if (vmax > KICK_V && !this.warnedKick.has(id)) {
+          this.warnedKick.add(id);
+          this.s.app.log(`Switching ${id} off made a ${vmax >= 1000 ? `${(vmax / 1000).toFixed(1)} kV` : `${Math.round(vmax)} V`} spike: the coil's inductance kicks back when its current is cut. A real transistor would break down. Put a flyback diode (1N4007) across ${id}, cathode to the + side.`, 'warn');
+        }
+      }
       for (const [g, src] of this.gpioSrc) {
         const i = Math.abs(src.current(sim.x));
         if (i > GPIO_MAX_A && !this.warnedPins.has(g)) {
@@ -338,9 +376,31 @@ export class AnalogBridge {
     }
   }
 
-  /** Fraction of a step at which the first chip input crosses its threshold (or null). */
+  /** Relay armatures: pull in / drop out with hysteresis on the coil current. Returns true if any moved. */
+  private updateRelays(): boolean {
+    const sim = this.sim; if (!sim) return false;
+    let moved = false;
+    for (const r of this.relays.values()) {
+      const i = Math.abs(r.coilCurrent(sim.x));
+      const want = r.closed ? i > RELAY.dropOut * 0.999 : i > RELAY.pullIn * 0.999;
+      if (want === r.closed) continue;
+      r.closed = want; moved = true;
+      r.contacts.forEach((s) => { s.closed = want; }); r.nc.forEach((s) => { s.closed = !want; });
+    }
+    return moved;
+  }
+
+  /** Fraction of a step at which the first chip input (or relay coil current) crosses its threshold. */
   private crossing = (xOld: Float64Array, xNew: Float64Array): number | null => {
     let first: number | null = null;
+    for (const r of this.relays.values()) {
+      const i0 = Math.abs(r.coilCurrent(xOld)), i1 = Math.abs(r.coilCurrent(xNew));
+      const thr = r.closed ? RELAY.dropOut : RELAY.pullIn;
+      const crosses = r.closed ? i0 >= thr && i1 < thr : i0 <= thr && i1 > thr;
+      if (!crosses) continue;
+      const f = i1 === i0 ? 1 : (thr - i0) / (i1 - i0);
+      if (first === null || f < first) first = f;
+    }
     for (const ch of this.chips) {
       const g0 = volt(xOld, ch.node(ch.def.gnd)), g1 = volt(xNew, ch.node(ch.def.gnd));
       for (const p of ch.def.inputs) {
@@ -383,6 +443,14 @@ export class AnalogBridge {
     const out: Record<string, number> = {};
     for (const [id, l] of this.leds) out[id] = this.burnt.has(id) ? 0 : Math.min(1, Math.sqrt(Math.max(0, l.avg) / LED_FULL));
     return out;
+  }
+
+  /** Motors: [rpm, shaft angle]; relays: armature closed. */
+  mechanics(): { motors: Record<string, [number, number]>; relays: Record<string, number> } {
+    const motors: Record<string, [number, number]> = {}, relays: Record<string, number> = {};
+    if (this.sim) for (const [id, m] of this.motors) motors[id] = [this.sim.nodeV(m.node) * 60 / (2 * Math.PI), m.angle];
+    for (const [id, r] of this.relays) relays[id] = r.closed ? 1 : 0;
+    return { motors, relays };
   }
 
   /** Per-part activity (transistors conducting), 0..1. */

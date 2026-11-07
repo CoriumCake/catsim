@@ -372,6 +372,7 @@ function to92(c, s, mark, legs) {
     ${on ? `<circle cx="32" cy="10" r="2.2" fill="#22c55e" opacity="${Math.min(1, 0.4 + s.on).toFixed(2)}"/>` : ''}`;
 }
 const TRANSISTOR_HINT = 'Shows a green dot when it conducts. Base/gate needs a resistor from the GPIO.';
+const spiceCtl = (accepts) => ({ key: 'spice', label: 'Custom SPICE model', type: 'spice', maxLength: 50000, accepts });
 
 DEFS.npn = {
   type: 'npn', name: 'NPN Transistor (2N2222)', category: 'Semiconductors', w: 40, h: 62, hint: TRANSISTOR_HINT,
@@ -380,7 +381,7 @@ DEFS.npn = {
     { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor, e.g. 1 kΩ)' },
     { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
   ],
-  props: {},
+  props: { spice: '' }, controls: [spiceCtl('.model NAME NPN(IS=… BF=… VAF=…)')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'NPN' }),
   render: (c, s) => to92(c, s, '2N2222', ['E', 'B', 'C']),
 };
@@ -392,7 +393,7 @@ DEFS.pnp = {
     { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor)' },
     { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
   ],
-  props: {},
+  props: { spice: '' }, controls: [spiceCtl('.model NAME PNP(IS=… BF=…)')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'PNP' }),
   render: (c, s) => to92(c, s, '2N2907', ['E', 'B', 'C']),
 };
@@ -405,7 +406,7 @@ DEFS.nmos = {
     { id: 'G', label: 'G', x: 20, y: 62, dir: 'b', title: 'Gate' },
     { id: 'D', label: 'D', x: 30, y: 62, dir: 'b', title: 'Drain (to the load)' },
   ],
-  props: {},
+  props: { spice: '' }, controls: [spiceCtl('.model NAME NMOS(LEVEL=1 VTO=… KP=…), or a .subckt with pins D G S')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'N-FET' }),
   render: (c, s) => to92(c, s, '2N7000', ['S', 'G', 'D']),
 };
@@ -414,8 +415,8 @@ const DIODE_TYPES = ['1N4148', '1N4007', '1N5819'];
 DEFS.diode = {
   type: 'diode', name: 'Diode', category: 'Semiconductors', w: 70, h: 16,
   pins: [{ id: 'A', label: 'A', x: 0, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 70, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
-  props: { model: '1N4148' },
-  controls: [{ key: 'model', label: 'Type', type: 'select', options: DIODE_TYPES }],
+  props: { model: '1N4148', spice: '' },
+  controls: [{ key: 'model', label: 'Type', type: 'select', options: DIODE_TYPES }, spiceCtl('.model NAME D(IS=… N=… RS=…)')],
   render(c) {
     const big = c.props.model !== '1N4148';
     const body = big ? '#1d1f24' : '#c98a3a';
@@ -435,8 +436,8 @@ DEFS.opamp = {
     { id: 'IN-', label: 'IN−', x: 24, y: 60, dir: 'b', title: 'Pin 2: inverting input' },
     { id: 'IN+', label: 'IN+', x: 40, y: 60, dir: 'b', title: 'Pin 3: non-inverting input' },
     { id: 'GND', label: 'GND', x: 56, y: 60, dir: 'b', title: 'Pin 4: GND' },
-  ],
-  props: {},
+    ],
+    props: { spice: '' }, controls: [spiceCtl('.subckt NAME +IN −IN VCC VEE OUT (standard op-amp pin order)')],
   render() {
     let legs = '';
     for (let i = 0; i < 4; i++) legs += `<rect x="${5 + i * 16}" y="44" width="6" height="16" fill="#b9bec7"/><rect x="${5 + i * 16}" y="0" width="6" height="16" fill="${i === 0 ? '#b9bec7' : '#8a8f98'}"/>`;
@@ -493,6 +494,51 @@ DEFS.capacitor = {
   },
 };
 
+// ---------- electromechanical ----------
+DEFS.motor = {
+  type: 'motor', name: 'DC Motor', category: 'Electromechanical', w: 60, h: 72,
+  hint: 'Toy motor: ~9500 rpm unloaded at 5 V, 0.5 A when stalled. Too much for a GPIO: drive it with a transistor or MOSFET and add a flyback diode.',
+  pins: [{ id: '+', label: '+', x: 22, y: 72, dir: 'b', title: '+ terminal' }, { id: '-', label: '−', x: 38, y: 72, dir: 'b', title: '− terminal' }],
+  props: {},
+  state: (c, sim) => { const m = sim.analog && sim.analog.mech && sim.analog.mech.motors[c.id]; return { rpm: m ? m[0] : 0, angle: m ? m[1] : 0 }; },
+  render(c, s) {
+    const a = (s.angle * 180) / Math.PI;
+    const rpm = Math.round(Math.abs(s.rpm));
+    return `<path d="M22 54 V72 M38 54 V72" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="6" y="18" width="48" height="38" rx="5" fill="#c9ced6" stroke="#8b929c"/>
+      <rect x="6" y="46" width="48" height="10" rx="2" fill="#2b2f37"/>
+      <circle cx="30" cy="30" r="15" fill="#aeb4be" stroke="#7d8591"/>
+      <g transform="rotate(${a.toFixed(1)} 30 30)"><rect x="28" y="12" width="4" height="36" rx="2" fill="#e5484d"/></g>
+      <circle cx="30" cy="30" r="3" fill="#555c66"/>
+      <text x="16" y="53" class="cs-tiny cs-light">+</text>
+      ${rpm > 1 ? `<text x="30" y="8" class="cs-part-lbl">${rpm.toLocaleString()} rpm</text>` : ''}`;
+  },
+};
+
+DEFS.relay = {
+  type: 'relay', name: '5 V Relay', category: 'Electromechanical', w: 66, h: 60,
+  hint: 'Coil C1–C2 (70 Ω, pulls in above ~35 mA). COM connects to NC at rest and to NO when energised. Drive the coil with a transistor and a flyback diode.',
+  pins: [
+    { id: 'C1', label: 'C1', x: 8, y: 60, dir: 'b', title: 'Coil +' },
+    { id: 'C2', label: 'C2', x: 20, y: 60, dir: 'b', title: 'Coil −' },
+    { id: 'COM', label: 'COM', x: 34, y: 60, dir: 'b', title: 'Common contact' },
+    { id: 'NO', label: 'NO', x: 46, y: 60, dir: 'b', title: 'Normally open (closed when energised)' },
+    { id: 'NC', label: 'NC', x: 58, y: 60, dir: 'b', title: 'Normally closed (open when energised)' },
+  ],
+  props: {},
+  state: (c, sim) => ({ on: !!(sim.analog && sim.analog.mech && sim.analog.mech.relays[c.id]) }),
+  render(c, s) {
+    const on = !!s.on;
+    return `${[8, 20, 34, 46, 58].map((x) => `<path d="M${x} 46 V60" stroke="#a7adb7" stroke-width="2"/>`).join('')}
+      <rect x="1" y="4" width="64" height="44" rx="3" fill="#2163d6" stroke="#123c86"/>
+      <text x="33" y="17" class="cs-tiny cs-light">RELAY 5V</text>
+      <path d="M8 40 V28 M20 40 V28" stroke="#9db7e6" stroke-width="1.4"/><rect x="5" y="24" width="18" height="8" rx="2" fill="none" stroke="#9db7e6"/>
+      <circle cx="34" cy="38" r="2" fill="#fff"/><circle cx="46" cy="28" r="2" fill="#fff"/><circle cx="58" cy="28" r="2" fill="#fff"/>
+      <path d="M34 38 L${on ? 46 : 58} 29" stroke="${on ? '#ffd60a' : '#fff'}" stroke-width="2" stroke-linecap="round"/>
+      <text x="${on ? 46 : 58}" y="${on ? 22 : 22}" class="cs-tiny cs-light">${on ? 'NO' : 'NC'}</text>`;
+  },
+};
+
 DEFS.lcd = {
   type: 'lcd', name: 'LCD 16×2 (I2C)', category: 'Output', w: 236, h: 86,
   pins: [
@@ -537,6 +583,7 @@ const PALETTE = [
   { cat: 'Input', types: ['button', 'pot'] },
   { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },
   { cat: 'Semiconductors', types: ['npn', 'pnp', 'nmos', 'diode', 'opamp'] },
+  { cat: 'Electromechanical', types: ['motor', 'relay'] },
   { cat: 'Logic', types: Object.keys(CHIPS) },
   { cat: 'Passive', types: ['resistor', 'capacitor'] },
 ];

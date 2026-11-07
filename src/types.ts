@@ -44,7 +44,9 @@ export interface PinDef {
 export type ControlDef =
   | { key: string; label: string; type: 'range'; min: number; max: number; step: number; fmt?: (v: number) => string }
   | { key: string; label: string; type: 'select'; options: Array<string | number> }
-  | { key: string; label: string; type: 'toggle' };
+  | { key: string; label: string; type: 'toggle' }
+  /** pasted SPICE .model / .subckt text that replaces the built-in model */
+  | { key: string; label: string; type: 'spice'; maxLength: number; accepts: string };
 
 /** The subset of the simulator a part's behaviour hooks may use. */
 export interface SimView {

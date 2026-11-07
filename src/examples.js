@@ -475,6 +475,68 @@ void loop() {
       code: unoPotIno, firmware: { name: 'uno-pot.ino.hex', hex: unoPotHex },
     },
     {
+      key: 'motor', name: 'DC motor speed control (MOSFET + PWM)',
+      components: [esp,
+        { id: 'mot1', type: 'motor', x: 110, y: 120, props: {} },
+        { id: 'q1', type: 'nmos', x: 160, y: 300, props: {} },
+        { id: 'd1', type: 'diode', x: 120, y: 240, props: { model: '1N4007' } }],
+      wires: [W('esp:D26', 'q1:G'), W('q1:S', 'esp:GND.L'), W('esp:VIN', 'mot1:+', '#ff4d4d'), W('mot1:-', 'q1:D'),
+        W('mot1:-', 'd1:A'), W('d1:K', 'esp:VIN', '#ff4d4d')],
+      code: `// The 2N7000 MOSFET switches the motor from the 5 V rail; PWM on its gate sets the speed.
+// A GPIO can't power a motor directly (it needs far more than 40 mA), and the 1N4007
+// flyback diode catches the voltage spike the motor's coil makes each time it switches off.
+// Try deleting d1 and watch the Console. Scope tip: probe mot1.- to see the PWM and the clamp.
+const int GATE = 26;
+
+void setup() {
+  Serial.begin(115200);
+  // 200 Hz keeps this simulation real-time; real motor drivers often use 1–20 kHz (quieter),
+  // which works here too but runs slower: every edge needs fine steps to follow the coil current.
+  ledcAttach(GATE, 200, 8);
+}
+
+void loop() {
+  for (int duty = 0; duty <= 255; duty += 15) { ledcWrite(GATE, duty); Serial.printf("duty %d%%\\n", duty * 100 / 255); delay(250); }
+  for (int duty = 255; duty >= 0; duty -= 15) { ledcWrite(GATE, duty); delay(150); }
+}
+`,
+    },
+    {
+      key: 'relay', name: 'Relay switches two LEDs (NO / NC)',
+      components: [esp,
+        { id: 'rb', type: 'resistor', x: 480, y: 192, props: { ohms: 1000 } },
+        { id: 'q1', type: 'npn', x: 560, y: 330, props: {} },
+        { id: 'k1', type: 'relay', x: 640, y: 330, props: {} },
+        { id: 'd1', type: 'diode', x: 650, y: 450, props: { model: '1N4007' } },
+        { id: 'r1', type: 'resistor', x: 760, y: 470, props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: 860, y: 380, props: { color: 'green' } },
+        { id: 'r2', type: 'resistor', x: 760, y: 520, props: { ohms: 220 } },
+        { id: 'led2', type: 'led', x: 910, y: 380, props: { color: 'red' } }],
+      wires: [W('esp:D18', 'rb:1'), W('rb:2', 'q1:B'), W('q1:E', 'esp:GND.R'),
+        W('esp:VIN', 'k1:C1', '#ff4d4d'), W('k1:C2', 'q1:C'), W('k1:C2', 'd1:A'), W('d1:K', 'esp:VIN', '#ff4d4d'),
+        W('esp:3V3', 'k1:COM', '#ff4d4d'), W('k1:NO', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp:GND.R'),
+        W('k1:NC', 'r2:1'), W('r2:2', 'led2:A'), W('led2:C', 'esp:GND.R')],
+      code: `// A relay is a switch moved by an electromagnet: the 70 Ω coil needs ~70 mA from 5 V,
+// so an NPN transistor drives it, and a flyback diode protects the transistor.
+// COM connects to NC (red LED) at rest and to NO (green LED) when the coil is energised.
+const int COIL = 18;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(COIL, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(COIL, HIGH);
+  Serial.println("relay on: COM -> NO (green)");
+  delay(1000);
+  digitalWrite(COIL, LOW);
+  Serial.println("relay off: COM -> NC (red)");
+  delay(1000);
+}
+`,
+    },
+    {
       key: 'traffic', name: 'Traffic light',
       components: [esp,
         { id: 'r1', type: 'resistor', x: 500, y: 100, props: { ohms: 220 } },

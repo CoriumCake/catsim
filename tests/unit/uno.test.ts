@@ -10,6 +10,11 @@ import fadeHex from '../../src/firmware/uno-fade.hex?raw';
 type Comp = { id: string; type: string; x: number; y: number; props: Record<string, unknown> };
 const comp = (id: string, type: string, props = {}): Comp => ({ id, type, x: 0, y: 0, props: { ...DEFS[type].props, ...props } });
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Emulation may run below real time on a loaded machine: wait for a condition, not a fixed time. */
+async function until(u: UnoRunner, cond: () => boolean, timeout = 5000) {
+  const t0 = Date.now();
+  while (!cond()) { if (Date.now() - t0 > timeout) throw new Error('condition not reached'); await wait(20); u.touch(); }
+}
 let live: UnoRunner | null = null;
 afterEach(() => { live?.stop(true); live = null; });
 
@@ -52,31 +57,31 @@ describe('Arduino Uno firmware', () => {
   it('runs Blink: serial output, on-board LED and an external LED on pin 9', async () => {
     const [parts, wires] = ledOn9();
     const { u, host } = run([uno, ...parts], wires, blinkHex);
-    await wait(150); u.touch();
+    await until(u, () => u.millis() > 150);
     expect(host.errors).toEqual([]);
     expect(u.serialOut).toContain('Uno blink started');
     expect(u.serialOut).toContain('tick');
     expect(u.out[13]).toBe(1); // first half-second: L on, pin 9 low
     expect(u.analog.ledBrightness().l1).toBeLessThan(0.05);
-    await wait(500); u.touch();
+    await until(u, () => u.millis() > 650);
     expect(u.serialOut).toContain('tock');
     expect(u.analog.ledBrightness().l1).toBeGreaterThan(0.5); // ~11 mA through 220 Ω from 5 V
   });
 
   it('keeps simulated time in step with the CPU clock (millis() from Timer0)', async () => {
     const { u } = run([uno], [], blinkHex);
-    await wait(1200);
-    expect((u.serialOut.match(/tick|tock/g) || []).length).toBeGreaterThanOrEqual(2);
-    expect(u.millis()).toBeGreaterThan(900);
+    await until(u, () => u.millis() > 1100);
+    // two delay(500) per line pair: millis() from Timer0 must agree with the CPU cycle count
+    expect((u.serialOut.match(/tick|tock/g) || []).length).toBe(3);
   });
 
   it('reads a button through INPUT_PULLUP', async () => {
     const [parts, wires] = ledOn9();
     const { u } = run([uno, comp('b1', 'button'), ...parts], [...wires, ['uno:D2', 'b1:1'], ['b1:2', 'uno:GND2']], buttonHex);
-    await wait(80); u.touch();
+    await until(u, () => u.millis() > 80);
     expect(u.analog.ledBrightness().l1).toBeLessThan(0.05);
     u.setPressed('b1', true);
-    await wait(120); u.touch();
+    const t = u.millis(); await until(u, () => u.millis() > t + 120);
     expect(u.serialOut).toContain('pressed');
     expect(u.analog.ledBrightness().l1).toBeGreaterThan(0.5);
   });
@@ -86,7 +91,7 @@ describe('Arduino Uno firmware', () => {
     const { u } = run([uno, comp('p1', 'pot', { value: 0.25 }), ...parts],
       [...wires, ['uno:5V', 'p1:VCC'], ['p1:GND', 'uno:GND3'], ['p1:SIG', 'uno:A0']], potHex);
     u.analog.setProbes(['uno:D9'], 2e-5);
-    await wait(400); u.touch();
+    await until(u, () => u.millis() > 400);
     const m = /A0 = (\d+)/.exec(u.serialOut);
     expect(m).not.toBeNull();
     expect(+m![1]).toBeGreaterThan(245); expect(+m![1]).toBeLessThan(262); // 25 % of 1023
@@ -103,7 +108,7 @@ describe('Arduino Uno firmware', () => {
     const [parts, wires] = ledOn9();
     const { u } = run([uno, ...parts], wires, fadeHex);
     const seen = new Set<number>();
-    for (let i = 0; i < 6; i++) { await wait(120); u.touch(); seen.add(Math.round(u.analog.ledBrightness().l1 * 10)); }
+    for (let i = 1; i <= 6; i++) { await until(u, () => u.millis() > i * 120); seen.add(Math.round(u.analog.ledBrightness().l1 * 10)); }
     expect(seen.size).toBeGreaterThan(2);
   });
 
