@@ -64,7 +64,8 @@ class SimHost extends Simulator {
     if (!this.worker) return Promise.resolve(false);
     this.paused = false;
     this.analog = null;
-    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed });
+    const board = (this.app.project.components.find((c) => c.type === 'uno') || {}).type;
+    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed, board, firmware: board === 'uno' && this.app.project.firmware ? this.app.project.firmware.hex : undefined });
     if (this.probes.some(Boolean)) this.send({ type: 'probes', refs: this.probes, dtMax: this.probeDtMax });
     return new Promise((res) => { this.resolveRun = res; });
   }
@@ -113,6 +114,7 @@ class SimHost extends Simulator {
       case 'snap': {
         this.snapT = Math.max(0, finite(m.t, this.snapT)); this.snapAt = performance.now();
         this.paused = m.paused === true;
+        this.txAt = typeof m.serial === 'string' && m.serial ? performance.now() : this.txAt;
         { const sp = finite(m.speed, this.speed); if (sp >= 0.05 && sp <= 100) this.speed = sp; }
         this.mode = numMap(m.mode); this.out = numMap(m.out); this.pwm = numMap(m.pwm);
         this.servo = numMap(m.servo); this.tone = numMap(m.tone);

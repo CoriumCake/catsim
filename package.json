@@ -18,6 +18,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@lezer/highlight": "^1.2.5",
+    "avr8js": "^0.21.1",
     "codemirror": "^6.0.2",
     "three": "^0.187.0"
   },

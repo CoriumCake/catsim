@@ -9,6 +9,7 @@ import { createEditor } from './editor.ts';
 import { normalizeProject, encodeShare, decodeShare } from './project.ts';
 import { Scope } from './scope.ts';
 import { wireNets } from './analog/nets.ts';
+import { parseIntelHex } from './avr/hex.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
@@ -66,7 +67,7 @@ const App = {
 
   fromExample(key) {
     const ex = EXAMPLES.find((e) => e.key === key);
-    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })) };
+    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}) };
   },
 
   normalize(p) { return normalizeProject(p, DEFS); },
@@ -82,7 +83,7 @@ const App = {
     requestAnimationFrame(() => this.canvas.fit());
     this.view3d.dirty = true; this.view3d.camFitted = false;
     if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
-    this.refreshScopeNets(); this.scope.clear();
+    this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi();
     this.renderIot(); this.save();
   },
 
@@ -113,7 +114,7 @@ const App = {
     this.canvas.select({ kind: 'comp', id: c.id });
   },
   addWire(from, to) {
-    if (from.split(':')[0] === to.split(':')[0] && DEFS[this.project.components.find((c) => c.id === from.split(':')[0]).type].type !== 'esp32') { this.toast('Connect pins of different parts'); return; }
+    if (from.split(':')[0] === to.split(':')[0] && !DEFS[this.project.components.find((c) => c.id === from.split(':')[0]).type].board) { this.toast('Connect pins of different parts'); return; }
     if (this.project.wires.some((w) => (w.from === from && w.to === to) || (w.from === to && w.to === from))) return;
     let i = 1; while (this.project.wires.some((w) => w.id === 'w' + i)) i++;
     this.project.wires.push({ id: 'w' + i, from, to });
@@ -140,6 +141,11 @@ const App = {
     $('#serialOut').textContent = '';
     this.clearConsole();
     this.project.code = this.editor.get();
+    if (this.boardType() === 'uno' && !this.project.firmware) {
+      this.log('The Arduino Uno runs compiled firmware. Click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.', 'error');
+      this.showTab('bottom', 'consolePane');
+      return;
+    }
     this.sim.start(this.project.code).then((ok) => { if (ok === false) this.showTab('bottom', 'consolePane'); });
   },
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
@@ -182,10 +188,57 @@ const App = {
   },
 
   onScopeSamples(t, v) { this.scope.addSamples(t, v); },
+  boardType() { const b = this.project.components.find((c) => DEFS[c.type] && DEFS[c.type].board); return b ? b.type : 'esp32'; },
+  /** Switch the project's microcontroller board. Wires to the old board's pins are removed. */
+  setBoard(type) {
+    if (type === this.boardType() || !DEFS[type] || !DEFS[type].board) return;
+    this.stop();
+    const old = this.project.components.find((c) => DEFS[c.type].board);
+    const id = type === 'uno' ? 'uno' : 'esp';
+    const before = this.project.wires.length;
+    if (old) {
+      this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(old.id + ':') && !w.to.startsWith(old.id + ':'));
+      this.project.components = this.project.components.filter((c) => c !== old);
+    }
+    this.project.components.unshift({ id, type, x: old ? old.x : 300, y: old ? old.y : 80, props: {} });
+    this.changed(); this.refreshBoardUi(); requestAnimationFrame(() => this.canvas.fit());
+    const removed = before - this.project.wires.length;
+    this.toast(`Switched to ${DEFS[type].name}${removed ? `. ${removed} wire${removed > 1 ? 's' : ''} to the old board removed` : ''}`);
+  },
+  refreshBoardUi() {
+    const uno = this.boardType() === 'uno';
+    $('#boardSelect').value = this.boardType();
+    document.querySelector('.brand .chip').textContent = uno ? 'UNO' : 'ESP32';
+    $('#serialInput').placeholder = `Message to ${uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
+    $('#btnFirmware').hidden = !uno;
+    const b = $('#unoBanner'); b.hidden = !uno;
+    if (uno) {
+      const fw = this.project.firmware;
+      b.textContent = '';
+      const msg = document.createElement('span');
+      msg.textContent = fw ? `Running firmware “${fw.name}”. This sketch is shown for reference: edit it in the Arduino IDE, export the compiled binary and upload the .hex.` : 'The Uno runs real compiled firmware. Compile this sketch in the Arduino IDE (Sketch → Export Compiled Binary) and click “Upload .hex”.';
+      b.appendChild(msg);
+    }
+  },
+  async loadFirmware(file) {
+    if (!file) return;
+    if (file.size > 200_000) { this.toast('That file is too large for an ATmega328P'); return; }
+    const text = await file.text();
+    try {
+      const flash = parseIntelHex(text);
+      let used = flash.length; while (used > 0 && flash[used - 1] === 0) used--;
+      this.stop();
+      this.project.firmware = { name: file.name.slice(0, 120), hex: text };
+      this.save(); this.refreshBoardUi();
+      this.toast(`Loaded ${file.name} (${used.toLocaleString()} bytes)`);
+    } catch (e) {
+      this.log(`Could not load ${file.name}: ${e.message}`, 'error'); this.showTab('bottom', 'consolePane');
+    }
+  },
   /** Net choices for the scope, labelled by the pins on each net (ESP32 pins first). */
   refreshScopeNets() {
     const { members } = wireNets(this.project, DEFS);
-    const espId = (this.project.components.find((c) => c.type === 'esp32') || {}).id;
+    const espId = (this.project.components.find((c) => DEFS[c.type].board) || {}).id; // pins of the board are listed by name
     const isEsp = (k) => k.startsWith(espId + ':');
     const opts = [];
     for (const keys0 of members.values()) {
@@ -354,6 +407,9 @@ const App = {
     $('#btnRun').onclick = () => this.toggleRun();
     $('#btnRestart').onclick = () => this.restartSim();
     $('#btnPause').onclick = () => this.togglePause();
+    $('#boardSelect').onchange = (e) => this.setBoard(e.target.value);
+    $('#btnFirmware').onclick = () => $('#firmwareFile').click();
+    $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
     $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     $('#addPart').onclick = () => this.showTab('editor', 'partsPane');
     const is3d = () => this.view3d.active;

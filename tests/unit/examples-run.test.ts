@@ -6,6 +6,7 @@ import { AnalogBridge } from '../../src/analog/bridge.ts';
 import { EXAMPLES } from '../../src/examples.js';
 import { normalizeProject } from '../../src/project.ts';
 import { DEFS } from '../../src/components.js';
+import { UnoRunner } from '../../src/avr/uno.ts';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SKIP = new Set(['http']); // needs the internet
@@ -20,11 +21,19 @@ async function runExample(key: string, ms: number) {
     log(m: string, level = 'info') { host.logs.push([level, m]); }, reportError(e: unknown) { host.errors.push(e); },
     iotChanged() {}, onSimState() {}, restartSim() {},
   };
+  if ('firmware' in ex) host.project.firmware = { ...(ex as { firmware: { name: string; hex: string } }).firmware };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sim: any = new Simulator(host);
-  sim.analog = new AnalogBridge(sim);
-  sim.setSpeed(4);
-  sim.start(ex.code);
+  let sim: any;
+  if (host.project.components.some((c) => c.type === 'uno')) {
+    sim = new UnoRunner(host); // real firmware on the emulated ATmega328P
+    sim.setSpeed(2);
+    expect(sim.start(host.project.firmware!.hex)).toBe(true);
+  } else {
+    sim = new Simulator(host);
+    sim.analog = new AnalogBridge(sim);
+    sim.setSpeed(4);
+    sim.start(ex.code);
+  }
   for (let t = 0; t < ms; t += 50) { await wait(50); sim.touch(); }
   sim.stop(true);
   return { sim, host };

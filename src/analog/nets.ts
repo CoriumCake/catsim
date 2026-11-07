@@ -19,8 +19,12 @@ export function wireNets(p: Project, defs: Record<string, PartDef>): WireNets {
   for (const c of p.components) for (const pin of defs[c.type]?.pins ?? []) parent.set(`${c.id}:${pin.id}`, `${c.id}:${pin.id}`);
   const union = (a: string, b: string) => { if (!parent.has(a) || !parent.has(b)) return; const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
   for (const w of p.wires) union(w.from, w.to);
-  const esp = p.components.find((c) => c.type === 'esp32');
-  if (esp) union(`${esp.id}:GND.L`, `${esp.id}:GND.R`); // joined on the board
+  // pins joined on a board itself (ESP32 GND.L/GND.R, Uno GND pins and A4=SDA/A5=SCL)
+  for (const c of p.components) {
+    const d = defs[c.type];
+    if (!d?.board || !d.internal) continue;
+    for (const [a, b] of d.internal(c, {} as never)) union(`${c.id}:${a}`, `${c.id}:${b}`);
+  }
   const rootOf = new Map<string, string>(), members = new Map<string, string[]>();
   for (const k of parent.keys()) {
     const r = find(k); rootOf.set(k, r);

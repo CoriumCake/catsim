@@ -15,6 +15,9 @@
       <span class="chip">ESP32</span>
     </div>
     <input id="projectName" class="proj-name" value="Untitled project" spellcheck="false" aria-label="Project name">
+    <select id="boardSelect" class="board-select" aria-label="Board" title="Microcontroller board"><option value="esp32">ESP32 DevKit</option><option value="uno">Arduino Uno</option></select>
+    <button id="btnFirmware" class="btn" hidden title="Load compiled firmware for the Uno (.hex)">Upload .hex</button>
+    <input type="file" id="firmwareFile" accept=".hex,.ihx,text/plain" hidden>
     <div class="tb-spacer"></div>
     <div class="tb-group tb-files">
       <select id="exampleSelect" class="btn" aria-label="Load example"><option value="">Examples…</option></select>
@@ -35,7 +38,7 @@
         <button class="tab" data-tab="refPane">API reference</button>
       </div>
       <div class="editor-wrap">
-        <div id="editorPane" class="tabpane active"><div id="code" class="code-host"></div></div>
+        <div id="editorPane" class="tabpane active"><div id="unoBanner" class="uno-banner" hidden></div><div id="code" class="code-host"></div></div>
   <div id="partsPane" class="tabpane palette">
         <input id="paletteSearch" class="search" placeholder="Search parts…" aria-label="Search parts">
         <div id="paletteList" class="palette-list"></div>
