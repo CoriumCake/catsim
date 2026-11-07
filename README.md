@@ -43,6 +43,10 @@ js/app.js         app shell, panels, persistence
 
 The site is hosted on Cloudflare Workers as static assets at **https://sim.catcodehq.com**.
 
+GitHub Actions (`.github/workflows/ci-cd.yml`) runs the tests (`node --test tests/`) on every push and pull request, and deploys every push to `main` that passes. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+To deploy by hand instead:
+
 ```sh
 npx wrangler deploy
 ```

@@ -6,3 +6,5 @@ wrangler.jsonc
 README.md
 .gitignore
 .assetsignore
+tests
+.github
