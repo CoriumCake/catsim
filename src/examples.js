@@ -350,10 +350,14 @@ void loop() {
     {
       key: 'traffic', name: 'Traffic light',
       components: [esp,
-        { id: 'red', type: 'led', x: 560, y: 60, props: { color: 'red' } },
-        { id: 'yellow', type: 'led', x: 610, y: 60, props: { color: 'yellow' } },
-        { id: 'green', type: 'led', x: 660, y: 60, props: { color: 'green' } }],
-      wires: [W('esp:D23', 'red:A'), W('esp:D22', 'yellow:A'), W('esp:D21', 'green:A'),
+        { id: 'r1', type: 'resistor', x: 500, y: 100, props: { ohms: 220 } },
+        { id: 'r2', type: 'resistor', x: 500, y: 140, props: { ohms: 220 } },
+        { id: 'r3', type: 'resistor', x: 500, y: 180, props: { ohms: 220 } },
+        { id: 'red', type: 'led', x: 640, y: 30, props: { color: 'red' } },
+        { id: 'yellow', type: 'led', x: 700, y: 30, props: { color: 'yellow' } },
+        { id: 'green', type: 'led', x: 760, y: 30, props: { color: 'green' } }],
+      wires: [W('esp:D23', 'r1:1'), W('esp:D22', 'r2:1'), W('esp:D21', 'r3:1'),
+        W('r1:2', 'red:A'), W('r2:2', 'yellow:A'), W('r3:2', 'green:A'),
         W('red:C', 'esp:GND.R'), W('yellow:C', 'esp:GND.R'), W('green:C', 'esp:GND.R')],
       code: `// Classic traffic light using an array of pins and an enum.
 int pins[] = {23, 22, 21};
