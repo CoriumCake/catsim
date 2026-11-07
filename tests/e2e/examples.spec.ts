@@ -105,9 +105,11 @@ test('stop during a long delay terminates the worker', async ({ page }) => {
 test('share link round-trips a project', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await loadExample(page, 'weather');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
   await page.click('#btnShare');
+  // Share compresses the project asynchronously before writing to the clipboard.
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/#z=[A-Za-z0-9_-]+$/);
   const url = await page.evaluate(() => navigator.clipboard.readText());
-  expect(url).toMatch(/#z=[A-Za-z0-9_-]+$/);
   await page.goto(url);
   await page.waitForFunction(() => window.CatSim?.App?.project);
   expect(await page.evaluate(() => window.CatSim.App.project.name)).toContain('Weather');
