@@ -61,7 +61,7 @@ void loop() { delay(100); }`);
 
 test('the CSP blocks injected inline scripts, while the worker can still compile sketches', async ({ page, request }) => {
   const res = await request.get('/');
-  expect(res.headers()['content-security-policy']).toContain("script-src 'self'");
+  expect(res.headers()['content-security-policy']).toMatch(/script-src 'self'( https:\/\/static\.cloudflareinsights\.com)?;/);
   await page.goto('/');
   await page.waitForFunction(() => window.CatSim?.App?.project);
   // An injected inline script (what an HTML-injection bug would produce) must not run.
