@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "catsim",
+  "compatibility_date": "2026-10-01",
+  // Static site only: every file in the repo root is served, minus .assetsignore entries.
+  "assets": {
+    "directory": ".",
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    { "pattern": "sim.catcodehq.com", "custom_domain": true }
+  ]
+}
