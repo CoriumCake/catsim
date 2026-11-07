@@ -206,7 +206,7 @@ test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
 
 test('Arduino Uno runs real compiled firmware (Blink)', async ({ page }) => {
   await loadExample(page, 'uno-blink');
-  await expect(page.locator('#boardSelect')).toHaveValue('uno');
+  await expect(page.locator('#paletteList .part[data-type="uno"]')).toHaveClass(/current/);
   await expect(page.locator('#btnFirmware')).toBeVisible();
   await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toMatch(/Uno blink started\s+tick\s+tock/);
@@ -214,7 +214,9 @@ test('Arduino Uno runs real compiled firmware (Blink)', async ({ page }) => {
 });
 
 test('switch to the Uno, upload a .hex and run it', async ({ page }) => {
-  await page.selectOption('#boardSelect', 'uno');
+  await page.click('#addPart'); // Parts tab
+  await page.click('#paletteList .part[data-type="uno"]');
+  await expect(page.locator('#paletteList .part[data-type="uno"]')).toHaveClass(/current/);
   await expect(page.locator('#unoBanner')).toContainText('Upload .hex');
   await page.click('#btnRun');
   await expect(page.locator('#consoleOut')).toContainText('runs compiled firmware'); // no firmware yet

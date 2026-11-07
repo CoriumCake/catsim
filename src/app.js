@@ -110,6 +110,7 @@ const App = {
   },
   addComponent(type, x, y) {
     const d = DEFS[type];
+    if (d.board) { this.setBoard(type); return; } // a project has exactly one board: picking one switches to it
     if (x === undefined) { const c = this.canvas.centerPoint(); x = c.x - d.w / 2 + (Math.random() * 60 - 30); y = c.y - d.h / 2 + (Math.random() * 60 - 30); }
     const c = { id: this.nextId(type), type, x: Math.round(x / 5) * 5, y: Math.round(y / 5) * 5, props: { ...d.props } };
     this.project.components.push(c);
@@ -227,7 +228,11 @@ const App = {
   },
   refreshBoardUi() {
     const uno = this.boardType() === 'uno';
-    $('#boardSelect').value = this.boardType();
+    document.querySelectorAll('#paletteList .part').forEach((b) => {
+      const cur = b.dataset.type === this.boardType();
+      b.classList.toggle('current', cur);
+      if (DEFS[b.dataset.type].board) b.title = cur ? `${DEFS[b.dataset.type].name} (in use)` : `Switch to ${DEFS[b.dataset.type].name}`;
+    });
     document.querySelector('.brand .chip').textContent = uno ? 'UNO' : 'ESP32';
     $('#serialInput').placeholder = `Message to ${uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
     $('#btnFirmware').hidden = !uno;
@@ -446,8 +451,7 @@ const App = {
     $('#btnRestart').onclick = () => this.restartSim();
     $('#btnPause').onclick = () => this.togglePause();
     $('#btnSide').onclick = () => this.toggleSidebar();
-    $('#boardSelect').onchange = (e) => this.setBoard(e.target.value);
-    $('#btnFirmware').onclick = () => $('#firmwareFile').click();
+$('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
     $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     $('#addPart').onclick = () => this.showTab('editor', 'partsPane');

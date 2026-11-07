@@ -579,6 +579,7 @@ DEFS.lcd = {
 };
 
 const PALETTE = [
+  { cat: 'Boards', types: ['esp32', 'uno'] }, // picking one switches the project's board
   { cat: 'Output', types: ['led', 'buzzer', 'servo', 'lcd'] },
   { cat: 'Input', types: ['button', 'pot'] },
   { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },
