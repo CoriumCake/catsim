@@ -73,6 +73,7 @@
       const sun = this.sun = new T.DirectionalLight(0xffffff, 0.75);
       sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.radius = 3;
       this.scene.add(sun, sun.target);
+      const under = new T.DirectionalLight(0xfff4e0, 0.45); under.position.set(0.3, -1, 0.4); this.scene.add(under); // fill light for the undersides
       this.root = new T.Group(); this.scene.add(this.root);
 
       this.glowTex = canvasTex(64, 64, (g) => {
@@ -83,7 +84,7 @@
 
       const c = this.controls = new T.OrbitControls(this.camera, this.el);
       c.enableDamping = true; c.dampingFactor = 0.12; c.screenSpacePanning = true;
-      c.maxPolarAngle = 85 * DEG; c.minDistance = 60; c.maxDistance = 4000;
+      c.minPolarAngle = 0; c.maxPolarAngle = Math.PI; // full 360°: look under the boards too c.minDistance = 60; c.maxDistance = 4000;
 
       this.ray = new T.Raycaster(); this.ptr = new T.Vector2();
       this.el.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -115,6 +116,7 @@
         if (this.dirty) this.rebuild();
         this.update();
         this.controls.update();
+        this.seeThrough();
         this.renderer.render(this.scene, this.camera);
         this._raf = requestAnimationFrame(tick);
       };
@@ -143,6 +145,16 @@
       this.camera.position.set(cx, Math.sin(elev) * dist, cz + Math.cos(elev) * dist);
       this.controls.update();
       this.camFitted = true;
+    }
+
+    // From below, fade the cutting mat to glass and hide the shadow floor so the PCB backs are visible.
+    seeThrough() {
+      if (!this.matMesh) return;
+      const below = this.camera.position.y < 0;
+      const m = this.matMesh.material, want = below ? 0.18 : 1;
+      if (Math.abs(m.opacity - want) > 0.005) m.opacity += (want - m.opacity) * 0.2; else m.opacity = want;
+      m.depthWrite = m.opacity > 0.95;
+      this.floorMesh.visible = !below;
     }
 
     zoom(f) {
@@ -220,9 +232,10 @@
       });
       grid.wrapS = grid.wrapT = T.RepeatWrapping; grid.repeat.set(mw / 80, md / 80);
       const mat = this.mesh(new T.BoxGeometry(mw, 2, md), this.mat('#ffffff', { map: grid, roughness: 0.95 }), this.root, (b.x0 + b.x1) / 2, -1, (b.z0 + b.z1) / 2, false);
-      mat.userData.ground = true;
+      mat.userData.ground = true; this.matMesh = mat;
+      mat.material.transparent = true;
       const floor = this.mesh(new T.PlaneGeometry(20000, 20000), (() => { const m = new T.ShadowMaterial({ opacity: 0.12 }); this.disp.push(m); return m; })(), this.root, 0, -2.01, 0, false);
-      floor.rotation.x = -Math.PI / 2;
+      floor.rotation.x = -Math.PI / 2; this.floorMesh = floor;
 
       const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, r = Math.max(mw, md) / 2 + 60;
       this.sun.position.set(cx - r * 0.5, r * 1.6, cz - r * 0.35); this.sun.target.position.set(cx, 0, cz);
@@ -283,9 +296,31 @@
         x.fillStyle = '#7f8aa3'; x.textAlign = 'center'; x.font = '600 7px system-ui, sans-serif'; x.fillText('DEVKIT V1', 75, 146);
         x.font = '600 5px system-ui, sans-serif'; x.fillText('PWR', 62, 214); x.fillText('IO2', 90, 214); x.fillText('EN', 51, 230); x.fillText('BOOT', 101, 230);
       });
+      // Back side. The -Y box face shows the image flipped about the X axis, so physical z maps to row 262 - z.
+      const back = this.tex(600, 1048, (x) => {
+        const k = 4; x.scale(k, k);
+        x.fillStyle = '#151b28'; x.fillRect(0, 0, 150, 262);
+        x.strokeStyle = 'rgba(201,162,39,.35)'; x.lineWidth = 1.1; x.lineCap = 'round';
+        const traces = [[[18, 70], [40, 70], [52, 82], [52, 150]], [[132, 90], [110, 90], [98, 102], [98, 170]], [[18, 160], [60, 160], [75, 175], [75, 220]], [[132, 200], [100, 200], [90, 210]], [[30, 230], [120, 230]]];
+        for (const t of traces) { x.beginPath(); t.forEach(([a, b], i) => (i ? x.lineTo(a, b) : x.moveTo(a, b))); x.stroke(); }
+        x.fillStyle = 'rgba(201,162,39,.5)';
+        for (const [a, b] of [[52, 150], [98, 170], [75, 220], [90, 210], [40, 120], [110, 60]]) { x.beginPath(); x.arc(a, b, 1.6, 0, Math.PI * 2); x.fill(); }
+        x.textBaseline = 'middle'; x.font = '600 6.5px ui-monospace, Menlo, monospace';
+        for (const p of pins) {
+          const row = 262 - p.y, px = p.x === 0 ? 5 : 145;
+          x.fillStyle = '#d8b24a'; x.beginPath(); x.arc(px, row, 3.4, 0, Math.PI * 2); x.fill();
+          x.fillStyle = '#151b28'; x.beginPath(); x.arc(px, row, 1.3, 0, Math.PI * 2); x.fill();
+          x.fillStyle = '#c4cbd8'; x.textAlign = p.x === 0 ? 'left' : 'right'; x.fillText(p.label, p.x === 0 ? 11 : 139, row + 0.5);
+        }
+        x.fillStyle = '#d8b24a'; x.fillRect(57, 262 - 266, 36, 14);
+        x.fillStyle = '#c4cbd8'; x.textAlign = 'center';
+        x.font = '700 9px system-ui, sans-serif'; x.fillText('ESP32 DEVKIT V1', 75, 118);
+        x.font = '600 6px system-ui, sans-serif'; x.fillText('CP2102 · AMS1117-3.3', 75, 130); x.fillText('sim.catcodehq.com', 75, 140);
+        x.strokeStyle = '#c4cbd8'; x.lineWidth = 0.8; x.strokeRect(46, 100, 58, 46);
+      });
       const side = this.mat('#151b28', { roughness: 0.7 });
       const pcb = this.mesh(new T.BoxGeometry(150, PCB_Y1 - PCB_Y0, 262),
-        [side, side, this.mat('#ffffff', { map: top, roughness: 0.7 }), side, side, side], g, 75, (PCB_Y0 + PCB_Y1) / 2, 131);
+        [side, side, this.mat('#ffffff', { map: top, roughness: 0.7 }), this.mat('#ffffff', { map: back, roughness: 0.7 }), side, side], g, 75, (PCB_Y0 + PCB_Y1) / 2, 131);
       pcb.material.forEach((m) => this.disp.includes(m) || this.disp.push(m));
       // header strips (underneath, holding the board up) and pins on top
       for (const x of [0, 140]) this.box(g, x, 30, 10, 212, 0, PCB_Y0, this.M.header);
@@ -469,7 +504,25 @@
 
     build_lcd(g, c) {
       const T = THREE;
-      this.box(g, 14, 0, 222, 86, 0, 3, this.mat('#1f6a35'));
+      // underside: PCF8574 I2C "backpack" (texture rows are 86 - z because the -Y face is flipped)
+      const back = this.tex(888, 344, (x) => {
+        x.scale(4, 4); x.translate(-14, 0);
+        x.fillStyle = '#1f6a35'; x.fillRect(14, 0, 222, 86);
+        x.fillStyle = '#d8b24a';
+        for (let i = 0; i < 16; i++) { x.beginPath(); x.arc(40 + i * 8, 86 - 6, 2, 0, Math.PI * 2); x.fill(); }
+        x.fillStyle = '#1d3f8f'; x.fillRect(16, 86 - 72, 80, 56);
+        x.fillStyle = '#111'; x.fillRect(40, 86 - 50, 28, 14);
+        x.fillStyle = '#c4cbd8'; x.font = '600 4px ui-monospace, monospace'; x.textAlign = 'center'; x.fillText('PCF8574T', 54, 86 - 42);
+        x.fillStyle = '#2f6fe0'; x.fillRect(74, 86 - 66, 16, 16); x.fillStyle = '#f2f2f2'; x.beginPath(); x.arc(82, 86 - 58, 5, 0, Math.PI * 2); x.fill();
+        x.fillStyle = '#111'; x.fillRect(80.8, 86 - 63, 2.4, 10);
+        x.fillStyle = '#c4cbd8'; x.font = '600 4.5px system-ui, sans-serif'; x.textAlign = 'left';
+        ['GND', 'VCC', 'SDA', 'SCL'].forEach((l, i) => { x.fillText(l, 22, 86 - (22 + i * 12) + 1.5); });
+        x.fillText('0x27', 42, 86 - 26); x.fillText('LED', 74, 86 - 24);
+        x.fillStyle = '#111'; x.fillRect(70, 86 - 30, 8, 4);
+        x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '700 7px system-ui, sans-serif'; x.fillText('LCD1602 · I2C', 165, 86 - 40);
+      });
+      const lg = this.mat('#1f6a35');
+      this.mesh(new T.BoxGeometry(222, 3, 86), [lg, lg, lg, this.mat('#ffffff', { map: back }), lg, lg], g, 125, 1.5, 43);
       for (const [x, z] of [[24, 8], [226, 8], [24, 78], [226, 78]]) this.cyl(g, x, z, 3, 3, 3.3, this.mat('#0f3a1b'), 12);
       this.box(g, 30, 14, 196, 58, 3, 9, this.mat('#111111', { roughness: 0.5 }));
       for (const z of [22, 34, 46, 58]) this.rod(g, [0, PIN_TOP - 1, z], [16, 2.5, z], 0.9, this.M.lead);

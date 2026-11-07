@@ -264,7 +264,7 @@
         b3.disabled = false;
         this.canvas.cancelWire && this.canvas.wireStart && this.canvas.cancelWire();
         $('#zoomLabel').textContent = '3D';
-        this.hint('Drag to orbit · right-drag to pan · scroll to zoom · switch to 2D to wire parts');
+        this.hint('Drag to orbit 360° · right-drag to pan · scroll to zoom · switch to 2D to wire parts');
         clearTimeout(this._hintT); this._hintT = setTimeout(() => this.hint(''), 3500);
       } else {
         if (!this.view3d.active) return;
