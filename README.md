@@ -20,6 +20,7 @@ An internet connection is needed for the CodeMirror editor (loaded from cdnjs). 
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
 - **ESP32 pitfall checks:** warnings for flash pins 6–11, output on input-only pins 34–39, missing pull-ups, ADC2 used while WiFi is on, floating inputs, and unpowered sensors.
+- **3D view:** switch the stage to *3D* to orbit around a live 3D model of the circuit (LEDs glow, the servo turns, the LCD shows text, and you can press buttons). Wiring and moving parts still happen in 2D. Three.js loads only when you first open it.
 - **Projects** auto-save in the browser. You can also export or import JSON, or copy a share link (the whole project is encoded in the URL).
 
 Keyboard shortcuts: `Ctrl+Enter` starts or stops the simulation, `Del` deletes the selection, `Esc` cancels a wire.
@@ -35,6 +36,7 @@ js/components.js  part definitions (SVG rendering, pins, behaviour)
 js/transpiler.js  sketch → JS
 js/runtime.js     simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
 js/canvas.js      diagram editor (drag, wire, pan/zoom)
+js/view3d.js      3D view (Three.js, loaded on demand)
 js/examples.js    example projects
 js/app.js         app shell, panels, persistence
 ```

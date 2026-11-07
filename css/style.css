@@ -178,6 +178,13 @@ select.btn { padding-right: 6px; }
 .stage-hint { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: #1c2230; color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .15s; white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; }
 .stage-hint kbd { background: #2c3445; border-color: #3b4558; color: #fff; }
 .stage-hint.show { opacity: 1; }
+.view3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; touch-action: none; outline: none; }
+.view3d[hidden] { display: none; }
+.stage-tools, .stage-hint, .props { z-index: 3; }
+.view-seg { display: flex; background: var(--panel-2); border-radius: 8px; padding: 3px; gap: 2px; }
+.view-seg button { border: 0; background: transparent; height: 28px; min-width: 34px; border-radius: 6px; font: 700 12px var(--mono, monospace); color: var(--muted); cursor: pointer; }
+.view-seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.view-seg button:disabled { opacity: .5; cursor: wait; }
 
 /* parts on canvas */
 .cs-comp { cursor: move; }

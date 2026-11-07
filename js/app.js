@@ -3,6 +3,7 @@
   'use strict';
   const $ = (s) => document.querySelector(s);
   const STORE = 'catsim.project.v1';
+  const VIEW_STORE = 'catsim.view';
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
   // ---------- audio for buzzers ----------
@@ -55,11 +56,14 @@
     init() {
       this.sim = new NS.Simulator(this);
       this.canvas = new NS.Canvas(this, $('#canvas'));
+      this.view3d = new NS.View3D(this, $('#stage'));
       this.editor = createEditor($('#code'));
       this.buildPalette(); this.bindUi(); this.bindSplitters();
       this.load(this.initialProject());
       this.editor.onChange(() => { this.project.code = this.editor.get(); this.save(); });
       requestAnimationFrame(() => this.frame());
+      let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
+      if (v === '3d') this.setView('3d');
       window.addEventListener('resize', () => this.editor.refresh());
     },
 
@@ -98,6 +102,8 @@
       this.canvas.select(null);
       this.canvas.renderAll();
       requestAnimationFrame(() => this.canvas.fit());
+      this.view3d.dirty = true; this.view3d.camFitted = false;
+      if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
       this.renderIot(); this.save();
     },
 
@@ -108,6 +114,7 @@
 
     changed({ structure = true } = {}) {
       if (structure) { this.sim.invalidate(); this.canvas.renderAll(); }
+      this.view3d.dirty = true;
       this.save();
     },
 
@@ -248,7 +255,25 @@
     // ---------- UI ----------
     hint(html) { const h = $('#stageHint'); h.innerHTML = html; h.classList.toggle('show', !!html); },
     toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(this._toastT); this._toastT = setTimeout(() => t.classList.remove('show'), 2200); },
-    onZoom(k) { $('#zoomLabel').textContent = Math.round(k * 100) + '%'; },
+    async setView(mode) {
+      const b2 = $('#view2d'), b3 = $('#view3d');
+      if (mode === '3d') {
+        if (this.view3d.active) return;
+        b3.disabled = true;
+        try { await this.view3d.show(); } catch (e) { console.error(e); b3.disabled = false; this.toast('Could not load the 3D view (offline?)'); return; }
+        b3.disabled = false;
+        this.canvas.cancelWire && this.canvas.wireStart && this.canvas.cancelWire();
+        $('#zoomLabel').textContent = '3D';
+        this.hint('Drag to orbit · right-drag to pan · scroll to zoom · switch to 2D to wire parts');
+        clearTimeout(this._hintT); this._hintT = setTimeout(() => this.hint(''), 3500);
+      } else {
+        if (!this.view3d.active) return;
+        this.view3d.hide(); this.onZoom(this.canvas.view.k); this.hint('');
+      }
+      b2.classList.toggle('on', mode !== '3d'); b3.classList.toggle('on', mode === '3d');
+      try { localStorage.setItem(VIEW_STORE, mode); } catch (_) { /* ignore */ }
+    },
+    onZoom(k) { if (this.view3d && this.view3d.active) return; $('#zoomLabel').textContent = Math.round(k * 100) + '%'; },
 
     showTab(group, id) {
       const tabs = document.querySelector(`.tabs[data-group="${group}"]`);
@@ -317,9 +342,12 @@
       $('#btnRun').onclick = () => this.toggleRun();
       $('#btnRestart').onclick = () => this.restartSim();
       $('#addPart').onclick = () => this.showTab('editor', 'partsPane');
-      $('#zoomIn').onclick = () => this.canvas.zoomCenter(1.2);
-      $('#zoomOut').onclick = () => this.canvas.zoomCenter(1 / 1.2);
-      $('#zoomFit').onclick = () => this.canvas.fit();
+      const is3d = () => this.view3d.active;
+      $('#zoomIn').onclick = () => (is3d() ? this.view3d.zoom(1.2) : this.canvas.zoomCenter(1.2));
+      $('#zoomOut').onclick = () => (is3d() ? this.view3d.zoom(1 / 1.2) : this.canvas.zoomCenter(1 / 1.2));
+      $('#zoomFit').onclick = () => (is3d() ? this.view3d.fit() : this.canvas.fit());
+      $('#view2d').onclick = () => this.setView('2d');
+      $('#view3d').onclick = () => this.setView('3d');
       $('#projectName').addEventListener('input', (e) => { this.project.name = e.target.value; this.save(); });
 
       const sel = $('#exampleSelect');
