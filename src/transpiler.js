@@ -110,6 +110,10 @@ function transpile(source) {
 
   // --- misc C++ syntax ---
   code = code.replace(/->/g, '.');
+// C octal literals (010 == 8) are a syntax error in strict-mode JS: use 0o10.
+code = code.replace(/(?<![\w.])0([0-7]+)(?![\w.])/g, '0o$1');
+// yield is a reserved word in strict mode; map Arduino's yield() to the runtime's cooperative yield.
+code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   code = code.replace(/\bsizeof\s*\(\s*(\w+)\s*\)\s*\/\s*sizeof\s*\([^)]*\)/g, '$1.length');
   code = code.replace(/\bsizeof\s*\(/g, '__sizeof(');
   code = code.replace(/\.length\s*\(\s*\)/g, '.length');
@@ -193,7 +197,7 @@ function transpile(source) {
   code = code.replace(/\bdtostrf\s*\(([^;]*?),\s*([A-Za-z_]\w*)\s*\)/g, '$2 = __dtostrf($1)');
 
   // --- await: delay(), user functions, HTTP requests ---
-  code = code.replace(/(?<![\w.])(delay|delayMicroseconds|yield)\s*\(/g, 'await $1(');
+  code = code.replace(/(?<![\w.])(delay|delayMicroseconds|__y)\s*\(/g, 'await $1(');
   if (fnNames.length) {
     code = code.replace(new RegExp(`(?<![\\w.])(?<!function\\s+)(${fnNames.join('|')})\\s*\\(`, 'g'), 'await $1(');
   }

@@ -129,3 +129,14 @@ test('3D view renders and a 3D button press works', async ({ page }) => {
   await expect.poll(async () => (await partState(page, 'led'))[0].b).toBe(0);
   expect(await page.locator('canvas.view3d').count()).toBe(1);
 });
+
+test('Ctrl+Enter in the editor starts the simulation (once)', async ({ page }) => {
+  await loadExample(page, 'blink');
+  await page.click('.cm-content');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.CatSim.App.sim.running)).toBe(true);
+  await page.keyboard.press('Control+Enter');
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.CatSim.App.sim.running)).toBe(false);
+});

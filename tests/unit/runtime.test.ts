@@ -122,3 +122,24 @@ describe('sketch execution', () => {
     await expect(Promise.race([done, wait(500).then(() => 'timeout')])).resolves.not.toBe('timeout');
   });
 });
+
+describe('strict-mode sketch wrapper', () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  it('lets sketch variables shadow API names', async () => {
+    const { sim, host } = makeSim([comp('esp', 'esp32')], []);
+    live = sim;
+    sim.start('int map = 3;\nint min(int a, int b) { return a < b ? b : a; }\nvoid setup() { Serial.print(map); Serial.print(min(1, 2)); Serial.print(constrain(9, 0, 5)); }\nvoid loop() { delay(10); }');
+    await wait(50);
+    expect(host.errors).toEqual([]);
+    expect(sim.serialOut).toBe('325');
+  });
+  it('reports runtime errors on the right line', async () => {
+    const { sim, host } = makeSim([comp('esp', 'esp32')], []);
+    live = sim;
+    sim.start('void setup() {\n  Serial.begin(9600);\n  notAFunction();\n}\nvoid loop() {}');
+    await wait(50);
+    const e = host.errors[0] as Error;
+    expect(e.message).toMatch(/notAFunction/);
+    expect(String(e.stack)).toMatch(/<anonymous>:5:/); // body line 3 + 2 lines of Function() preamble
+  });
+});

@@ -4,6 +4,7 @@ import { DEFS, ESP } from './components.js';
 import { transpile } from './transpiler.js';
 import { SimClock } from './clock.ts';
 const STOP = { stop: true };
+const STRICT_RESERVED = new Set(['yield', 'let', 'static', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'eval', 'arguments', 'await', 'enum']);
 const VALID_GPIO = new Set([0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39]);
 const DEVKIT_GPIO = new Set([1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39]);
 // Base constants are Number objects so Serial.print(x, BIN) can tell a base from a decimal count.
@@ -226,19 +227,23 @@ class Simulator {
       this.app.log(`Compile error${e.line ? ` (line ${e.line})` : ''}: ${e.message}`, 'error', e.line);
       return false;
     }
+    const runId = ++this.runId;
+    const api = this.createApi(runId);
     let factory;
     try {
+      // Strict mode, no `with`: the API is unpacked into consts, and the sketch runs in an inner block so
+      // its own declarations may shadow API names. Everything before the sketch stays on line 1 so that
+      // error line numbers match the editor.
+      const names = Object.keys(api).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k) && !STRICT_RESERVED.has(k));
       // eslint-disable-next-line no-new-func
-      factory = new Function('__api', `return (async function(){ with (__api) { ${js}\n;return { setup: typeof setup === 'function' ? setup : null, loop: typeof loop === 'function' ? loop : null }; } })();`);
+      factory = new Function('__api', `"use strict"; return (async function(){ const { ${names.join(', ')} } = __api; { ${js}\n;return { setup: typeof setup === 'function' ? setup : null, loop: typeof loop === 'function' ? loop : null }; } })();`);
     } catch (e) {
       this.app.log(`Compile error: ${e.message}. CatSim supports a subset of Arduino C++ — see the API reference tab.`, 'error');
       console.debug('[CatSim] transpiled sketch:\n' + js);
       return false;
     }
-    const runId = ++this.runId;
     this.clock.reset(); this.running = true; this.lastYield = performance.now();
     this.app.onSimState(true);
-    const api = this.createApi(runId);
     try {
       const mod = await factory(api);
       if (!mod.setup || !mod.loop) throw new Error('The sketch must define both setup() and loop()');

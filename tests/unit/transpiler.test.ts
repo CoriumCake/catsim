@@ -3,7 +3,7 @@ import { transpile } from '../../src/transpiler.js';
 import { EXAMPLES } from '../../src/examples.js';
 
 // Compile the transpiled sketch the same way the runtime does (syntax check only).
-const compile = (js: string) => new Function('__api', `return (async function(){ with (__api) { ${js}\n;return 1; } })();`);
+const compile = (js: string) => new Function('__api', `"use strict"; return (async function(){ { ${js}\n;return 1; } })();`);
 
 describe('transpiler', () => {
   for (const ex of EXAMPLES) {
@@ -49,5 +49,22 @@ describe('transpiler', () => {
   it('keeps line numbers aligned with the source', () => {
     const src = '// a\n// b\nvoid setup() {\n  int x = 1;\n}\nvoid loop() {}';
     expect(transpile(src).js.split('\n').length).toBe(src.split('\n').length);
+  });
+});
+
+describe('strict-mode compatibility', () => {
+  it('turns C octal literals into 0o form without touching decimals or hex', () => {
+    const { js } = transpile('int a = 010; float b = 0.5; int c = 0x1F; int d = 0; int e = 100;\nvoid setup() {}\nvoid loop() {}');
+    expect(js).toMatch(/let a = 0o10;/);
+    expect(js).toMatch(/let b = 0\.5;/);
+    expect(js).toMatch(/let c = 0x1F;/);
+    expect(js).toMatch(/let d = 0;/);
+    expect(js).toMatch(/let e = 100;/);
+    expect(() => compile(js)).not.toThrow();
+  });
+  it('maps yield() to the runtime yield', () => {
+    const { js } = transpile('void setup() {}\nvoid loop() { yield(); }');
+    expect(js).toMatch(/await __y\(\)/);
+    expect(() => compile(js)).not.toThrow();
   });
 });
