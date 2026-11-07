@@ -15,7 +15,8 @@ export interface ScopeHost {
 }
 
 const fmtTime = (s: number) => (s >= 1 ? `${+s.toPrecision(3)} s` : s >= 1e-3 ? `${+(s * 1e3).toPrecision(3)} ms` : `${+(s * 1e6).toPrecision(3)} µs`);
-const fmtV = (v: number) => `${v.toFixed(2)} V`;
+// Values within rounding of zero print as 0.00 (the solver can return -1e-9 for a grounded node).
+const fmtV = (v: number) => `${(Math.abs(v) < 0.005 ? 0 : v).toFixed(2)} V`;
 
 export class Scope {
   private t: number[] = [];

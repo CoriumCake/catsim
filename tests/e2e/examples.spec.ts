@@ -155,7 +155,31 @@ test('scope shows the PWM square wave and the LED forward voltage', async ({ pag
   await startSim(page);
   await expect(page.locator('.scope-meas')).toContainText('kHz', { timeout: 5000 });
   const meas = await page.locator('.scope-meas').innerText();
-  expect(meas).toMatch(/CH1 max 3\.\d+ V · min 0\.00 V · 5\.00 kHz/);
+  expect(meas).toMatch(/CH1 max 3\.\d+ V · min 0\.00 V/);
+  const f = +(meas.match(/CH1 .*?(\d+\.\d+) kHz/)?.[1] ?? 0); // measured from crossings in the window
+  expect(f).toBeGreaterThan(4.95); expect(f).toBeLessThan(5.05);
   const vf = +(meas.match(/CH2 max (\d\.\d+) V/)?.[1] ?? 0);
   expect(vf).toBeGreaterThan(1.8); expect(vf).toBeLessThan(2.05); // red LED forward voltage
+});
+
+test('NPN transistor switches a blue LED from 5 V', async ({ page }) => {
+  await loadExample(page, 'transistor'); await startSim(page);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeGreaterThan(0.8);
+  await expect.poll(async () => (await partState(page, 'npn'))[0].on).toBe(1);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeLessThan(0.05);
+});
+
+test('op-amp night light reacts to the light level', async ({ page }) => {
+  await loadExample(page, 'nightlight'); await startSim(page);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeGreaterThan(0.5);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.components.find((x: { id: string }) => x.id === 'ldr1').props.light = 0.95; A.sim.syncProject(); });
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeLessThan(0.05);
+});
+
+test('an LED without a resistor burns out and the console explains why', async ({ page }) => {
+  errors.length = 0;
+  await loadExample(page, 'noresistor'); await startSim(page);
+  await expect.poll(async () => (await partState(page, 'led')).map((s: { burnt?: boolean }) => !!s.burnt), { timeout: 4000 }).toEqual([true, false]);
+  await expect(page.locator('#consoleOut')).toContainText('led1 burned out');
+  await expect(page.locator('.cs-comp[data-id="led1"]')).toContainText('burnt');
 });

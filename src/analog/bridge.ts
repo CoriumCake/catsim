@@ -33,6 +33,12 @@ export interface SimState {
 }
 
 const VIH = 0.75 * V_LOGIC, VIL = 0.25 * V_LOGIC;
+/** An LED burns out when its thermally averaged current exceeds this (typical abs. max 30 mA). */
+export const LED_BURN_A = 0.03;
+const LED_THERMAL_TAU = 0.3;
+/** ESP32 absolute maximum source/sink current per GPIO. */
+export const GPIO_MAX_A = 0.04;
+const OPEN_JUNCTION = { is: 1e-30, n: 2 };
 const LED_TAU = 0.02; // brightness averaging time constant (s), roughly what the eye integrates
 const MAX_PROBE_POINTS = 50_000;
 
@@ -52,7 +58,11 @@ export class AnalogBridge {
   private project: Project | null = null;
   private comps = new Map<string, Component>();
   private pinNode = new Map<string, number>();
-  private leds = new Map<string, { d: Diode; avg: number }>();
+  private leds = new Map<string, { d: Diode; avg: number; heat: number }>();
+  /** LEDs destroyed by overcurrent in this run (they stay open-circuit) */
+  readonly burnt = new Set<string>();
+  private pendingBurn: string[] = [];
+  private warnedPins = new Set<number>();
   private lastLevel = new Map<number, number>();
   private probes: Array<string | null> = [];
   private probeNodes: number[] = [];
@@ -68,7 +78,7 @@ export class AnalogBridge {
   /** Forget everything (new run). The circuit is rebuilt on the next sync(). */
   reset(): void {
     this.sim = null; this.error = null; this.topo = '';
-    this.leds.clear(); this.lastLevel.clear();
+    this.leds.clear(); this.lastLevel.clear(); this.burnt.clear(); this.pendingBurn = []; this.warnedPins.clear();
     this.rec = { t: [], v: this.probes.map(() => []) };
     this.rtf = { simT: 0, realT: 0, value: 1 }; this.workMs = 0;
   }
@@ -114,7 +124,10 @@ export class AnalogBridge {
       const fn = MODELS[c.type]; if (!fn) continue;
       const m = fn(ckt, c, nodeOf(c), () => this.s.ui[c.id], () => this.comps.get(c.id) ?? c);
       this.models.push({ c, m });
-      if (m.led) this.leds.set(c.id, { d: m.led, avg: prevLeds.get(c.id)?.avg ?? 0 });
+      if (m.led) {
+        this.leds.set(c.id, { d: m.led, avg: prevLeds.get(c.id)?.avg ?? 0, heat: prevLeds.get(c.id)?.heat ?? 0 });
+        if (this.burnt.has(c.id)) m.led.setModel(OPEN_JUNCTION);
+      }
     }
     const t = this.now();
     this.sim = new Simulation(ckt, { dtMax: this.dtMax });
@@ -157,8 +170,13 @@ export class AnalogBridge {
 
   private onStep = (_t: number, _x: Float64Array, dt: number) => {
     if (this.leds.size && this.sim) {
-      const a = 1 - Math.exp(-dt / LED_TAU);
-      for (const l of this.leds.values()) l.avg += (Math.max(0, l.d.current(this.sim.x)) - l.avg) * a;
+      const a = 1 - Math.exp(-dt / LED_TAU), h = 1 - Math.exp(-dt / LED_THERMAL_TAU);
+      for (const [id, l] of this.leds) {
+        const i = Math.max(0, l.d.current(this.sim.x));
+        l.avg += (i - l.avg) * a;
+        l.heat += (i - l.heat) * h;
+        if (l.heat > LED_BURN_A && !this.burnt.has(id) && !this.pendingBurn.includes(id)) this.pendingBurn.push(id);
+      }
     }
     this.record();
   };
@@ -186,6 +204,22 @@ export class AnalogBridge {
         if (d.key !== this.gpioDrive.get(g)) { src.wave = d.wave; src.rs = d.rs; this.gpioDrive.set(g, d.key); changed = true; }
       }
       for (const { m } of this.models) if (m.update?.()) changed = true;
+      // overcurrent damage (applied between solver runs, not inside a step)
+      for (const id of this.pendingBurn) {
+        const l = this.leds.get(id); if (!l) continue;
+        const mA = Math.round(Math.max(l.heat, l.d.current(sim.x)) * 1000);
+        this.burnt.add(id); changed = true;
+        this.s.app.log(`${id} burned out: about ${mA} mA flowed through it (LEDs take 20–30 mA at most). Add a series resistor, e.g. 220 Ω. Restart to replace it.`, 'error');
+      }
+      this.pendingBurn = [];
+      for (const id of this.burnt) this.leds.get(id)?.d.setModel(OPEN_JUNCTION);
+      for (const [g, src] of this.gpioSrc) {
+        const i = Math.abs(src.current(sim.x));
+        if (i > GPIO_MAX_A && !this.warnedPins.has(g)) {
+          this.warnedPins.add(g);
+          this.s.app.log(`GPIO${g} is carrying ${Math.round(i * 1000)} mA, above the ESP32's 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
+        }
+      }
       if (changed) { sim.refresh(); this.record(); }
     } catch (e) {
       if (e instanceof ConvergenceError) { this.fail(e); return; }
@@ -220,7 +254,15 @@ export class AnalogBridge {
 
   ledBrightness(): Record<string, number> {
     const out: Record<string, number> = {};
-    for (const [id, l] of this.leds) out[id] = Math.min(1, Math.sqrt(Math.max(0, l.avg) / LED_FULL));
+    for (const [id, l] of this.leds) out[id] = this.burnt.has(id) ? 0 : Math.min(1, Math.sqrt(Math.max(0, l.avg) / LED_FULL));
+    return out;
+  }
+
+  /** Per-part activity (transistors conducting), 0..1. */
+  partActivity(): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (!this.sim) return out;
+    for (const { c, m } of this.models) if (m.activity) out[c.id] = m.activity(this.sim.x);
     return out;
   }
 

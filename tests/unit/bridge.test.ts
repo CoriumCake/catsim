@@ -105,4 +105,69 @@ describe('analog bridge', () => {
     sim.touch();
     expect(sim.analog.gpioVoltage(34)).toBeCloseTo(2.475, 1);
   });
+
+  it('NPN switches an LED from the 5 V rail', async () => {
+    const { sim } = run([esp, comp('q1', 'npn'), comp('rb', 'resistor', { ohms: 1000 }), comp('rl', 'resistor', { ohms: 150 }), comp('l1', 'led', { color: 'blue' })], [
+      ['esp:D25', 'rb:1'], ['rb:2', 'q1:B'], ['q1:E', 'esp:GND.L'],
+      ['esp:VIN', 'rl:1'], ['rl:2', 'l1:A'], ['l1:C', 'q1:C'],
+    ], 'void setup() { pinMode(25, OUTPUT); }\nvoid loop() { digitalWrite(25, HIGH); delay(100); digitalWrite(25, LOW); delay(100); }');
+    await wait(60); sim.touch();
+    expect(sim.analog.ledBrightness().l1).toBeGreaterThan(0.8); // ~13 mA from 5 V: a blue LED that 3.3 V could barely light
+    expect(sim.analog.partActivity().q1).toBe(1);
+    expect(sim.analog.nodeVoltage('q1:C')).toBeLessThan(0.3); // saturated
+    await wait(120); sim.touch();
+    expect(sim.analog.partActivity().q1).toBeLessThan(0.01);
+  });
+
+  it('2N7000 MOSFET switches a load with a 3.3 V gate', async () => {
+    const { sim } = run([esp, comp('m1', 'nmos'), comp('rl', 'resistor', { ohms: 100 })], [
+      ['esp:D26', 'm1:G'], ['m1:S', 'esp:GND.L'], ['esp:VIN', 'rl:1'], ['rl:2', 'm1:D'],
+    ], 'void setup() { pinMode(26, OUTPUT); digitalWrite(26, HIGH); }\nvoid loop() { delay(10); }');
+    await wait(40); sim.touch();
+    const vd = sim.analog.nodeVoltage('m1:D');
+    expect(vd).toBeGreaterThan(0.1); expect(vd).toBeLessThan(0.5); // a few ohms of Rds(on) at Vgs = 3.3 V
+  });
+
+  it('LM358 comparator output is read by digitalRead', async () => {
+    const pot = comp('p1', 'pot', { value: 0.8 });
+    const { sim, host } = run([esp, comp('u1', 'opamp'), pot, comp('r1', 'resistor', { ohms: 10000 }), comp('r2', 'resistor', { ohms: 10000 }), comp('r3', 'resistor', { ohms: 10000 }), comp('r4', 'resistor', { ohms: 20000 })], [
+      ['esp:VIN', 'u1:VCC'], ['u1:GND', 'esp:GND.L'],
+      ['esp:3V3', 'p1:VCC'], ['p1:GND', 'esp:GND.L'], ['p1:SIG', 'u1:IN+'],
+      ['esp:3V3', 'r1:1'], ['r1:2', 'u1:IN-'], ['u1:IN-', 'r2:1'], ['r2:2', 'esp:GND.L'],
+      // output (up to 3.5 V) divided to stay under 3.3 V at the input pin
+      ['u1:OUT', 'r3:1'], ['r3:2', 'esp:D27'], ['esp:D27', 'r4:1'], ['r4:2', 'esp:GND.R'],
+    ], 'void setup() { pinMode(27, INPUT); }\nvoid loop() { delay(10); }');
+    await wait(40);
+    expect(sim.readPin(27)).toBe(1);
+    expect(sim.analog.nodeVoltage('u1:OUT')).toBeCloseTo(3.5, 1);
+    const copy = structuredClone(host.project); copy.components.find((c: Comp) => c.id === 'p1')!.props.value = 0.3;
+    host.project = copy; sim.invalidate();
+    expect(sim.readPin(27)).toBe(0);
+  });
+
+  it('burns out an LED driven without a resistor, and warns about the GPIO current', async () => {
+    const { sim, host } = run([esp, comp('l1', 'led', { color: 'red' })], [['esp:D2', 'l1:A'], ['l1:C', 'esp:GND.R']],
+      'void setup() { pinMode(2, OUTPUT); digitalWrite(2, HIGH); }\nvoid loop() { delay(20); }');
+    await wait(50); sim.touch();
+    expect(sim.analog.burnt.has('l1')).toBe(false);
+    for (let i = 0; i < 12; i++) { await wait(100); sim.touch(); }
+    expect(sim.analog.burnt.has('l1')).toBe(true);
+    expect(sim.analog.ledBrightness().l1).toBe(0);
+    expect(host.logs.some((m: string) => /l1 burned out/.test(m))).toBe(true);
+    expect(sim.analog.gpioVoltage(2)).toBeGreaterThan(3.2); // open circuit now: no load on the pin
+  });
+
+  it('keeps an LED with a proper resistor alive', async () => {
+    const { sim } = run([esp, comp('r1', 'resistor', { ohms: 220 }), comp('l1', 'led')], [['esp:D2', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'esp:GND.R']],
+      'void setup() { pinMode(2, OUTPUT); digitalWrite(2, HIGH); }\nvoid loop() { delay(20); }');
+    for (let i = 0; i < 8; i++) { await wait(100); sim.touch(); }
+    expect(sim.analog.burnt.size).toBe(0);
+  });
+
+  it('warns when a GPIO sources more than 40 mA', async () => {
+    const { sim, host } = run([esp, comp('r1', 'resistor', { ohms: 10 })], [['esp:D4', 'r1:1'], ['r1:2', 'esp:GND.L']],
+      'void setup() { pinMode(4, OUTPUT); digitalWrite(4, HIGH); }\nvoid loop() { delay(20); }');
+    await wait(50); sim.touch();
+    expect(host.logs.some((m: string) => /GPIO4 is carrying \d+ mA/.test(m))).toBe(true);
+  });
 });

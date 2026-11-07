@@ -262,6 +262,92 @@ void loop() {
 `,
     },
     {
+      key: 'transistor', name: 'NPN transistor drives an LED from 5 V',
+      components: [esp,
+        { id: 'q1', type: 'npn', x: 150, y: 380, props: {} },
+        { id: 'rb', type: 'resistor', x: 200, y: 206, props: { ohms: 1000 } },
+        { id: 'rl', type: 'resistor', x: 120, y: 330, props: { ohms: 150 } },
+        { id: 'led1', type: 'led', x: 40, y: 230, props: { color: 'blue' } }],
+      wires: [W('esp:D25', 'rb:2'), W('rb:1', 'q1:B'), W('q1:E', 'esp:GND.L'), W('esp:VIN', 'rl:2', '#ff4d4d'), W('rl:1', 'led1:A'), W('led1:C', 'q1:C')],
+      code: `// A 2N2222 NPN transistor switches a blue LED from the 5 V rail (VIN).
+// A blue LED needs about 3 V, which a 3.3 V GPIO can barely drive through a resistor.
+// The transistor lets a small GPIO current (through the 1 kΩ base resistor) control a
+// bigger current from another supply. Try the Scope tab on q1.C and the D25 net.
+const int BASE = 25;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BASE, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(BASE, HIGH);
+  Serial.println("transistor on");
+  delay(700);
+  digitalWrite(BASE, LOW);
+  Serial.println("transistor off");
+  delay(700);
+}
+`,
+    },
+    {
+      key: 'nightlight', name: 'Op-amp night light (LM358 comparator)',
+      components: [esp,
+        { id: 'u1', type: 'opamp', x: 90, y: 120, props: {} },
+        { id: 'ldr1', type: 'ldr', x: 30, y: 300, props: { light: 0.6 } },
+        { id: 'pot1', type: 'pot', x: 140, y: 300, props: { value: 0.7 } },
+        { id: 'r1', type: 'resistor', x: 170, y: 40, props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: 250, y: -20, props: { color: 'yellow' } },
+        { id: 'r2', type: 'resistor', x: 190, y: 130, props: { ohms: 10000 } },
+        { id: 'r3', type: 'resistor', x: 200, y: 250, props: { ohms: 10000 } }],
+      wires: [W('esp:VIN', 'u1:VCC', '#ff4d4d'), W('u1:GND', 'esp:GND.L'),
+        W('esp:3V3', 'ldr1:VCC', '#ff4d4d'), W('ldr1:GND', 'esp:GND.L'), W('ldr1:AO', 'u1:IN-'), W('ldr1:AO', 'esp:D35'),
+        W('esp:3V3', 'pot1:VCC', '#ff4d4d'), W('pot1:GND', 'esp:GND.L'), W('pot1:SIG', 'u1:IN+'),
+        W('u1:OUT', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp:GND.L'),
+        W('u1:OUT', 'r2:1'), W('r2:2', 'esp:D34'), W('esp:D34', 'r3:1'), W('r3:2', 'esp:GND.L')],
+      code: `// Night light: the LM358 op-amp compares the light sensor (IN−) with the knob (IN+).
+// When the light drops below the threshold set by the knob, the op-amp output swings
+// high and lights the LED. That part is pure analog: no code involved.
+// Select the light sensor and lower its light level, or turn the knob.
+// The ESP32 only reports what the circuit is doing.
+const int SENSOR = 35;  // light sensor output
+const int OPAMP = 34;   // op-amp output through a 10k/10k divider
+
+void setup() {
+  Serial.begin(115200);
+}
+
+void loop() {
+  float sensor = analogRead(SENSOR) * 3.3 / 4095.0;
+  float out = analogRead(OPAMP) * 3.3 / 4095.0 * 2;
+  Serial.printf("sensor %.2f V -> op-amp output %.2f V (%s)\\n", sensor, out, out > 2 ? "LED on" : "LED off");
+  delay(500);
+}
+`,
+    },
+    {
+      key: 'noresistor', name: 'What happens without a resistor? (LED burnout)',
+      components: [esp,
+        { id: 'led1', type: 'led', x: 520, y: 210, props: { color: 'red' } },
+        { id: 'r1', type: 'resistor', x: 500, y: 330, props: { ohms: 220 } },
+        { id: 'led2', type: 'led', x: 600, y: 280, props: { color: 'red' } }],
+      wires: [W('esp:D2', 'led1:A'), W('led1:C', 'esp:GND.R'), W('esp:D15', 'r1:1'), W('r1:2', 'led2:A'), W('led2:C', 'esp:GND.R')],
+      code: `// led1 is wired straight to GPIO2 with no resistor, so only the pin's own ~30 Ω
+// limits the current: around 40 mA, more than an LED (20–30 mA) or a GPIO (40 mA)
+// can take. Watch led1 burn out and read the Console. led2 has a 220 Ω resistor and lives.
+void setup() {
+  pinMode(2, OUTPUT);
+  pinMode(15, OUTPUT);
+  digitalWrite(2, HIGH);
+  digitalWrite(15, HIGH);
+}
+
+void loop() {
+  delay(100);
+}
+`,
+    },
+    {
       key: 'traffic', name: 'Traffic light',
       components: [esp,
         { id: 'red', type: 'led', x: 560, y: 60, props: { color: 'red' } },
