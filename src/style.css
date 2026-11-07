@@ -19,7 +19,7 @@
   --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --side-w: 450px;
-  --bottom-h: 34%;
+  --bottom-h: 32%;
   color-scheme: light;
 }
 
@@ -100,7 +100,7 @@ select.btn { padding-right: 6px; }
 .palette-hint { font-size: 11.5px; color: var(--muted); margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); }
 
 /* bottom dock */
-.bottom { height: var(--bottom-h); min-height: 120px; display: flex; flex-direction: column; flex: none; }
+.bottom { height: var(--bottom-h); min-height: 120px; display: flex; flex-direction: column; flex: none; background: var(--panel); }
 .serial-out { flex: 1; margin: 0; overflow: auto; padding: 8px 12px; font: 12.5px/1.55 var(--mono); background: var(--term-bg); color: #1c2230; white-space: pre-wrap; word-break: break-word; }
 .serial-form, .mqtt-form { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--line); background: var(--panel); }
 .serial-form input, .mqtt-form input { flex: 1; min-width: 0; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel); font-family: var(--mono); font-size: 12px; }
@@ -147,7 +147,8 @@ select.btn { padding-right: 6px; }
 .splitter-v:hover, .splitter-h:hover, .dragging { background: var(--accent); }
 
 /* ---------- canvas ---------- */
-.stage { flex: 1; min-width: 0; position: relative; background: var(--canvas); }
+.center { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.stage { flex: 1; min-width: 0; min-height: 120px; position: relative; background: var(--canvas); }
 .canvas { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; cursor: default; }
 .canvas.cs-panning { cursor: grabbing; }
 .cs-grid-dot { fill: var(--grid); }
@@ -244,6 +245,7 @@ select.btn { padding-right: 6px; }
   .tb-files { width: 100%; overflow-x: auto; height: auto; }
   .btn-dark { height: auto; padding: 6px 12px; border-radius: 8px; }
   .workspace { flex-direction: column-reverse; flex: none; }
+  .center { flex: none; }
   .stage { height: 60vh; flex: none; }
   .splitter-v, .splitter-h { display: none; }
   .side { width: 100%; max-width: none; min-width: 0; }

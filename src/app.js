@@ -534,7 +534,8 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
       el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
     });
     drag($('#splitV'), (e) => { const r = ws.getBoundingClientRect(); const w = Math.min(r.width * 0.7, Math.max(320, e.clientX - r.left)); document.documentElement.style.setProperty('--side-w', w + 'px'); });
-    drag($('#splitH'), (e) => { const r = side.getBoundingClientRect(); const h = Math.min(r.height - 140, Math.max(120, r.bottom - e.clientY)); document.documentElement.style.setProperty('--bottom-h', h + 'px'); this.editor.refresh(); });
+    // the terminal/scope dock sits under the canvas: drag the divider to share the centre column
+    drag($('#splitH'), (e) => { const r = $('#center').getBoundingClientRect(); const h = Math.min(r.height - 160, Math.max(120, r.bottom - e.clientY)); document.documentElement.style.setProperty('--bottom-h', h + 'px'); });
   },
 };
 

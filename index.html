@@ -80,7 +80,32 @@
           <p>Numbers are JavaScript doubles; integer division is applied when assigning to <code>int</code>/<code>long</code> variables. Char literals behave as one-letter strings.</p>
         </div>
       </div>
-
+    </section>
+    <div class="splitter-v" id="splitV" title="Drag to resize"></div>
+    <div class="center" id="center">
+    <section class="stage" id="stage">
+      <svg id="canvas" class="canvas" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="cs-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cs-grid-dot"/></pattern>
+          <filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
+          <linearGradient id="cs-metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e3e6ea"/><stop offset=".5" stop-color="#b9bfc8"/><stop offset="1" stop-color="#d5d9df"/></linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#cs-grid)"/>
+        <g id="cs-viewport">
+          <g id="cs-wires"></g>
+          <g id="cs-comps"></g>
+          <path id="cs-temp" class="cs-temp"/>
+        </g>
+      </svg>
+      <div class="stage-tools">
+        <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
+        <span id="zoomLabel">100%</span>
+        <button class="btn btn-icon" id="zoomIn" title="Zoom in">+</button>
+        <button class="btn btn-icon" id="zoomFit" title="Fit diagram">⤢</button>
+      </div>
+      <div id="stageHint" class="stage-hint"></div>
+      <div id="props" class="props" hidden></div>
+    </section>
       <div class="splitter-h" id="splitH" title="Drag to resize"></div>
 
       <div class="bottom" id="bottom">
@@ -120,34 +145,7 @@
         <div id="scopePane" class="tabpane scope"></div>
         <div id="consolePane" class="tabpane console"><div id="consoleOut"></div></div>
       </div>
-    </section>
-    <div class="splitter-v" id="splitV" title="Drag to resize"></div>
-    <section class="stage" id="stage">
-      <svg id="canvas" class="canvas" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="cs-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cs-grid-dot"/></pattern>
-          <filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
-          <linearGradient id="cs-metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e3e6ea"/><stop offset=".5" stop-color="#b9bfc8"/><stop offset="1" stop-color="#d5d9df"/></linearGradient>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#cs-grid)"/>
-        <g id="cs-viewport">
-          <g id="cs-wires"></g>
-          <g id="cs-comps"></g>
-          <path id="cs-temp" class="cs-temp"/>
-        </g>
-      </svg>
-      <div class="stage-tools">
-        <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
-        <span id="zoomLabel">100%</span>
-        <button class="btn btn-icon" id="zoomIn" title="Zoom in">+</button>
-        <button class="btn btn-icon" id="zoomFit" title="Fit diagram">⤢</button>
-      </div>
-      <div id="stageHint" class="stage-hint"></div>
-      <div id="props" class="props" hidden></div>
-    </section>
-
-
-
+    </div>
   </main>
   <div id="toast" class="toast" role="status"></div>
 
