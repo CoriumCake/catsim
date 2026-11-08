@@ -9,6 +9,7 @@
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "pretest:e2e": "vite build",
     "test:e2e": "playwright test"
   },
   "dependencies": {

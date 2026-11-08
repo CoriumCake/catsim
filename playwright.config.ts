@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // Runs against `wrangler dev`, i.e. the real Cloudflare static-asset server with public/_headers
-// (CSP) applied. Build first: `npm run build && npm run test:e2e`.
+// (CSP) applied. `npm run test:e2e` builds dist/ first (pretest:e2e); plain `npx playwright test` does not.
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 60_000,
