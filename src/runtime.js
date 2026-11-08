@@ -79,6 +79,9 @@ function sprintf(fmt, ...a) {
   });
 }
 
+// n × … zero-filled nested arrays: int grid[2][3];
+function zeros(n, ...rest) { return Array.from({ length: Math.max(0, n | 0) }, () => (rest.length ? zeros(...rest) : 0)); }
+
 // Arduino String methods on JS strings (this app only).
 const SP = String.prototype;
 const def = (name, fn) => { if (!(name in SP)) Object.defineProperty(SP, name, { value: fn, configurable: true, writable: true }); };
@@ -486,7 +489,13 @@ class Simulator {
         return undefined;
       },
       __i: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : v),
-      __arr: function mk(n, ...rest) { return Array.from({ length: Math.max(0, n | 0) }, () => (rest.length ? mk(...rest) : 0)); },
+      __arr: zeros,
+      // int a[5] = {1, 2}; → the missing elements are zero, as in C
+      __pad: function pad(a, n, ...rest) {
+        const r = rest.length ? a.map((x) => (Array.isArray(x) ? pad(x, ...rest) : x)) : a;
+        while (r.length < n) r.push(rest.length ? zeros(...rest) : 0);
+        return r;
+      },
       __sizeof: (x) => (Array.isArray(x) || typeof x === 'string' ? x.length : 4),
 
       HIGH: 1, LOW: 0, INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN, PULLUP: 0x04, PULLDOWN: 0x08,
@@ -615,7 +624,8 @@ class Simulator {
       isDigit: (c) => /^[0-9]$/.test(c), isAlpha: (c) => /^[A-Za-z]$/.test(c), isSpace: (c) => /^\s$/.test(c),
       atoi: (s) => parseInt(s, 10) || 0, atol: (s) => parseInt(s, 10) || 0, atof: (s) => parseFloat(s) || 0,
       strlen: (s) => String(s).length, strcmp: (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-      String: (v, f) => (v === undefined ? '' : (typeof v === 'number' && f !== undefined) ? fmtValue(v, f) : fmtValue(v)),
+      // String(n, HEX) is lowercase on Arduino, unlike Serial.print(n, HEX)
+      String: (v, f) => (v === undefined ? '' : (typeof v === 'number' && f !== undefined) ? (f instanceof Number ? fmtValue(v, f).toLowerCase() : fmtValue(v, f)) : fmtValue(v)),
       int: (x) => Math.trunc(Number(x)) || 0, long: (x) => Math.trunc(Number(x)) || 0, float: Number, double: Number, byte: (x) => x & 0xff,
       F: (s) => s, PSTR: (s) => s,
       __sprintf: (fmt, ...a) => sprintf(fmt, ...a), __snprintf: (n, fmt, ...a) => sprintf(fmt, ...a).slice(0, Math.max(0, n - 1)),

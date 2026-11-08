@@ -108,6 +108,13 @@ function transpile(source) {
   code = code.replace(/\b(0[xX][0-9a-fA-F]+)[uUlL]+\b/g, '$1');
   code = code.replace(/\b(\d+\.\d*(?:[eE][+-]?\d+)?|\d*\.\d+(?:[eE][+-]?\d+)?|\d+(?:[eE][+-]?\d+)?)(?:[uU][lL]{0,2}|[lL]{1,2}[uU]?|[fF])\b/g, '$1');
 
+  // --- integer-literal division truncates, as in C: 7 / 2 == 3 (not after x* or x/, where it binds left) ---
+  {
+    const litDiv = /(?<![\w.)\]*\/%]\s*)(?<![\w.)\]*\/%])(\d+)\s*\/\s*(\d+)(?![\w.(\[])/g;
+    let prev;
+    do { prev = code; code = code.replace(litDiv, (m, a, b) => (+b === 0 ? m : String(Math.trunc(+a / +b)))); } while (code !== prev);
+  }
+
   // --- misc C++ syntax ---
   code = code.replace(/->/g, '.');
 // C octal literals (010 == 8) are a syntax error in strict-mode JS: use 0o10.
@@ -168,7 +175,9 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
     if (code[last] === '{') {
       const end = matchClose(code, last, '{', '}');
       if (end < 0) throw new TranspileError('Unbalanced { } in array initializer', code.slice(0, m.index).split('\n').length);
-      out += code.slice(last, end + 1).replace(/\{/g, '[').replace(/\}/g, ']');
+      const lit = code.slice(last, end + 1).replace(/\{/g, '[').replace(/\}/g, ']');
+      const dims = m[2].match(/\[([^\]]*)\]/g).map((d) => d.slice(1, -1).trim());
+      out += dims.every(Boolean) ? `__pad(${lit}, ${dims.join(', ')})` : lit;
       last = end + 1; arrInit.lastIndex = last;
     }
   }
@@ -185,11 +194,17 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
     const names = [...intVars].join('|');
     code = code.replace(new RegExp(`(^|[;{}\\s])(${names})(\\s*=)(?!=)([^;]*\\/[^;]*);`, 'g'),
       (mm, pre, n, eq, rhs) => (hasTopLevelComma(rhs) || /^\s*__i\(/.test(rhs) ? mm : `${pre}${n}${eq} __i(${rhs});`));
+    code = code.replace(new RegExp(`(^|[;{}\\s])(${names})\\s*\\/=\\s*([^;]*);`, 'g'), (mm, pre, n, rhs) => `${pre}${n} = __i(${n} / (${rhs}));`);
   }
 
   // --- typed declarations → let ---
   code = code.replace(new RegExp(`\\b${QUAL}(?:${TYPES})\\b(?:\\s*[\\*&]\\s*|\\s+)(?=[A-Za-z_])`, 'g'), 'let ');
   code = code.replace(/\bfor\s*\(\s*let\s+&?\s*([A-Za-z_]\w*)\s*:\s*/g, 'for (let $1 of ');
+
+  // --- Arduino calls that change their argument in place ---
+  code = code.replace(/(^|[;{}\n])(\s*)(bitSet|bitClear|bitWrite)\s*\(\s*([A-Za-z_][\w.]*(?:\[[^\]]*\])*)\s*,/g, '$1$2$4 = $3($4,');
+  code = code.replace(/(^|[;{}\n])(\s*)([A-Za-z_][\w.]*(?:\[[^\]]*\])*)\s*\.\s*(toUpperCase|toLowerCase|trim|replace|remove)\s*\(([^;]*)\)\s*;/g,
+    (mm, a, ws, v, fn, args) => `${a}${ws}${v} = ${v}.${fn === 'replace' ? 'replaceAll' : fn}(${args});`);
 
   // --- C string helpers that write into a buffer argument ---
   code = code.replace(/\bsprintf\s*\(\s*([A-Za-z_]\w*)\s*,/g, '$1 = __sprintf(');
