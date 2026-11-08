@@ -4,6 +4,7 @@
  * message from the worker is validated and coerced here before it reaches the UI. */
 import { Simulator } from './runtime.js';
 const LEVELS = new Set(['info', 'warn', 'error']);
+const boardId = (b) => (typeof b === 'string' && /^[\w-]{1,32}$/.test(b) ? b : undefined);
 const str = (v, max = 2000) => String(v ?? '').slice(0, max);
 const finite = (v, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 // { gpio: number } maps only, with small integer keys
@@ -24,6 +25,8 @@ class SimHost extends Simulator {
     this.worker = null; this.snapT = 0; this.snapAt = 0; this.resolveRun = null;
     this.speed = 1; this.paused = false;
     this.analog = null; // { leds: {id: 0..1}, rtf, error } from the worker's analog engine
+    this.boards = null; // several boards: per-board pin state, by board id
+    this.serialBy = {}; // serial output not yet shown, by board id ('' = the only board)
     this.probes = []; this.probeDtMax = 1e-3;
   }
 
@@ -64,8 +67,11 @@ class SimHost extends Simulator {
     if (!this.worker) return Promise.resolve(false);
     this.paused = false;
     this.analog = null;
-    const board = (this.app.project.components.find((c) => c.type === 'uno') || {}).type;
-    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed, board, firmware: board === 'uno' && this.app.project.firmware ? this.app.project.firmware.hex : undefined });
+    const boardComps = this.app.boards ? this.app.boards() : [];
+    const boards = boardComps.length > 1 ? boardComps.map((b) => { const pr = this.app.program(b.id); return { id: b.id, type: b.type, code: pr.code || '', firmware: pr.firmware ? pr.firmware.hex : '' }; }) : undefined;
+    const board = boardComps[0] ? boardComps[0].type : 'esp32';
+    this.boards = null; this.serialBy = {};
+    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed, board, boards, firmware: board === 'uno' && this.app.project.firmware ? this.app.project.firmware.hex : undefined });
     if (this.probes.some(Boolean)) this.send({ type: 'probes', refs: this.probes, dtMax: this.probeDtMax });
     return new Promise((res) => { this.resolveRun = res; });
   }
@@ -88,7 +94,15 @@ class SimHost extends Simulator {
     queueMicrotask(() => { this._syncQueued = false; this.send({ type: 'project', project: this.app.project }); });
   }
   setPressed(id, on) { this.ui[id] = { ...(this.ui[id] || {}), pressed: on }; this.invalidate(); this.send({ type: 'ui', id, pressed: !!on }); }
-  sendSerial(text) { this.send({ type: 'serial', text: String(text) }); }
+  sendSerial(text, board) { this.send({ type: 'serial', text: String(text), board: board ? String(board) : '' }); }
+  /** Serial output received since the last call, by board id ('' = the only board). */
+  takeSerial() {
+    const out = this.serialBy; this.serialBy = {};
+    if (this.serialOut) { out[''] = (out[''] || '') + this.serialOut; this.serialOut = ''; }
+    return out;
+  }
+  /** Pin state of one board (several-board runs), or null. */
+  boardState(id) { return (this.boards && this.boards[id]) || null; }
   setProbes(refs, dtMax = 1e-3) { this.probes = refs.slice(0, 4); this.probeDtMax = dtMax; this.send({ type: 'probes', refs: this.probes, dtMax }); }
   // The worker polls interrupts and WiFi itself.
   pollInterrupts() {}
@@ -116,6 +130,18 @@ class SimHost extends Simulator {
         this.paused = m.paused === true;
         this.txAt = typeof m.serial === 'string' && m.serial ? performance.now() : this.txAt;
         { const sp = finite(m.speed, this.speed); if (sp >= 0.05 && sp <= 100) this.speed = sp; }
+        if (m.boards && typeof m.boards === 'object') {
+          // several boards: each one's pin state and serial output; the first board also fills the classic fields
+          const boards = {};
+          for (const [id, b] of Object.entries(m.boards)) {
+            if (!/^[\w-]{1,32}$/.test(id) || !b || typeof b !== 'object') continue;
+            boards[id] = { type: b.type === 'uno' ? 'uno' : 'esp32', running: b.running === true, mode: numMap(b.mode), out: numMap(b.out), pwm: numMap(b.pwm), servo: numMap(b.servo), tone: numMap(b.tone), lcd: cleanLcd(b.lcd) };
+            if (typeof b.serial === 'string' && b.serial) this.serialBy[id] = ((this.serialBy[id] || '') + b.serial).slice(-100000);
+          }
+          this.boards = boards;
+          const first = Object.keys(m.boards)[0];
+          if (first) m = { ...m, ...m.boards[first], serial: '' };
+        }
         this.mode = numMap(m.mode); this.out = numMap(m.out); this.pwm = numMap(m.pwm);
         this.servo = numMap(m.servo); this.tone = numMap(m.tone);
         this.lcd = cleanLcd(m.lcd);
@@ -147,8 +173,8 @@ class SimHost extends Simulator {
         if (changed) this.app.iotChanged();
         break;
       }
-      case 'log': this.app.log(str(m.msg), LEVELS.has(m.level) ? m.level : 'info', Number.isInteger(m.line) && m.line > 0 ? m.line : undefined); break;
-      case 'error': this.app.reportError({ message: str(m.message), stack: str(m.stack, 4000) }); break;
+      case 'log': this.app.log(str(m.msg), LEVELS.has(m.level) ? m.level : 'info', Number.isInteger(m.line) && m.line > 0 ? m.line : undefined, boardId(m.board)); break;
+      case 'error': this.app.reportError({ message: str(m.message), stack: str(m.stack, 4000) }, boardId(m.board)); break;
       case 'pub': if (this.running && m.m) this.brokerPublish(m.m.topic, m.m.payload, 'device'); break;
       case 'restart': if (this.running) setTimeout(() => this.app.restartSim(), 0); break;
       case 'done': { const r = this.resolveRun; this.resolveRun = null; if (r) r(m.ok !== false); if (m.ok === false) this.stop(true); break; }

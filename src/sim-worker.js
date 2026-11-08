@@ -4,6 +4,7 @@
 import { Simulator, topicMatch } from './runtime.js';
 import { AnalogBridge } from './analog/bridge.ts';
 import { UnoRunner } from './avr/uno.ts';
+import { MultiRun } from './multi.ts';
 
 let project = { components: [], wires: [] };
 const post = (m, transfer = []) => self.postMessage(m, transfer);
@@ -29,7 +30,26 @@ esp.brokerPublish = (topic, payload, from) => {
   if (sim.mqtt.connected && sim.mqtt.subs.some((f) => topicMatch(f, m.topic))) sim.mqtt.queue.push(m);
 };
 
+// ---------- several boards ----------
+let multi = null;
+const multiHost = {
+  get project() { return project; },
+  log(msg, level, line, board) { post({ type: 'log', msg: String(msg), level, line, board }); },
+  reportError(e, board) { post({ type: 'error', message: String((e && e.message) || e), stack: String((e && e.stack) || ''), board }); },
+  onPublish(m) { post({ type: 'pub', m, board: m.board }); },
+  onRestart() { post({ type: 'restart' }); },
+};
+
+function snapshotMulti() {
+  const a = multi.bridge, t = multi.clock.millis();
+  const samples = a.takeSamples();
+  const analog = { mech: a.mechanics(), parts: a.partActivity(), burnt: [...a.burnt], leds: a.ledBrightness(), rtf: multi.running ? a.realTimeFactor() : 1, error: a.error };
+  post({ type: 'snap', t, running: multi.running, speed: multi.clock.speed, paused: multi.clock.paused, boards: multi.boardStates(), analog, samples },
+    samples ? [samples.t.buffer, ...samples.v.map((v) => v.buffer)] : []);
+}
+
 function snapshot() {
+  if (multi) { snapshotMulti(); return; }
   let serial = sim.serialOut; sim.serialOut = '';
   const a = sim.analog;
   const samples = a.takeSamples();
@@ -48,6 +68,7 @@ let ticker = 0;
 function startTicker() {
   if (ticker) return;
   ticker = setInterval(() => {
+    if (multi) { if (multi.running) { multi.touch(); snapshotMulti(); } return; }
     if (!sim.running) return;
     sim.updateWifi(); sim.touch(); sim.pollInterrupts(); snapshot();
   }, 16);
@@ -58,6 +79,13 @@ self.onmessage = (e) => {
   switch (m.type) {
     case 'start':
       project = m.project;
+      if (Array.isArray(m.boards) && m.boards.length > 1) {
+        multi = new MultiRun(multiHost);
+        const ok = multi.start(m.boards.map((b) => ({ id: String(b.id), type: String(b.type), code: typeof b.code === 'string' ? b.code : '', firmware: typeof b.firmware === 'string' ? b.firmware : '' })), +m.speed || 1);
+        if (!ok) { post({ type: 'done', ok: false }); break; }
+        post({ type: 'state', on: true }); startTicker();
+        break;
+      }
       if (m.board === 'uno') {
         sim = uno || (uno = new UnoRunner(host));
         if (m.speed) sim.clock.speed = m.speed;
@@ -68,14 +96,20 @@ self.onmessage = (e) => {
       if (m.speed) sim.clock.speed = m.speed;
       sim.start(m.code).then((ok) => { snapshot(); post({ type: 'done', ok }); });
       break;
-    case 'project': project = m.project; sim.invalidate(); sim.pollInterrupts(); break;
-    case 'ui': sim.setPressed(m.id, !!m.pressed); break;
-    case 'pause': sim.pause(); snapshot(); break;
-    case 'probes': sim.analog.setProbes(Array.isArray(m.refs) ? m.refs.map((r) => (typeof r === 'string' ? r : null)) : [], +m.dtMax); break;
-    case 'resume': sim.resume(); snapshot(); break;
-    case 'speed': sim.setSpeed(m.speed); snapshot(); break;
-    case 'serial': if (sim.sendSerial) sim.sendSerial(String(m.text)); else sim.serialIn += String(m.text); break;
-    case 'pub': if (sim.mqtt.connected && sim.mqtt.subs.some((f) => topicMatch(f, m.topic))) sim.mqtt.queue.push({ t: sim.millis(), topic: m.topic, payload: m.payload, from: 'dashboard' }); break;
+    case 'project': project = m.project; if (multi) { multi.invalidate(); multi.touch(); } else { sim.invalidate(); sim.pollInterrupts(); } break;
+    case 'ui': (multi || sim).setPressed(m.id, !!m.pressed); break;
+    case 'pause': (multi || sim).pause(); snapshot(); break;
+    case 'probes': (multi ? multi.bridge : sim.analog).setProbes(Array.isArray(m.refs) ? m.refs.map((r) => (typeof r === 'string' ? r : null)) : [], +m.dtMax); break;
+    case 'resume': (multi || sim).resume(); snapshot(); break;
+    case 'speed': (multi || sim).setSpeed(m.speed); snapshot(); break;
+    case 'serial':
+      if (multi) multi.sendSerial(String(m.board || ''), String(m.text));
+      else if (sim.sendSerial) sim.sendSerial(String(m.text)); else sim.serialIn += String(m.text);
+      break;
+    case 'pub':
+      if (multi) multi.publish('dashboard', m.topic, m.payload, 'dashboard');
+      else if (sim.mqtt.connected && sim.mqtt.subs.some((f) => topicMatch(f, m.topic))) sim.mqtt.queue.push({ t: sim.millis(), topic: m.topic, payload: m.payload, from: 'dashboard' });
+      break;
     default: break;
   }
 };

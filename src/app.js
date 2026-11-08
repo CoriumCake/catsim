@@ -14,6 +14,26 @@ import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
+// starting programs for boards added to a project
+const ESP_TEMPLATE = `// This board runs its own sketch, alongside the other boards in the circuit.
+// Wire its pins to another board to make them talk.
+void setup() {
+  Serial.begin(115200);
+  Serial.println("ready");
+}
+
+void loop() {
+  delay(1000);
+}
+`;
+const UNO_TEMPLATE = `// This Arduino Uno runs compiled firmware: write the sketch in the Arduino IDE,
+// export the compiled binary (Sketch > Export Compiled Binary) and click "Upload .hex".
+void setup() {
+}
+
+void loop() {
+}
+`;
 const SIDE_STORE = 'catsim.sideHidden';
 const DOCK_STORE = 'catsim.dockCollapsed';
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -50,7 +70,7 @@ const App = {
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
     this.buildPalette(); this.bindUi(); this.bindSplitters();
     this.load(await this.initialProject());
-    this.editor.onChange(() => { this.project.code = this.editor.get(); this.save(); });
+    this.editor.onChange(() => { if (this._loadingEditor) return; this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() }); this.save(); });
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
     try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
@@ -72,7 +92,7 @@ const App = {
 
   fromExample(key) {
     const ex = EXAMPLES.find((e) => e.key === key);
-    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}) };
+    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}), ...(ex.programs ? { programs: clone(ex.programs) } : {}) };
   },
 
   normalize(p) { return normalizeProject(p, DEFS); },
@@ -81,7 +101,8 @@ const App = {
     this.stop();
     this.project = this.normalize(p);
     $('#projectName').value = this.project.name;
-    this.editor.set(this.project.code); this.editor.clear();
+    this.activeBoard = ''; this.term = {};
+    this.switchBoard(this.primaryId());
     this.sim.resetHw(); this.sim.invalidate();
     this.canvas.select(null);
     this.canvas.renderAll();
@@ -112,7 +133,7 @@ const App = {
   },
   addComponent(type, x, y) {
     const d = DEFS[type];
-    if (d.board) { this.setBoard(type); return; } // a project has exactly one board: picking one switches to it
+    if (d.board) { this.addBoard(type); return; }
     if (x === undefined) { const c = this.canvas.centerPoint(); x = c.x - d.w / 2 + (Math.random() * 60 - 30); y = c.y - d.h / 2 + (Math.random() * 60 - 30); }
     const c = { id: this.nextId(type), type, x: Math.round(x / 5) * 5, y: Math.round(y / 5) * 5, props: { ...d.props } };
     this.project.components.push(c);
@@ -131,7 +152,8 @@ const App = {
     if (s.kind === 'wire') this.project.wires = this.project.wires.filter((w) => w.id !== s.id);
     else {
       const c = this.project.components.find((x) => x.id === s.id);
-      if (!c || DEFS[c.type].fixed) { this.toast('The ESP32 board cannot be removed'); return; }
+      if (!c) return;
+      if (DEFS[c.type].board) { this.removeBoard(c); return; }
       this.project.components = this.project.components.filter((x) => x.id !== s.id);
       this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(s.id + ':') && !w.to.startsWith(s.id + ':'));
       Audio.set(s.id, 0);
@@ -144,11 +166,12 @@ const App = {
   start() {
     Audio.ensure();
     this.editor.clear();
-    $('#serialOut').textContent = '';
+    this.term = {}; this.renderTerminal();
     this.clearConsole();
-    this.project.code = this.editor.get();
-    if (this.boardType() === 'uno' && !this.project.firmware) {
-      this.log('The Arduino Uno runs compiled firmware. Click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.', 'error');
+    this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() });
+    const missing = this.boards().filter((b) => b.type === 'uno' && !this.program(b.id).firmware).map((b) => b.id);
+    if (missing.length) {
+      this.log(`The Arduino Uno runs compiled firmware: ${missing.join(', ')} has none yet. Open its tab, click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.`, 'error');
       this.showTab('bottom', 'consolePane');
       return;
     }
@@ -259,36 +282,87 @@ const App = {
     const found = [...[...lib.models.entries()].map(([n, m]) => `.model ${n} (${m.type.toUpperCase()})`), ...[...lib.subckts.values()].map((s) => `.subckt ${s.name} (${s.ports.length} pins)`)];
     return found.length ? `Found ${found.join(', ')}` : 'No .model or .subckt found.';
   },
-  boardType() { const b = this.project.components.find((c) => DEFS[c.type] && DEFS[c.type].board); return b ? b.type : 'esp32'; },
-  /** Switch the project's microcontroller board. Wires to the old board's pins are removed. */
-  setBoard(type) {
-    if (type === this.boardType() || !DEFS[type] || !DEFS[type].board) return;
-    this.stop();
-    const old = this.project.components.find((c) => DEFS[c.type].board);
-    const id = type === 'uno' ? 'uno' : 'esp';
-    const before = this.project.wires.length;
-    if (old) {
-      this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(old.id + ':') && !w.to.startsWith(old.id + ':'));
-      this.project.components = this.project.components.filter((c) => c !== old);
+  // ---------- boards and their programs ----------
+  boards() { return this.project.components.filter((c) => DEFS[c.type] && DEFS[c.type].board); },
+  primaryId() { const b = this.boards()[0]; return b ? b.id : ''; },
+  /** type of the board whose program is open in the editor */
+  boardType() { const b = this.boards().find((x) => x.id === this.activeBoard) || this.boards()[0]; return b ? b.type : 'esp32'; },
+  /** A board's program. The first board's lives in project.code/firmware (single-board projects unchanged). */
+  program(id) {
+    if (!id || id === this.primaryId()) return { code: this.project.code, firmware: this.project.firmware };
+    return (this.project.programs && this.project.programs[id]) || {};
+  },
+  setProgram(id, patch) {
+    if (!id || id === this.primaryId()) {
+      if ('code' in patch) this.project.code = patch.code;
+      if ('firmware' in patch) { if (patch.firmware) this.project.firmware = patch.firmware; else delete this.project.firmware; }
+      return;
     }
-    this.project.components.unshift({ id, type, x: old ? old.x : 300, y: old ? old.y : 80, props: {} });
-    this.changed(); this.refreshBoardUi(); requestAnimationFrame(() => this.canvas.fit());
-    const removed = before - this.project.wires.length;
-    this.toast(`Switched to ${DEFS[type].name}${removed ? `. ${removed} wire${removed > 1 ? 's' : ''} to the old board removed` : ''}`);
+    this.project.programs = this.project.programs || {};
+    this.project.programs[id] = { ...(this.project.programs[id] || {}), ...patch };
+  },
+  /** Open a board's program in the editor (and its serial output in the Terminal). */
+  switchBoard(id) {
+    if (!this.boards().some((b) => b.id === id)) id = this.primaryId();
+    if (this.activeBoard && this.activeBoard !== id && this.boards().some((b) => b.id === this.activeBoard)) this.setProgram(this.activeBoard, { code: this.editor.get() });
+    this.activeBoard = id;
+    this._loadingEditor = true; this.editor.set(this.program(id).code || ''); this._loadingEditor = false;
+    this.editor.clear();
+    this.refreshBoardUi(); this.renderTerminal();
+  },
+  /** Add another microcontroller; it gets its own program tab. */
+  addBoard(type) {
+    const base = type === 'uno' ? 'uno' : 'esp';
+    let id = base, i = 2; while (this.project.components.some((c) => c.id === id)) id = base + i++;
+    let maxX = 0, minY = Infinity;
+    for (const c of this.project.components) { const d = DEFS[c.type]; if (d) { maxX = Math.max(maxX, c.x + d.w); minY = Math.min(minY, c.y); } }
+    this.project.components.push({ id, type, x: Math.round((maxX + 80) / 5) * 5, y: Number.isFinite(minY) ? minY : 80, props: {} });
+    if (this.boards().length > 1) this.setProgram(id, { code: type === 'uno' ? UNO_TEMPLATE : ESP_TEMPLATE });
+    this.changed(); requestAnimationFrame(() => this.canvas.fit());
+    this.switchBoard(id);
+    this.showTab('editor', 'editorPane'); // land on the new board's program
+    this.toast(`Added ${DEFS[type].name} "${id}": its program is in the ${id} tab above the editor`);
+  },
+  removeBoard(c) {
+    const boards = this.boards();
+    if (boards.length < 2) { this.toast('A project needs at least one board'); return; }
+    this.stop();
+    if (this.activeBoard) this.setProgram(this.activeBoard, { code: this.editor.get() });
+    if (boards[0].id === c.id) { // the next board becomes the first one: its program moves into code/firmware
+      const next = boards[1], np = this.program(next.id);
+      this.project.code = np.code || '';
+      if (np.firmware) this.project.firmware = np.firmware; else delete this.project.firmware;
+      if (this.project.programs) delete this.project.programs[next.id];
+    } else if (this.project.programs) delete this.project.programs[c.id];
+    this.project.components = this.project.components.filter((x) => x !== c);
+    this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(c.id + ':') && !w.to.startsWith(c.id + ':'));
+    this.activeBoard = '';
+    this.canvas.select(null); this.changed();
+    this.switchBoard(this.primaryId());
   },
   refreshBoardUi() {
-    const uno = this.boardType() === 'uno';
-    document.querySelectorAll('#paletteList .part').forEach((b) => {
-      const cur = b.dataset.type === this.boardType();
-      b.classList.toggle('current', cur);
-      if (DEFS[b.dataset.type].board) b.title = cur ? `${DEFS[b.dataset.type].name} (in use)` : `Switch to ${DEFS[b.dataset.type].name}`;
-    });
+    const uno = this.boardType() === 'uno', boards = this.boards(), multi = boards.length > 1;
+    const tabs = $('#boardTabs'); tabs.hidden = !multi;
+    if (multi) {
+      tabs.textContent = '';
+      for (const b of boards) {
+        const t = document.createElement('button');
+        t.className = 'board-tab' + (b.id === this.activeBoard ? ' active' : '');
+        t.setAttribute('role', 'tab'); t.setAttribute('aria-selected', String(b.id === this.activeBoard));
+        t.dataset.board = b.id;
+        t.textContent = `${b.id} · ${b.type === 'uno' ? 'firmware' : 'sketch'}`;
+        t.title = `${DEFS[b.type].name} "${b.id}"`;
+        t.onclick = () => this.switchBoard(b.id);
+        tabs.appendChild(t);
+      }
+    }
+    document.querySelectorAll('#paletteList .part').forEach((b) => { if (DEFS[b.dataset.type].board) b.title = `Add a ${DEFS[b.dataset.type].name}`; });
     document.querySelector('.brand .chip').textContent = uno ? 'UNO' : 'ESP32';
-    $('#serialInput').placeholder = `Message to ${uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
+    $('#serialInput').placeholder = `Message to ${multi ? this.activeBoard : uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
     $('#btnFirmware').hidden = !uno;
     const b = $('#unoBanner'); b.hidden = !uno;
     if (uno) {
-      const fw = this.project.firmware;
+      const fw = this.program(this.activeBoard).firmware;
       b.textContent = '';
       const msg = document.createElement('span');
       msg.textContent = fw ? `Running firmware “${fw.name}”. This sketch is shown for reference: edit it in the Arduino IDE, export the compiled binary and upload the .hex.` : 'The Uno runs real compiled firmware. Compile this sketch in the Arduino IDE (Sketch → Export Compiled Binary) and click “Upload .hex”.';
@@ -303,7 +377,7 @@ const App = {
       const flash = parseIntelHex(text);
       let used = flash.length; while (used > 0 && flash[used - 1] === 0) used--;
       this.stop();
-      this.project.firmware = { name: file.name.slice(0, 120), hex: text };
+      this.setProgram(this.activeBoard || this.primaryId(), { firmware: { name: file.name.slice(0, 120), hex: text } });
       this.save(); this.refreshBoardUi();
       this.toast(`Loaded ${file.name} (${used.toLocaleString()} bytes)`);
     } catch (e) {
@@ -333,25 +407,44 @@ const App = {
     $('#simTime').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
   },
 
+  /** Serial output per board; the Terminal shows the board whose program is open. */
   flushSerial() {
-    if (!this.sim.serialOut) return;
-    const el = $('#serialOut');
-    let t = el.textContent + this.sim.serialOut; this.sim.serialOut = '';
-    if (t.length > 60000) t = t.slice(-50000);
-    el.textContent = t;
-    if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
+    const chunks = this.sim.takeSerial ? this.sim.takeSerial() : {};
+    let mine = false;
+    for (const [id0, text] of Object.entries(chunks)) {
+      if (!text) continue;
+      const id = id0 || this.primaryId();
+      let t = (this.term[id] || '') + text; if (t.length > 60000) t = t.slice(-50000);
+      this.term[id] = t;
+      if (id === this.activeBoard) mine = true;
+      else { const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(id)}"]`); if (tab) tab.classList.add('unseen'); }
+    }
+    if (!mine) return;
+    this.renderTerminal();
     // new output you can't see (panel folded, or another tab open): mark the Terminal tab
     if ($('#bottom').classList.contains('collapsed') || !$('#serialPane').classList.contains('active')) $('.tab[data-tab="serialPane"]').classList.add('unseen');
-    },
+  },
+  renderTerminal() {
+    const el = $('#serialOut');
+    el.textContent = (this.term && this.term[this.activeBoard]) || '';
+    if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
+    const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(this.activeBoard || '')}"]`); if (tab) tab.classList.remove('unseen');
+  },
 
   // ---------- console ----------
-  log(msg, level = 'info', line) {
+  log(msg, level = 'info', line, board) {
     const out = $('#consoleOut');
     const d = document.createElement('div'); d.className = `log ${level}`;
     const ms = Math.floor(this.sim ? this.sim.millis() : 0);
+    const multi = this.project && this.boards().length > 1;
     d.innerHTML = `<span class="tm">${(ms / 1000).toFixed(3)}s</span><span></span>`;
-    d.lastChild.textContent = msg;
-    if (line) { const a = document.createElement('a'); a.href = '#'; a.textContent = ` → line ${line}`; a.onclick = (e) => { e.preventDefault(); this.showTab('editor', 'editorPane'); this.editor.focusLine(line); }; d.lastChild.appendChild(a); this.editor.mark(line); }
+    d.lastChild.textContent = (multi && board ? `[${board}] ` : '') + msg;
+    if (line) {
+      const a = document.createElement('a'); a.href = '#'; a.textContent = ` → line ${line}`;
+      a.onclick = (e) => { e.preventDefault(); if (board && board !== this.activeBoard) this.switchBoard(board); this.showTab('editor', 'editorPane'); this.editor.focusLine(line); this.editor.mark(line); };
+      d.lastChild.appendChild(a);
+      if (!board || board === this.activeBoard) this.editor.mark(line);
+    }
     out.appendChild(d); while (out.children.length > 300) out.firstChild.remove();
     out.parentElement.scrollTop = out.parentElement.scrollHeight;
     if (level !== 'info' && !$('#consolePane').classList.contains('active')) {
@@ -360,12 +453,12 @@ const App = {
     }
   },
   clearConsole() { $('#consoleOut').textContent = ''; this._unseen = 0; $('#consoleBadge').hidden = true; },
-  reportError(e) {
+  reportError(e, board) {
     const m = String(e && e.stack || '').match(/(?:<anonymous>|Function):(\d+):\d+/);
     const line = m ? +m[1] - 2 : undefined;
     let msg = (e && e.message) || String(e);
     if (/is not defined/.test(msg)) msg += ' — it may be a function or library CatSim does not simulate yet';
-    this.log(`Runtime error: ${msg}`, 'error', line > 0 ? line : undefined);
+    this.log(`Runtime error: ${msg}`, 'error', line > 0 ? line : undefined, board);
     this.showTab('bottom', 'consolePane');
   },
 
@@ -463,7 +556,8 @@ const App = {
       const c = this.project.components.find((x) => x.id === sel.id); if (!c) { panel.hidden = true; return; }
       const d = DEFS[c.type];
       // boards have no settings and can't be deleted: nothing worth a card (pin info is in the tooltips)
-      if (d.board) { panel.hidden = true; return; }
+      // a lone board has no settings and can't be deleted; with several boards its card offers Delete
+      if (d.board && this.boards().length < 2) { panel.hidden = true; return; }
       const rows = (d.controls || []).map((ct) => {
         const v = c.props[ct.key];
         if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${esc(v)}" data-key="${ct.key}"></div>`;
@@ -479,7 +573,7 @@ const App = {
       }).join('');
       const hint = d.hint ? `<p class="hint">${d.hint}</p>` : '';
       panel.innerHTML = `<h4>${esc(d.name)}</h4><div class="sub">${esc(c.id)}</div>${rows}${hint}
-        ${d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
+        ${d.board ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
       panel.querySelectorAll('[data-key]').forEach((inp) => {
         inp.addEventListener('input', () => {
           const ct = d.controls.find((x) => x.key === inp.dataset.key);
@@ -558,7 +652,7 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     }));
     $('#btnClear').onclick = () => {
       const active = document.querySelector('.tabs[data-group="bottom"] .tab.active').dataset.tab;
-      if (active === 'serialPane') $('#serialOut').textContent = '';
+      if (active === 'serialPane') { this.term[this.activeBoard] = ''; this.renderTerminal(); }
       else if (active === 'consolePane') this.clearConsole();
       else { this.sim.broker.log = []; this.sim.broker.topics.clear(); this.renderIot(); }
     };
@@ -566,7 +660,7 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
       e.preventDefault();
       const inp = $('#serialInput'); const end = $('#lineEnding').value.replace('\\r', '\r').replace('\\n', '\n');
       if (!this.sim.running) { this.toast('Start the simulation first'); return; }
-      this.sim.sendSerial(inp.value + end); inp.value = '';
+      this.sim.sendSerial(inp.value + end, this.activeBoard); inp.value = '';
     };
     $('#mqttForm').onsubmit = (e) => {
       e.preventDefault();

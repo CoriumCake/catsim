@@ -77,6 +77,21 @@ describe('normalizeProject (untrusted input)', () => {
   });
 });
 
+describe('several boards', () => {
+  it('keeps every board and the programs of the extra ones; drops programs for unknown boards', () => {
+    const n = normalizeProject({ code: 'first', components: [
+      { id: 'esp', type: 'esp32' }, { id: 'esp2', type: 'esp32' }, { id: 'uno', type: 'uno' },
+    ], programs: { esp2: { code: 'second' }, uno: { firmware: { name: 'a.hex', hex: ':00000001FF' } }, ghost: { code: 'x' }, esp: { code: 'ignored' } } }, DEFS);
+    expect(n.components.map((c) => c.id)).toEqual(['esp', 'esp2', 'uno']);
+    expect(n.code).toBe('first');
+    expect(n.programs).toEqual({ esp2: { code: 'second' }, uno: { firmware: { name: 'a.hex', hex: ':00000001FF' } } });
+  });
+  it('rejects firmware that is not Intel HEX text', () => {
+    const n = normalizeProject({ components: [{ id: 'esp', type: 'esp32' }, { id: 'uno', type: 'uno' }], programs: { uno: { firmware: { name: 'x', hex: '<script>' } } } }, DEFS);
+    expect(n.programs).toEqual({ uno: {} });
+  });
+});
+
 describe('share links', () => {
   const p = { name: 'Blink ⚡ ünïcode', code: 'void setup(){}\n'.repeat(200), components: [{ id: 'esp', type: 'esp32', x: 300, y: 80, props: {} }], wires: [] };
 

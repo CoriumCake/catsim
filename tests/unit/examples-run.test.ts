@@ -7,6 +7,7 @@ import { EXAMPLES } from '../../src/examples.js';
 import { normalizeProject } from '../../src/project.ts';
 import { DEFS } from '../../src/components.js';
 import { UnoRunner } from '../../src/avr/uno.ts';
+import { MultiRun } from '../../src/multi.ts';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SKIP = new Set(['http']); // needs the internet
@@ -24,6 +25,15 @@ async function runExample(key: string, ms: number) {
   if ('firmware' in ex) host.project.firmware = { ...(ex as { firmware: { name: string; hex: string } }).firmware };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sim: any;
+  const boards = host.project.components.filter((c) => DEFS[c.type].board);
+  if (boards.length > 1) { // several boards: each runs its own program in the shared circuit
+    const progs = (ex as { programs?: Record<string, { code?: string; firmware?: { hex: string } }> }).programs || {};
+    const m = new MultiRun({ get project() { return host.project; }, log: (msg: string, level?: string) => host.log(msg, level), reportError: (e: unknown) => host.reportError(e) });
+    m.start(boards.map((b, i) => ({ id: b.id, type: b.type, code: i === 0 ? ex.code : progs[b.id]?.code, firmware: i === 0 ? (ex as { firmware?: { hex: string } }).firmware?.hex : progs[b.id]?.firmware?.hex })), 4);
+    for (let t = 0; t < ms; t += 50) { await wait(50); m.touch(); }
+    m.stop();
+    return { sim: { analog: m.bridge }, host };
+  }
   if (host.project.components.some((c) => c.type === 'uno')) {
     sim = new UnoRunner(host); // real firmware on the emulated ATmega328P
     sim.setSpeed(2);

@@ -48,7 +48,9 @@ export interface SimState {
   millis(): number;
   clock: { stall(realMs: number): void };
   /** boards that run real firmware (Uno): pin drivers come from the emulated chip's port registers */
-  board?: { drive(pin: number): { wave: Waveform; rs: number; key: string }; name: string };
+  board?: BoardDriver;
+  /** several boards in one circuit: a driver per board id (otherwise the single runtime drives the board) */
+  drivers?: Record<string, BoardDriver>;
   }
 
 const VIH = 0.75 * V_LOGIC, VIL = 0.25 * V_LOGIC;
@@ -64,18 +66,49 @@ const LED_TAU = 0.02; // brightness averaging time constant (s), roughly what th
 const MAX_PROBE_POINTS = 50_000;
 
 type Drive = { wave: Waveform; rs: number; key: string };
+export interface BoardDriver { name: string; drive(pin: number): Drive }
+/** One GPIO of one board in the circuit. */
+interface PinSrc { board: string; g: number; src: VSource; driver: BoardDriver; label: string }
 
 function topologyKey(p: Project): string {
   // pasted SPICE models change a part's internal structure, so they count as topology
   return JSON.stringify([p.components.map((c) => [c.id, c.type, typeof c.props.spice === 'string' ? c.props.spice : '']), p.wires.map((w) => [w.from, w.to])]);
 }
 
+
+/** How an ESP32 GPIO drives the circuit, from the sketch runtime's pin state (mode, level, PWM, tone…). */
+export function espDrive(s: SimState, g: number): Drive {
+  const mode = s.mode[g];
+  if (mode === OUTPUT) {
+    if (s.dac[g] != null) { const v = s.dac[g] * V_LOGIC; return { wave: dc(v), rs: 1000, key: `dac${v}` }; }
+    if (s.tone[g]) { const f = s.tone[g]; return { wave: square(V_LOGIC, f, 0.5), rs: R_OUT, key: `tone${f}` }; }
+    if (s.servo[g] != null) {
+      const us = 544 + (s.servo[g] / 180) * (2400 - 544);
+      return { wave: square(V_LOGIC, 50, us * 50e-6), rs: R_OUT, key: `servo${us}` };
+    }
+    if (s.pwm[g] != null) {
+      const lp = s.ledcPin[g];
+      const freq = lp?.freq || (lp?.ch != null ? s.ledcCh[lp.ch]?.freq : undefined) || 1000;
+      return { wave: square(V_LOGIC, freq, s.pwm[g]), rs: R_OUT, key: `pwm${freq}:${s.pwm[g]}` };
+    }
+    const v = s.out[g] ? V_LOGIC : 0;
+    return { wave: dc(v), rs: R_OUT, key: `out${v}` };
+  }
+  const canPull = g < 34;
+  if (mode === INPUT_PULLUP && canPull) return { wave: dc(V_LOGIC), rs: R_PULL, key: 'pu' };
+  if (mode === INPUT_PULLDOWN && canPull) return { wave: dc(0), rs: R_PULL, key: 'pd' };
+  return { wave: dc(0), rs: R_FLOAT, key: 'hiz' };
+}
+
 export class AnalogBridge {
   sim: Simulation | null = null;
   error: string | null = null;
   private topo = '';
-  private gpioSrc = new Map<number, VSource>();
-  private gpioDrive = new Map<number, string>();
+  /** board GPIO sources keyed "boardId:gpio" */
+  private gpioSrc = new Map<string, PinSrc>();
+  private gpioDrive = new Map<string, string>();
+  /** the first board: default for single-board callers */
+  private primary = '';
   private models: Array<{ c: Component; m: PartModel }> = [];
   private project: Project | null = null;
   private comps = new Map<string, Component>();
@@ -84,7 +117,7 @@ export class AnalogBridge {
   /** LEDs destroyed by overcurrent in this run (they stay open-circuit) */
   readonly burnt = new Set<string>();
   private pendingBurn: string[] = [];
-  private warnedPins = new Set<number>();
+  private warnedPins = new Set<string>();
   private chips: ChipRun[] = [];
   private motors = new Map<string, { node: number; angle: number; kickNodes: [number, number] }>();
   private relays = new Map<string, NonNullable<PartModel['relay']>>();
@@ -94,7 +127,7 @@ export class AnalogBridge {
   private fresh = true;
   private logicEvents = 0;
   private warnedOscillation = false;
-  private lastLevel = new Map<number, number>();
+  private lastLevel = new Map<string, number>();
   private probes: Array<string | null> = [];
   private probeNodes: number[] = [];
   /** solver step limit (set from the scope timebase) */
@@ -125,44 +158,34 @@ export class AnalogBridge {
     const ckt = new Circuit();
     // Nets from wires only (part-internal connections are modelled by the parts themselves).
     const { rootOf, members } = wireNets(p, DEFS);
-    const esp = p.components.find((c) => c.type === 'esp32');
-    const boardComp = p.components.find((c) => DEFS[c.type]?.board);
-    const gndPin = boardComp && (DEFS[boardComp.type].pins as PinDef[]).find((pd) => pd.kind === 'gnd');
-    const groundRoot = boardComp && gndPin ? rootOf.get(`${boardComp.id}:${gndPin.id}`) : null;
+    const boards = p.components.filter((c) => DEFS[c.type]?.board);
+    this.primary = boards[0]?.id ?? '';
+    // every board's GND is the common ground (boards are assumed to share a supply, like one USB hub)
+    const groundRoots = new Set<string>();
+    for (const b of boards) for (const pd of DEFS[b.type].pins as PinDef[]) if (pd.kind === 'gnd') { const r = rootOf.get(`${b.id}:${pd.id}`); if (r) groundRoots.add(r); }
     const rootNode = new Map<string, number>();
     this.pinNode.clear();
     for (const [key, r] of rootOf) {
       let n = rootNode.get(r);
-      if (n === undefined) { n = r === groundRoot ? 0 : ckt.node(r); rootNode.set(r, n); }
+      if (n === undefined) { n = groundRoots.has(r) ? 0 : ckt.node(r); rootNode.set(r, n); }
       this.pinNode.set(key, n);
     }
     // Board pins with nothing wired to them need no circuit elements (reads fall back to logic level).
     const wired = (key: string) => (members.get(rootOf.get(key) ?? '')?.length ?? 0) > 1;
     const nodeOf = (c: Component) => (pinId: string) => this.pinNode.get(`${c.id}:${pinId}`) ?? 0;
 
-    // ESP32: supply rails and one Thevenin source per GPIO
+    // Boards: supply rails and one Thevenin source per wired GPIO, driven by that board's runtime
     this.gpioSrc.clear(); this.gpioDrive.clear();
-    if (esp) {
-      const pin = nodeOf(esp);
-      if (wired(`${esp.id}:3V3`)) ckt.vsource(pin('3V3'), 0, dc(V_LOGIC), 0.1, '3V3');
-      if (wired(`${esp.id}:VIN`)) ckt.vsource(pin('VIN'), 0, dc(5), 0.1, 'VIN');
-      for (const pd of DEFS.esp32.pins as PinDef[]) {
-        if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${esp.id}:${pd.id}`)) continue;
-        const d = this.drive(pd.gpio);
-        this.gpioSrc.set(pd.gpio, ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `GPIO${pd.gpio}`));
-        this.gpioDrive.set(pd.gpio, d.key);
-      }
-    }
-    const uno = p.components.find((c) => c.type === 'uno');
-    if (uno) {
-      const pin = nodeOf(uno);
-      if (wired(`${uno.id}:5V`)) ckt.vsource(pin('5V'), 0, dc(5), 0.1, '5V');
-      if (wired(`${uno.id}:3V3`)) ckt.vsource(pin('3V3'), 0, dc(3.3), 0.5, '3V3');
-      for (const pd of DEFS.uno.pins as PinDef[]) {
-        if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${uno.id}:${pd.id}`)) continue;
-        const d = this.drive(pd.gpio);
-        this.gpioSrc.set(pd.gpio, ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `${pd.id}`));
-        this.gpioDrive.set(pd.gpio, d.key);
+    for (const b of boards) {
+      const pin = nodeOf(b), driver = this.driverFor(b);
+      const rails: Array<[string, number, number]> = b.type === 'uno' ? [['5V', 5, 0.1], ['3V3', 3.3, 0.5]] : [['3V3', V_LOGIC, 0.1], ['VIN', 5, 0.1]];
+      for (const [id, v, rs] of rails) if (wired(`${b.id}:${id}`)) ckt.vsource(pin(id), 0, dc(v), rs, `${b.id}_${id}`);
+      for (const pd of DEFS[b.type].pins as PinDef[]) {
+        if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${b.id}:${pd.id}`)) continue;
+        const d = driver.drive(pd.gpio), key = `${b.id}:${pd.gpio}`;
+        const label = b.type === 'uno' ? `Pin ${pd.id}` : `GPIO${pd.gpio}`;
+        this.gpioSrc.set(key, { board: b.id, g: pd.gpio, src: ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `${b.id}_${pd.id}`), driver, label });
+        this.gpioDrive.set(key, d.key);
       }
     }
     this.models = [];
@@ -202,29 +225,14 @@ export class AnalogBridge {
     this.record();
   }
 
-  private drive(g: number): Drive {
-    if (this.s.board) return this.s.board.drive(g);
-    const s = this.s, mode = s.mode[g];
-    if (mode === OUTPUT) {
-      if (s.dac[g] != null) { const v = s.dac[g] * V_LOGIC; return { wave: dc(v), rs: 1000, key: `dac${v}` }; }
-      if (s.tone[g]) { const f = s.tone[g]; return { wave: square(V_LOGIC, f, 0.5), rs: R_OUT, key: `tone${f}` }; }
-      if (s.servo[g] != null) {
-        const us = 544 + (s.servo[g] / 180) * (2400 - 544);
-        return { wave: square(V_LOGIC, 50, us * 50e-6), rs: R_OUT, key: `servo${us}` };
-      }
-      if (s.pwm[g] != null) {
-        const lp = s.ledcPin[g];
-        const freq = lp?.freq || (lp?.ch != null ? s.ledcCh[lp.ch]?.freq : undefined) || 1000;
-        return { wave: square(V_LOGIC, freq, s.pwm[g]), rs: R_OUT, key: `pwm${freq}:${s.pwm[g]}` };
-      }
-      const v = s.out[g] ? V_LOGIC : 0;
-      return { wave: dc(v), rs: R_OUT, key: `out${v}` };
-    }
-    const canPull = g < 34;
-    if (mode === INPUT_PULLUP && canPull) return { wave: dc(V_LOGIC), rs: R_PULL, key: 'pu' };
-    if (mode === INPUT_PULLDOWN && canPull) return { wave: dc(0), rs: R_PULL, key: 'pd' };
-    return { wave: dc(0), rs: R_FLOAT, key: 'hiz' };
+  /** Who drives a board's pins: an explicit per-board driver, the single Uno, or the single ESP32 runtime. */
+  private driverFor(c: Component): BoardDriver {
+    const d = this.s.drivers?.[c.id]; if (d) return d;
+    if (c.type === 'uno' && this.s.board) return this.s.board;
+    return { name: 'ESP32', drive: (g) => this.drive(g) };
   }
+
+  private drive(g: number): Drive { return espDrive(this.s, g); }
 
   // ---------- time ----------
   now(): number { return this.s.millis() / 1000; }
@@ -290,9 +298,9 @@ export class AnalogBridge {
         this.s.app.log('A logic circuit is oscillating faster than the simulator can follow (thousands of edges per frame). Check for an output wired back to its own input without a delay.', 'warn');
       }
       let changed = false;
-      for (const [g, src] of this.gpioSrc) {
-        const d = this.drive(g);
-        if (d.key !== this.gpioDrive.get(g)) { src.wave = d.wave; src.rs = d.rs; this.gpioDrive.set(g, d.key); changed = true; }
+      for (const [key, ps] of this.gpioSrc) {
+        const d = ps.driver.drive(ps.g);
+        if (d.key !== this.gpioDrive.get(key)) { ps.src.wave = d.wave; ps.src.rs = d.rs; this.gpioDrive.set(key, d.key); changed = true; }
       }
       for (const { m } of this.models) if (m.update?.()) changed = true;
       // overcurrent damage (applied between solver runs, not inside a step)
@@ -311,12 +319,12 @@ export class AnalogBridge {
           this.s.app.log(`Switching ${id} off made a ${vmax >= 1000 ? `${(vmax / 1000).toFixed(1)} kV` : `${Math.round(vmax)} V`} spike: the coil's inductance kicks back when its current is cut. A real transistor would break down. Put a flyback diode (1N4007) across ${id}, cathode to the + side.`, 'warn');
         }
       }
-      for (const [g, src] of this.gpioSrc) {
-        const i = Math.abs(src.current(sim.x));
-        if (i > GPIO_MAX_A && !this.warnedPins.has(g)) {
-          this.warnedPins.add(g);
-          const where = this.s.board ? `Pin ${g < 14 ? `D${g}` : `A${g - 14}`}` : `GPIO${g}`;
-          this.s.app.log(`${where} is carrying ${Math.round(i * 1000)} mA, above the ${this.s.board ? this.s.board.name : 'ESP32'}'s 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
+      for (const [key, ps] of this.gpioSrc) {
+        const i = Math.abs(ps.src.current(sim.x));
+        if (i > GPIO_MAX_A && !this.warnedPins.has(key)) {
+          this.warnedPins.add(key);
+          const who = this.gpioSrc.size && new Set([...this.gpioSrc.values()].map((x) => x.board)).size > 1 ? `${ps.board} ` : '';
+          this.s.app.log(`${who}${ps.label} is carrying ${Math.round(i * 1000)} mA, above the ${ps.driver.name}'s 40 mA limit per pin (keep it under 20 mA). Use a resistor or a transistor to drive the load.`, 'warn');
         }
       }
       if (changed) { sim.refresh(); this.record(); if (this.chips.length) this.evaluateLogic(); }
@@ -424,18 +432,20 @@ export class AnalogBridge {
     return n === undefined || !this.sim ? null : this.sim.nodeV(n);
   }
 
-  gpioVoltage(g: number): number | null {
-    const src = this.gpioSrc.get(g);
-    return src && this.sim ? this.sim.nodeV(src.a) : null;
+  /** Voltage on a board GPIO (null if nothing is wired to it). `board` defaults to the first board. */
+  gpioVoltage(g: number, board = this.primary): number | null {
+    const ps = this.gpioSrc.get(`${board || this.primary}:${g}`);
+    return ps && this.sim ? this.sim.nodeV(ps.src.a) : null;
   }
 
   /** Digital input with Schmitt-trigger thresholds (VIL/VIH), remembering the last level in between. */
-  readDigital(g: number): number | null {
-    const v = this.gpioVoltage(g);
+  readDigital(g: number, board = this.primary): number | null {
+    const v = this.gpioVoltage(g, board);
     if (v == null) return null;
-    const last = this.lastLevel.get(g) ?? (v > V_LOGIC / 2 ? 1 : 0);
+    const key = `${board || this.primary}:${g}`;
+    const last = this.lastLevel.get(key) ?? (v > V_LOGIC / 2 ? 1 : 0);
     const lvl = v >= VIH ? 1 : v <= VIL ? 0 : last;
-    this.lastLevel.set(g, lvl);
+    this.lastLevel.set(key, lvl);
     return lvl;
   }
 

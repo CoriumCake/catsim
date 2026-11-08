@@ -49,8 +49,12 @@ export class UnoRunner {
   mqtt = { connected: false, clientId: '', host: '', subs: [] as string[], queue: [] as unknown[] };
   serialOut = '';
   txAt = 0;
-  readonly clock = new SimClock();
+  readonly clock: SimClock;
   readonly analog: AnalogBridge;
+  /** with several boards the clock and circuit are shared and owned by the worker */
+  private readonly ownsClock: boolean;
+  private readonly ownsAnalog: boolean;
+  readonly boardId: string | undefined;
   readonly board = { name: 'Arduino Uno', drive: (n: number) => this.drive(n) };
 
   private cpu!: CPU;
@@ -62,8 +66,12 @@ export class UnoRunner {
   private loopHandle: ReturnType<typeof setTimeout> | null = null;
   private inStep = false;
 
-  constructor(readonly app: UnoHost) {
-    this.analog = new AnalogBridge(this.bridgeState());
+  constructor(readonly app: UnoHost, opts: { clock?: SimClock; analog?: AnalogBridge; boardId?: string } = {}) {
+    this.clock = opts.clock ?? new SimClock();
+    this.ownsClock = !opts.clock;
+    this.analog = opts.analog ?? new AnalogBridge(this.bridgeState());
+    this.ownsAnalog = !opts.analog;
+    this.boardId = opts.boardId;
   }
 
   private bridgeState() {
@@ -112,9 +120,9 @@ export class UnoRunner {
     this.adc.avcc = VCC;
     for (const p of Object.values(this.ports)) p.addListener(() => this.pinsChanged());
     this.serialOut = ''; this.rxQueue = []; this.levels.clear(); this.out = {};
-    this.clock.reset();
+    if (this.ownsClock) this.clock.reset();
     this.running = true;
-    this.analog.reset();
+    if (this.ownsAnalog) this.analog.reset();
     this.app.onSimState(true);
     this.loop();
     return true;
@@ -156,7 +164,7 @@ export class UnoRunner {
     this.analog.sync();
     this.updateInputs();
     for (let ch = 0; ch < 6; ch++) {
-      const v = this.analog.gpioVoltage(14 + ch);
+      const v = this.analog.gpioVoltage(14 + ch, this.boardId);
       this.adc.channelValues[ch] = v == null ? 0 : Math.min(VCC, Math.max(0, v));
     }
   }
@@ -166,7 +174,7 @@ export class UnoRunner {
       const [p, bit] = portOf(n);
       const port = this.ports[p], st = port.pinState(bit);
       if (st === PinState.High || st === PinState.Low) continue;
-      const v = this.analog.gpioVoltage(n);
+      const v = this.analog.gpioVoltage(n, this.boardId);
       let lvl: boolean;
       if (v == null) lvl = st === PinState.InputPullUp; // unwired pin
       else { const last = this.levels.get(n) ?? v > VCC / 2; lvl = v >= VIH ? true : v <= VIL ? false : last; }

@@ -9,6 +9,7 @@ describe('transpiler', () => {
   for (const ex of EXAMPLES.filter((e) => !('firmware' in e))) { // Uno examples run compiled firmware instead
     it(`example "${ex.key}" transpiles to valid JavaScript`, () => {
       const { js, functions } = transpile(ex.code);
+      for (const pr of Object.values((ex as { programs?: Record<string, { code?: string }> }).programs || {})) if (pr.code) expect(() => compile(transpile(pr.code).js)).not.toThrow();
       expect(functions).toContain('setup');
       expect(functions).toContain('loop');
       expect(() => compile(js)).not.toThrow();

@@ -96,6 +96,9 @@ class Simulator {
     this.app = app; this.running = false; this.runId = 0; this.ui = {};
     this.clock = new SimClock(); this.sleeps = new Set(); // pending delay() promises, rejected on stop
     this.analog = null; // AnalogBridge (set in the worker); null = logic-level simulation only
+    // With several boards the clock and the circuit are shared: only their owner resets them.
+    this.ownsClock = true; this.ownsAnalog = true;
+    this.boardId = undefined; // which board this runtime drives in the circuit (undefined = the only one)
     this.resetHw();
   }
 
@@ -127,6 +130,7 @@ class Simulator {
   nets() {
     if (this._nets) return this._nets;
     const uf = makeUF(); const p = this.app.project;
+    const myBoard = (p.components.find((c) => DEFS[c.type] && DEFS[c.type].board && c.type === 'esp32') || {}).id;
     for (const c of p.components) {
       const d = DEFS[c.type]; if (!d) continue;
       for (const pin of d.pins) uf.find(c.id + ':' + pin.id);
@@ -141,10 +145,15 @@ class Simulator {
         let n = info.get(r);
         if (!n) { n = { gnd: false, vcc: false, gpios: [], drivers: [], analog: [], keys: [] }; info.set(r, n); }
         n.keys.push(k);
-        if (c.type === 'esp32') {
+        if (d.board) {
+          // only this runtime's own board provides "my" GPIOs; other boards share ground and supplies,
+          // and their GPIOs mean the net is driven from elsewhere (not floating)
+          const mine = this.boardId ? c.id === this.boardId : c.id === myBoard;
           if (pin.kind === 'gnd') n.gnd = true;
           else if (pin.kind === 'vcc') n.vcc = true;
-          else if (pin.kind === 'gpio') { n.gpios.push(pin.gpio); gpioNet.set(pin.gpio, n); }
+          else if (pin.kind === 'gpio') {
+            if (mine && c.type === 'esp32') { n.gpios.push(pin.gpio); gpioNet.set(pin.gpio, n); } else n.foreign = true;
+          }
         }
         if (d.drive && d.drive[pin.id]) n.drivers.push({ c, fn: d.drive[pin.id] });
         if (d.analog && d.analog[pin.id]) n.analog.push({ c, fn: d.analog[pin.id] });
@@ -180,7 +189,7 @@ class Simulator {
     if (this.mode[g] === OUTPUT) return this.out[g] ? 1 : 0;
     if (this.analog && this.running) {
       this.analog.sync();
-      const a = this.analog.readDigital(g);
+      const a = this.analog.readDigital(g, this.boardId);
       if (a != null) return a;
     }
     let v = this.level(this.netOfGpio(g), g);
@@ -251,8 +260,9 @@ class Simulator {
       console.debug('[CatSim] transpiled sketch:\n' + js);
       return false;
     }
-    this.clock.reset(); this.running = true; this.lastYield = performance.now();
-    if (this.analog) this.analog.reset();
+    if (this.ownsClock) this.clock.reset();
+    this.running = true; this.lastYield = performance.now();
+    if (this.analog && this.ownsAnalog) this.analog.reset();
     this.app.onSimState(true);
     try {
       const mod = await factory(api);
@@ -273,7 +283,8 @@ class Simulator {
   stop(silent) {
     if (!this.running) return;
     this.stoppedAt = this.clock.millis(); this.running = false; this.runId++;
-    this.clock.cancelAll(); this.clock.resume();
+    // a shared clock keeps running for the other boards; this run's timers just turn into no-ops
+    if (this.ownsClock) { this.clock.cancelAll(); this.clock.resume(); }
     for (const s of this.sleeps) s.reject(STOP);
     this.sleeps.clear();
     this.mqtt.connected = false;
@@ -521,7 +532,7 @@ class Simulator {
       digitalRead(pin) {
         pin = +pin;
         if (sim.mode[pin] === undefined) sim.warnOnce('dr' + pin, `digitalRead(${pin}) before pinMode() — pin is floating.`);
-        else if (sim.mode[pin] === INPUT && sim.level(sim.netOfGpio(pin), pin) == null) sim.warnOnce('fl' + pin, `GPIO${pin} is floating (nothing drives it). Use INPUT_PULLUP or a pull resistor.`);
+        else if (sim.mode[pin] === INPUT && sim.level(sim.netOfGpio(pin), pin) == null && !(sim.netOfGpio(pin) || {}).foreign) sim.warnOnce('fl' + pin, `GPIO${pin} is floating (nothing drives it). Use INPUT_PULLUP or a pull resistor.`);
         return sim.readPin(pin);
       },
       analogRead(pin) {
@@ -534,7 +545,7 @@ class Simulator {
         const max = (1 << sim.adcBits) - 1;
         if (sim.analog && sim.running) {
           sim.analog.sync();
-          const v = sim.analog.gpioVoltage(pin);
+          const v = sim.analog.gpioVoltage(pin, sim.boardId);
           if (v != null) return Math.round(Math.min(1, Math.max(0, v / 3.3)) * max);
         }
         const n = sim.netOfGpio(pin);

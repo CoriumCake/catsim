@@ -299,8 +299,6 @@ select.btn { padding-right: 6px; }
   .tb-files { margin-left: auto; }
   .tb-sim { order: 10; flex-basis: 100%; justify-content: center; }
 }
-.part.current { border-color: var(--accent); background: #fffaeb; }
-.part.current span::after { content: " · in use"; color: var(--muted); font-weight: 400; }
 /* bottom dock: labels never wrap; contextual actions stay compact */
 .tab { white-space: nowrap; }
 .bottom .tabs .tab { padding: 6px 10px; }
@@ -319,3 +317,9 @@ select.btn { padding-right: 6px; }
 .bottom.collapsed #btnDock svg { transform: rotate(180deg); }
 .tab.unseen::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; }
 #btnTidy.on { background: var(--accent); color: var(--accent-ink); }
+/* one tab per board when a project has several */
+.board-tabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; overflow-x: auto; }
+.board-tab { border: 0; background: none; padding: 6px 10px; font: 600 12px var(--mono); color: var(--muted); border-radius: 7px 7px 0 0; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.board-tab:hover { color: var(--text); }
+.board-tab.active { color: var(--text); background: var(--panel-2); }
+.board-tab.unseen::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }

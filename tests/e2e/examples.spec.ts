@@ -206,27 +206,33 @@ test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
 
 test('Arduino Uno runs real compiled firmware (Blink)', async ({ page }) => {
   await loadExample(page, 'uno-blink');
-  await expect(page.locator('#paletteList .part[data-type="uno"]')).toHaveClass(/current/);
+  expect(await page.evaluate(() => window.CatSim.App.boards().map((b: { type: string }) => b.type))).toEqual(['uno']);
+  await expect(page.locator('#boardTabs')).toBeHidden(); // one board: no board tabs
   await expect(page.locator('#btnFirmware')).toBeVisible();
   await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toMatch(/Uno blink started\s+tick\s+tock/);
   await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeGreaterThan(0.5);
 });
 
-test('switch to the Uno, upload a .hex and run it', async ({ page }) => {
+test('add an Arduino Uno next to the ESP32, upload its .hex and run both', async ({ page }) => {
+  await loadExample(page, 'blink');
   await page.click('#addPart'); // Parts tab
   await page.click('#paletteList .part[data-type="uno"]');
-  await expect(page.locator('#paletteList .part[data-type="uno"]')).toHaveClass(/current/);
+  await expect(page.locator('#boardTabs .board-tab.active')).toHaveText('uno · firmware');
   await expect(page.locator('#unoBanner')).toContainText('Upload .hex');
+  await expect(page.locator('#btnFirmware')).toBeVisible();
   await page.click('#btnRun');
-  await expect(page.locator('#consoleOut')).toContainText('runs compiled firmware'); // no firmware yet
+  await expect(page.locator('#consoleOut')).toContainText('uno has none yet'); // no firmware yet
   const hex = (await import('node:fs')).readFileSync(new URL('../../src/firmware/uno-blink.hex', import.meta.url), 'utf8');
   await page.locator('#firmwareFile').setInputFiles({ name: 'blink.hex', mimeType: 'text/plain', buffer: Buffer.from(hex) });
   await expect(page.locator('#unoBanner')).toContainText('blink.hex');
   await startSim(page);
-  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('tick');
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('Uno blink started'); // the Uno's terminal
+  await page.click('#boardTabs [data-board="esp"]');
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('ESP32 blink started'); // the ESP32's terminal
   // corrupted firmware is refused with a line number
   await page.click('#btnRun');
+  await page.click('#boardTabs [data-board="uno"]');
   await page.locator('#firmwareFile').setInputFiles({ name: 'bad.hex', mimeType: 'text/plain', buffer: Buffer.from(hex.replace(/^(:10.{36})../m, '$1FF')) });
   await expect(page.locator('#consoleOut')).toContainText('bad checksum');
 });
@@ -323,4 +329,35 @@ test('Tidy wires routes every wire at right angles and is saved with the project
   expect(await page.evaluate(() => window.CatSim.App.project.wireStyle)).toBe('tidy');
   await page.click('#btnTidy');
   expect(await page.evaluate(() => window.CatSim.App.project.wireStyle)).toBeUndefined();
+});
+
+test('two ESP32s: each runs its own sketch and they talk over a wire', async ({ page }) => {
+  await loadExample(page, 'two-esp32');
+  await expect(page.locator('#boardTabs .board-tab')).toHaveText(['esp · sketch', 'esp2 · sketch']);
+  await startSim(page);
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('btn1', true));
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 4000 }).toBeGreaterThan(0.5);
+  await expect.poll(() => serial(page)).toContain('sending HIGH'); // esp's terminal
+  await page.click('#boardTabs [data-board="esp2"]');
+  await expect.poll(() => serial(page)).toContain('received HIGH: LED on'); // esp2's own terminal
+  expect(await page.evaluate(() => window.CatSim.App.editor.get())).toContain('Board "esp2"');
+  await expect(page.locator('#consoleOut')).not.toContainText('floating');
+});
+
+test('add a second board from Parts, give it its own sketch, and delete it again', async ({ page }) => {
+  await loadExample(page, 'blink');
+  await page.click('#addPart');
+  await page.click('#paletteList .part[data-type="esp32"]');
+  await expect(page.locator('#boardTabs .board-tab')).toHaveText(['esp · sketch', 'esp2 · sketch']);
+  await expect(page.locator('#boardTabs .board-tab.active')).toHaveText('esp2 · sketch');
+  expect(await page.evaluate(() => window.CatSim.App.editor.get())).toContain('runs its own sketch');
+  await page.click('#boardTabs [data-board="esp"]');
+  expect(await page.evaluate(() => window.CatSim.App.editor.get())).toContain('Blink');
+  // a lone board can't be deleted; one of two can
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp2' }));
+  await page.click('#props [data-act="delete"]');
+  await expect(page.locator('#boardTabs')).toBeHidden();
+  expect(await page.evaluate(() => window.CatSim.App.project.components.filter((c: { type: string }) => c.type === 'esp32').length)).toBe(1);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
+  await expect(page.locator('#props')).toBeHidden();
 });
