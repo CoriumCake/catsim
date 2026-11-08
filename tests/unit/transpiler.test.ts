@@ -25,14 +25,14 @@ describe('transpiler', () => {
 
   it('keeps static locals between calls', async () => {
     const { js } = transpile('int tick() { static int n = 0; n++; return n; }\nvoid setup() {}\nvoid loop() {}');
-    const run = new Function(`return (async () => { ${js}\n; await tick(); await tick(); return await tick(); })();`);
-    expect(await run()).toBe(3);
+    const run = new Function('__i32', `return (async () => { ${js}\n; await tick(); await tick(); return await tick(); })();`);
+    expect(await run((v: number) => v | 0)).toBe(3);
   });
 
   it('truncates integer division for int variables', async () => {
     const { js } = transpile('int half() { int x = 7 / 2; return x; }\nvoid setup() {}\nvoid loop() {}');
-    const run = new Function('__i', `return (async () => { ${js}\n; return await half(); })();`);
-    expect(await run((v: number) => Math.trunc(v))).toBe(3);
+    const run = new Function('__i32', `return (async () => { ${js}\n; return await half(); })();`);
+    expect(await run((v: number) => Math.trunc(v) | 0)).toBe(3);
   });
 
   it('converts arrays, enums and #define', () => {
@@ -67,5 +67,12 @@ describe('strict-mode compatibility', () => {
     const { js } = transpile('void setup() {}\nvoid loop() { yield(); }');
     expect(js).toMatch(/await __y\(\)/);
     expect(() => compile(js)).not.toThrow();
+  });
+});
+
+describe('line numbers survive the integer-type rewrites', () => {
+  it('keeps every line when a statement spans several lines', () => {
+    const src = 'int total = 0;\nvoid setup() {\n  total =\n    1 + 2;\n  total +=\n    3;\n  int avg = total\n    / 2;\n}\nvoid loop() {}';
+    expect(transpile(src).js.split('\n').length).toBe(src.split('\n').length);
   });
 });

@@ -18,6 +18,23 @@ const CLASSES = ['Servo', 'DHT', 'PubSubClient', 'WiFiClient', 'WiFiClientSecure
 const typeRe = (list) => list.map((t) => t.replace(/ /g, '\\s+')).join('|');
 const QUAL = '(?:(?:static|const|volatile|constexpr|unsigned|signed|inline)\\s+)*';
 
+// C integer type → the runtime helper that wraps a value to that type's width (ESP32: int and long are 32 bit).
+function wrapFor(type) {
+  const t = type.replace(/\b(?:static|const|volatile|constexpr|inline|signed)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/^(?:bool|boolean)$/.test(t)) return '__b';
+  if (/^(?:unsigned )?long long$|^u?int64_t$/.test(t)) return '__i';
+  if (/^(?:unsigned char|byte|uint8_t)$/.test(t)) return '__u8';
+  if (/^(?:char|int8_t)$/.test(t)) return '__i8';
+  if (/^(?:unsigned short|uint16_t|word)$/.test(t)) return '__u16';
+  if (/^(?:short|int16_t)$/.test(t)) return '__i16';
+  if (/^(?:unsigned(?: int| long)?|uint32_t|size_t)$/.test(t)) return '__u32';
+  return '__i32'; // int, long, int32_t, enums
+}
+
+const FLOAT_CAST = '\u0001';
+// keep a rewrite's line count so runtime errors still point at the right line
+const keepNl = (mm, out) => out + '\n'.repeat(Math.max(0, (mm.match(/\n/g) || []).length - (out.match(/\n/g) || []).length));
+
 class TranspileError extends Error {
   constructor(msg, line) { super(msg); this.line = line; }
 }
@@ -129,7 +146,9 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
 
   // --- casts ---
   code = code.replace(/\(\s*(?:const\s+)?(?:unsigned\s+)?(?:char|byte|uint8_t|void)\s*\*\s*\)/g, '');
-  code = code.replace(/\(\s*(?:float|double|String|char|bool|boolean)\s*\)/g, '');
+  // (float)/(double) leave a marker so integer division never takes the operand next to them; removed at the end
+  code = code.replace(/\(\s*(?:float|double)\s*\)\s*/g, FLOAT_CAST);
+  code = code.replace(/\(\s*(?:String|char|bool|boolean)\s*\)/g, '');
   code = code.replace(/\(\s*(?:int|short|byte|uint8_t|uint16_t|int8_t|int16_t|int32_t|unsigned\s+int|unsigned\s+char|word)\s*\)\s*/g, '~~');
   code = code.replace(/\(\s*(?:long\s+long|unsigned\s+long|long|uint32_t|uint64_t|int64_t|size_t|unsigned)\s*\)\s*/g, '+');
 
@@ -138,10 +157,18 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
     (m, a, b) => a + b);
 
   // --- function definitions ---
-  const fnNames = [];
-  code = code.replace(new RegExp(`(^|[;}\\n])([ \\t]*)${QUAL}(?:void|${TYPES})(?:\\s*[\\*&]\\s*|\\s+)([A-Za-z_]\\w*)\\s*\\(([^()]*)\\)\\s*\\{`, 'g'),
-    (m, a, ws, name, params) => {
+  const fnNames = []; const fnWrap = new Map(); // int-returning function → wrap helper
+  const varWrap = new Map(); // integer variable → wrap helper (null when a name has conflicting types)
+  const noteVar = (name, w) => varWrap.set(name, varWrap.has(name) && varWrap.get(name) !== w ? null : w);
+  const intTypeRe = new RegExp(`^\\s*${QUAL}(?:${INTS}|bool|boolean)\\s*$`); // types whose values wrap/convert on assignment
+  code = code.replace(new RegExp(`(^|[;}\\n])([ \\t]*)(${QUAL}(?:void|${TYPES}))((?:\\s*[\\*&]\\s*|\\s+))([A-Za-z_]\\w*)\\s*\\(([^()]*)\\)\\s*\\{`, 'g'),
+    (m, a, ws, rtype, sep, name, params) => {
       fnNames.push(name);
+      if (intTypeRe.test(rtype) && !/[*&]/.test(sep)) fnWrap.set(name, wrapFor(rtype));
+      for (const prm of params.split(',')) {
+        const pm = prm.trim().match(/^(.*?)\s*([*&]?)\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*(?:=.*)?$/);
+        if (pm && pm[1] && !/[\[]/.test(prm)) noteVar(pm[3], intTypeRe.test(pm[1]) && !pm[2] ? wrapFor(pm[1]) : null);
+      }
       const nl = '\n'.repeat((m.slice(a.length).match(/\n/g) || []).length);
       return `${a}${ws}async function ${name}(${convParams(params)}) {${nl}`;
     });
@@ -185,16 +212,52 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   code = code.replace(new RegExp(`\\b${QUAL}(?:${TYPES})(?:\\s*\\*\\s*|\\s+)([A-Za-z_]\\w*)\\s*((?:\\[[^\\]]+\\]\\s*)+);`, 'g'),
     (mm, name, dims) => `let ${name} = __arr(${dims.match(/\[([^\]]+)\]/g).map((d) => d.slice(1, -1)).join(', ')});`);
 
-  // --- integer division for int-typed declarations/assignments ---
-  const intVars = new Set();
-  code.replace(new RegExp(`\\b${QUAL}(?:${INTS})\\s+([A-Za-z_]\\w*)`, 'g'), (mm, n) => intVars.add(n));
-  code = code.replace(new RegExp(`\\b(${QUAL}(?:${INTS})\\s+)([A-Za-z_]\\w*)(\\s*=\\s*)([^;]*\\/[^;]*);`, 'g'),
-    (mm, t, n, eq, rhs) => (hasTopLevelComma(rhs) ? mm : `${t}${n}${eq}__i(${rhs});`));
-  if (intVars.size) {
-    const names = [...intVars].join('|');
-    code = code.replace(new RegExp(`(^|[;{}\\s])(${names})(\\s*=)(?!=)([^;]*\\/[^;]*);`, 'g'),
-      (mm, pre, n, eq, rhs) => (hasTopLevelComma(rhs) || /^\s*__i\(/.test(rhs) ? mm : `${pre}${n}${eq} __i(${rhs});`));
-    code = code.replace(new RegExp(`(^|[;{}\\s])(${names})\\s*\\/=\\s*([^;]*);`, 'g'), (mm, pre, n, rhs) => `${pre}${n} = __i(${n} / (${rhs}));`);
+  // --- C integer semantics: values assigned to integer variables wrap to the type's width ---
+  // e.g. byte b = 255; b++; → 0. Names declared with different types in different places are left alone.
+  {
+    // declarations: int a = 7, b; → record each name and wrap its initialiser
+    const declRe = new RegExp(`(^|[;{}(\\n])(\\s*)(${QUAL}(?:${TYPES}))\\s+([A-Za-z_][^;]*);`, 'g');
+    code = code.replace(declRe, (mm, pre, ws, type, rest) => {
+      const isInt = intTypeRe.test(type); const w = isInt ? wrapFor(type) : null;
+      const parts = []; let d = 0, cur = '';
+      for (const ch of rest) { if ('([{'.includes(ch)) d++; else if (')]}'.includes(ch)) d--; if (ch === ',' && d === 0) { parts.push(cur); cur = ''; } else cur += ch; }
+      parts.push(cur);
+      const out = parts.map((pt) => {
+        const dm = pt.match(/^(\s*)([A-Za-z_]\w*)(\s*)(=\s*)?([\s\S]*)$/);
+        if (!dm || (!dm[4] && dm[5].trim())) return null; // not a plain `name` / `name = value`
+        noteVar(dm[2], w);
+        const plainInt = /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+)$/.test(dm[5].trim()) && w !== '__b' && w !== '__u8' && w !== '__i8' && w !== '__u16' && w !== '__i16';
+        return dm[4] && w && !plainInt ? `${dm[1]}${dm[2]}${dm[3]}${dm[4]}${w}(${dm[5].trim()})` : pt;
+      });
+      return out.includes(null) ? mm : keepNl(mm, `${pre}${ws}${type} ${out.join(',').trimStart()};`);
+    });
+    const ints = [...varWrap].filter(([, w]) => w).map(([n]) => n);
+    if (ints.length) {
+      const N = `(${ints.join('|')})`; const W = (n) => varWrap.get(n);
+      const pre = '(^|[;{}\\n)])(\\s*)';
+      // a right-hand side must be one whole expression: `for (…; i += 2) { f(i); }` is not a statement
+      const whole = (rhs) => { if (/[{}]/.test(rhs) || hasTopLevelComma(rhs)) return false; let d = 0; for (const ch of rhs) { if ('(['.includes(ch)) d++; else if (')]'.includes(ch) && --d < 0) return false; } return d === 0; };
+      // x = v;  (before the compound forms, which produce `x = …` themselves)
+      code = code.replace(new RegExp(`${pre}${N}\\s*=(?!=)\\s*([^;]*);`, 'g'),
+        (mm, a, ws, n, rhs) => (whole(rhs) ? keepNl(mm, `${a}${ws}${n} = ${W(n)}(${rhs});`) : mm));
+      // x += v;  x <<= v;  …
+      code = code.replace(new RegExp(`${pre}${N}\\s*(\\+|-|\\*|\\/|%|<<|>>|&|\\||\\^)=\\s*([^;]*);`, 'g'),
+        (mm, a, ws, n, op, rhs) => (whole(rhs) ? keepNl(mm, `${a}${ws}${n} = ${W(n)}(${n} ${op} (${rhs}));`) : mm));
+      // x++;  --x;
+      code = code.replace(new RegExp(`${pre}(?:(\\+\\+|--)${N}|${N}(\\+\\+|--))\\s*;`, 'g'),
+        (mm, a, ws, op1, n1, n2, op2) => { const n = n1 || n2; return keepNl(mm, `${a}${ws}${n} = ${W(n)}(${n} ${(op1 || op2)[0]} 1);`); });
+      // integer division between integer variables/literals: avg = sum / count
+      const opnd = `(${ints.join('|')}|\\d+)`;
+      code = code.replace(new RegExp(`(?<![\\w.)\\]*\\/%\\u0001]\\s*)(?<![\\w.)\\]*\\/%\\u0001])\\b${opnd}\\s*\\/\\s*${opnd}\\b(?![\\w.(\\[])`, 'g'),
+        (mm, l, r) => keepNl(mm, `__idiv(${l}, ${r})`));
+    }
+    // int-returning functions return whole numbers of their type
+    for (const [fname, w] of fnWrap) {
+      const fm = new RegExp(`async function ${fname}\\([^)]*\\) \\{`).exec(code); if (!fm) continue;
+      const open = fm.index + fm[0].length - 1; const close = matchClose(code, open, '{', '}'); if (close < 0) continue;
+      const body = code.slice(open, close + 1).replace(/\breturn\s+([^;]+);/g, (mm, v) => keepNl(mm, `return ${w}(${v});`));
+      code = code.slice(0, open) + body + code.slice(close + 1);
+    }
   }
 
   // --- typed declarations → let ---
@@ -232,6 +295,7 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   code = res + code.slice(last);
 
   // --- restore string literals ---
+  code = code.split(FLOAT_CAST).join('');
   code = code.replace(/__STR(\d+)__/g, (mm, n) => strs[+n]);
   return { js: code, functions: fnNames };
 }
