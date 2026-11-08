@@ -90,6 +90,13 @@ const cases: Array<[string, string, string, string?]> = [
   ['int from float truncates', 'int a = 3.9; Serial.print(a);', '3'],
   ['int function return truncates', 'Serial.print(half(5));', '2', 'int half(int v) { return v / 2; }'],
   // guards for integer type tracking
+  ['ADC to volts with a (float) cast', 'int raw = 2048; Serial.print((float)raw / 4095 * 3.3);', '1.65'],
+  ['(float) cast on the left operand', 'int a = 1, b = 4; Serial.print((float)a / b);', '0.25'],
+  ['(float) cast on the right operand', 'int s = 10, n = 4; Serial.print(s / (float)n);', '2.50'],
+  ['(double) cast', 'int s = 10, n = 4; Serial.print((double)s / n);', '2.50'],
+  ['float cast then stored in an int', 'int a = 1, b = 4; int pct = (float)a / b * 100; Serial.print(pct);', '25'],
+  ['(float) cast on a literal', 'int k = 0; Serial.print((float)7 / 2);', '3.50'],
+  ['float() function cast', 'int raw = 2048; Serial.print(float(raw) / 4095 * 3.3);', '1.65'],
   ['wrapping keeps values in range', 'unsigned long last = 0; unsigned long now = 5000; Serial.print(now - last >= 1000);', '1'],
   ['average with int division', 'int sum = 10, count = 4; int avg = sum / count; Serial.print(avg);', '2'],
   ['float var division stays float', 'float total = 10; int n = 4; Serial.print(total / n);', '2.50'],
@@ -101,7 +108,8 @@ const cases: Array<[string, string, string, string?]> = [
   ['bool stays bool', 'bool on = 5; Serial.print(on);', '1'],
 ];
 
-// Known gaps: the ESP32 runner is a regex transpiler to JavaScript, so types are not tracked. Each of
+// Known gaps: the ESP32 runner is a regex transpiler to JavaScript. It tracks integer variable types, but not
+// expression types (chars as numbers, float printing of whole numbers), references or structs. Each of
 // these runs with it.fails, so fixing one turns it red: move it to `cases` above when that happens.
 const gaps: Array<[string, string, string, string?]> = [
   ['println ends with CRLF', 'Serial.println(1);', '1\r\n'],

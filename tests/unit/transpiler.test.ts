@@ -69,3 +69,10 @@ describe('strict-mode compatibility', () => {
     expect(() => compile(js)).not.toThrow();
   });
 });
+
+describe('line numbers survive the integer-type rewrites', () => {
+  it('keeps every line when a statement spans several lines', () => {
+    const src = 'int total = 0;\nvoid setup() {\n  total =\n    1 + 2;\n  total +=\n    3;\n  int avg = total\n    / 2;\n}\nvoid loop() {}';
+    expect(transpile(src).js.split('\n').length).toBe(src.split('\n').length);
+  });
+});
