@@ -263,7 +263,8 @@ DEFS.pir = {
 DEFS.buzzer = {
   type: 'buzzer', name: 'Piezo Buzzer', category: 'Output', w: 44, h: 62,
   pins: [{ id: '+', label: '+', x: 16, y: 62, dir: 'b' }, { id: '-', label: '−', x: 28, y: 62, dir: 'b' }],
-  props: {},
+  props: { muted: false },
+  controls: [{ key: 'muted', label: 'Mute sound', type: 'toggle' }],
   state(c, sim) {
     let f = 0;
     for (const g of sim.pinGpios(c, '+')) if (sim.tone[g]) f = sim.tone[g];

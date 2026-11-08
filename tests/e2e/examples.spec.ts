@@ -361,3 +361,16 @@ test('add a second board from Parts, give it its own sketch, and delete it again
   await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
   await expect(page.locator('#props')).toBeHidden();
 });
+
+test('a buzzer is muted from its own card; the toolbar has no global sound button', async ({ page }) => {
+  await loadExample(page, 'alarm');
+  await expect(page.locator('#btnMute')).toHaveCount(0);
+  const muted = () => page.evaluate(() => window.CatSim.App.project.components.find((x: { type: string }) => x.type === 'buzzer').props.muted);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'bz1' }));
+  const box = page.locator('#props input[data-key="muted"]');
+  await expect(box).not.toBeChecked();
+  await box.check();
+  expect(await muted()).toBe(true);
+  await box.uncheck();
+  expect(await muted()).toBe(false);
+});

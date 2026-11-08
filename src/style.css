@@ -81,10 +81,6 @@ select.btn { padding-right: 6px; }
 #editorPane .code-host { flex: 1; min-height: 0; width: 100%; }
 #editorPane .code-host .cm-editor { height: 100%; }
 .cm-error-line { background: rgba(220, 38, 38, .12) !important; }
-.ref { overflow: auto; padding: 4px 18px 18px; color: #3b4352; }
-.ref h3 { margin: 14px 0 6px; font-size: 14px; color: var(--text); }
-.ref h4 { margin: 14px 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: #8a6400; }
-.ref p { margin: 0 0 6px; }
 
 /* parts pane */
 .palette { overflow: hidden; }

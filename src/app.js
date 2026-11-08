@@ -40,12 +40,12 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // ---------- audio for buzzers ----------
 const Audio = {
-  ctx: null, osc: new Map(), muted: false,
+  ctx: null, osc: new Map(),
   ensure() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { /* no audio */ } } if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
   set(id, f) {
     if (!this.ctx) return;
     let o = this.osc.get(id);
-    if (f > 0 && !this.muted) {
+    if (f > 0) {
       if (!o) {
         const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
         osc.type = 'square'; g.gain.value = 0.04; osc.connect(g).connect(this.ctx.destination); osc.start();
@@ -237,7 +237,7 @@ const App = {
     if (this.sim.running) {
       this.canvas.renderDynamic();
       for (const c of this.project.components) {
-        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, this.sim.paused ? 0 : s.f); }
+        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, this.sim.paused || c.props.muted ? 0 : s.f); }
       }
       this.flushSerial(); this.updateClock();
       if (this._iotDirty) this.renderIot();
@@ -642,7 +642,6 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
       const url = location.href.split('#')[0] + await encodeShare(this.project);
       try { await navigator.clipboard.writeText(url); this.toast('Share link copied to clipboard'); } catch (_) { prompt('Copy this link:', url); }
     };
-    $('#btnMute').onclick = (e) => { Audio.muted = !Audio.muted; e.currentTarget.textContent = Audio.muted ? '🔇' : '🔊'; if (Audio.muted) Audio.stopAll(); };
 
     document.querySelectorAll('.tabs').forEach((tabs) => tabs.addEventListener('click', (e) => {
       const t = e.target.closest('.tab'); if (!t) return;

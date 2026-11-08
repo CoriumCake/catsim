@@ -256,7 +256,7 @@ class Simulator {
       // eslint-disable-next-line no-new-func
       factory = new Function('__api', `"use strict"; return (async function(){ const { ${names.join(', ')} } = __api; { ${js}\n;return { setup: typeof setup === 'function' ? setup : null, loop: typeof loop === 'function' ? loop : null }; } })();`);
     } catch (e) {
-      this.app.log(`Compile error: ${e.message}. CatSim supports a subset of Arduino C++ — see the API reference tab.`, 'error');
+      this.app.log(`Compile error: ${e.message}. CatSim supports a subset of Arduino C++.`, 'error');
       console.debug('[CatSim] transpiled sketch:\n' + js);
       return false;
     }

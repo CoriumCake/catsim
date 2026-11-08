@@ -39,7 +39,6 @@
       <button id="btnNew" class="btn btn-ilabel" title="New project"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 3h7l3 3v11H5z M12 3v3h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">New</span></button>
       <button id="btnImport" class="btn btn-ilabel" title="Import a project file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3 M6 7l4-4 4 4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Import</span></button>
       <button id="btnExport" class="btn btn-ilabel" title="Export the project as a file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10 M6 9l4 4 4-4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Export</span></button>
-      <button id="btnMute" class="btn btn-icon" title="Toggle buzzer sound">🔊</button>
       <button id="btnShare" class="btn btn-dark">Share</button>
     </div>
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
@@ -50,7 +49,6 @@
       <div class="tabs" data-group="editor">
         <button class="tab active" data-tab="editorPane">sketch.ino</button>
         <button class="tab" data-tab="partsPane">Parts</button>
-        <button class="tab" data-tab="refPane">API reference</button>
       </div>
       <div class="editor-wrap">
         <div id="editorPane" class="tabpane active"><div id="boardTabs" class="board-tabs" role="tablist" aria-label="Board programs" hidden></div><div id="unoBanner" class="uno-banner" hidden></div><div id="code" class="code-host"></div></div>
@@ -59,26 +57,6 @@
         <div id="paletteList" class="palette-list"></div>
         <p class="palette-hint">Click or drag a part onto the canvas.<br>Click a pin, then another pin, to add a wire.<br><kbd>Del</kbd> removes the selection.</p>
       </div>
-        <div id="refPane" class="tabpane ref">
-          <h3>How CatSim runs your sketch</h3>
-          <p>Your Arduino C++ is translated to JavaScript and runs in the browser on a simulated ESP32 DevKit V1 (30 pins). Most everyday sketch code works: globals, functions, <code>#define</code>, arrays, <code>enum</code>, <code>switch</code>, <code>String</code>, interrupts. Not supported: <code>class</code>/<code>struct</code>, templates, pointers arithmetic, FreeRTOS tasks.</p>
-          <h4>Core</h4>
-          <p><code>pinMode</code> · <code>digitalWrite</code> · <code>digitalRead</code> · <code>analogRead</code> (12-bit) · <code>analogReadMilliVolts</code> · <code>analogWrite</code> · <code>dacWrite</code> · <code>delay</code> · <code>millis</code> · <code>micros</code> · <code>map</code> · <code>constrain</code> · <code>random</code> · <code>attachInterrupt</code> · <code>tone</code>/<code>noTone</code></p>
-          <h4>ESP32 PWM (LEDC)</h4>
-          <p>Core 3.x: <code>ledcAttach(pin, freq, bits)</code>, <code>ledcWrite(pin, duty)</code>, <code>ledcWriteTone</code>. Core 2.x: <code>ledcSetup(ch, freq, bits)</code>, <code>ledcAttachPin(pin, ch)</code>, <code>ledcWrite(ch, duty)</code>.</p>
-          <h4>Serial</h4>
-          <p><code>begin</code> · <code>print</code>/<code>println</code> (with <code>HEX</code>/<code>BIN</code> or decimals) · <code>printf</code> · <code>available</code> · <code>read</code> · <code>readString</code> · <code>readStringUntil</code> · <code>parseInt</code> · <code>parseFloat</code></p>
-          <h4>IoT</h4>
-          <p><b>WiFi.h</b> — <code>WiFi.begin</code>, <code>status</code>, <code>localIP</code>, <code>RSSI</code>, <code>macAddress</code>, <code>softAP</code>. Any SSID connects after ~1.5 s.<br>
-          <b>PubSubClient.h</b> — <code>setServer</code>, <code>setCallback</code>, <code>connect</code>, <code>publish</code>, <code>subscribe</code>, <code>loop</code>. Talks to the built-in broker in the <i>IoT · MQTT</i> tab.<br>
-          <b>HTTPClient.h</b> — <code>begin</code>, <code>GET</code>, <code>POST</code>, <code>getString</code>. Makes real requests via <code>fetch</code> (server must allow CORS).</p>
-          <h4>Libraries</h4>
-          <p><b>DHT.h</b> (DHT22) · <b>ESP32Servo.h</b> / <b>Servo</b> · <b>LiquidCrystal_I2C.h</b> (16×2, SDA 21 / SCL 22, or <code>Wire.begin(sda, scl)</code>) · <b>Wire.h</b> · <code>ESP.getFreeHeap()</code>, <code>ESP.restart()</code></p>
-          <h4>ESP32 checks</h4>
-          <p>The console warns about real ESP32 pitfalls: GPIO 6–11 (flash), output on input-only pins 34–39, missing pull-ups on 34–39, ADC2 pins used while WiFi is on, floating inputs, missing ground or power on parts.</p>
-          <h4>Limitations</h4>
-          <p>Numbers are JavaScript doubles; integer division is applied when assigning to <code>int</code>/<code>long</code> variables. Char literals behave as one-letter strings.</p>
-        </div>
       </div>
     </section>
     <div class="splitter-v" id="splitV" title="Drag to resize"></div>
