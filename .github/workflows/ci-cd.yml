@@ -28,11 +28,9 @@ jobs:
         run: npm test
         env:
           REQUIRE_NGSPICE: '1'
-      - name: Build
-        run: npx vite build
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
-      - name: End-to-end tests (wrangler dev + CSP headers)
+      - name: Build + end-to-end tests (wrangler dev + CSP headers)
         run: npm run test:e2e
       - name: Upload Playwright report
         if: failure()
