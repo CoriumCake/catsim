@@ -312,3 +312,15 @@ test('the edit card opens next to the selected part (not for the board)', async 
   await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
   await expect(page.locator('#props')).toBeHidden();
 });
+
+test('Tidy wires routes every wire at right angles and is saved with the project', async ({ page }) => {
+  await loadExample(page, 'relay');
+  await page.click('#btnTidy');
+  await expect(page.locator('#btnTidy')).toHaveAttribute('aria-pressed', 'true');
+  const ds = await page.locator('.cs-wire-line').evaluateAll((ps) => ps.map((p) => p.getAttribute('d') || ''));
+  expect(ds.length).toBe(14);
+  expect(ds.every((d) => !/ C/.test(d))).toBe(true); // no Bezier curves left
+  expect(await page.evaluate(() => window.CatSim.App.project.wireStyle)).toBe('tidy');
+  await page.click('#btnTidy');
+  expect(await page.evaluate(() => window.CatSim.App.project.wireStyle)).toBeUndefined();
+});

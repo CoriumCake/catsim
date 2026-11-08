@@ -88,7 +88,7 @@ const App = {
     requestAnimationFrame(() => this.canvas.fit());
     this.view3d.dirty = true; this.view3d.camFitted = false;
     if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
-    this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi();
+    this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi(); this.refreshTidy();
     this.renderIot(); this.save();
   },
 
@@ -173,6 +173,18 @@ const App = {
     b.title = label; b.setAttribute('aria-label', label); b.setAttribute('aria-expanded', String(!collapsed));
     try { localStorage.setItem(DOCK_STORE, collapsed ? '1' : ''); } catch (_) { /* ignore */ }
     if (!collapsed && $('#scopePane').classList.contains('active')) requestAnimationFrame(() => this.scope.render(true));
+  },
+  /** Switch wires between free curves and tidy right-angle routes (saved with the project). */
+  toggleTidy() {
+    const tidy = this.project.wireStyle !== 'tidy';
+    if (tidy) this.project.wireStyle = 'tidy'; else delete this.project.wireStyle;
+    this.refreshTidy(); this.canvas.renderWires(); this.save();
+    this.toast(tidy ? 'Wires tidied: they now route around parts as you edit' : 'Wires back to curves');
+  },
+  refreshTidy() {
+    const on = this.project.wireStyle === 'tidy', b = $('#btnTidy');
+    b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on);
+    b.title = on ? 'Wires are tidy (click for curves)' : 'Tidy wires: route them at right angles around parts';
   },
   togglePause() {
     if (!this.sim.running) return;
@@ -500,6 +512,7 @@ const App = {
     $('#btnPause').onclick = () => this.togglePause();
     $('#btnSide').onclick = () => this.toggleSidebar();
     $('#btnDock').onclick = () => this.toggleDock();
+    $('#btnTidy').onclick = () => this.toggleTidy();
 $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
     $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);

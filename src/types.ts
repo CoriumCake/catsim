@@ -21,6 +21,8 @@ export interface Project {
   code: string;
   components: Component[];
   wires: Wire[];
+  /** 'tidy' = wires routed at right angles around parts; default: curves */
+  wireStyle?: 'tidy' | 'curved';
   /** compiled firmware (Intel HEX) for boards that run machine code, e.g. the Arduino Uno */
   firmware?: { name: string; hex: string };
 }

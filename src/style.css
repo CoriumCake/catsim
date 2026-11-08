@@ -318,3 +318,4 @@ select.btn { padding-right: 6px; }
 #btnDock svg { transition: transform .15s; }
 .bottom.collapsed #btnDock svg { transform: rotate(180deg); }
 .tab.unseen::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; }
+#btnTidy.on { background: var(--accent); color: var(--accent-ink); }

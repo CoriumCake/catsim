@@ -1,6 +1,7 @@
 /* CatSim — diagram canvas: parts, wires, pan/zoom, selection, wiring. */
 import { DEFS } from './components.js';
 import { esc } from './util.ts';
+import { RouteGrid, roundedPath } from './router.ts';
 const SVGNS = 'http://www.w3.org/2000/svg';
 const DIRS = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
 const WIRE_COLORS = ['#2ecc71', '#3d8bff', '#f39c12', '#b06cff', '#ffd60a', '#1abc9c', '#ff6b9a', '#e8eaed'];
@@ -105,12 +106,34 @@ class Canvas {
     this.renderSelection();
   }
 
+  /** Tidy style: orthogonal routes around parts, shortest wires first so long ones detour around them. */
+  routeAll() {
+    const parts = this.project.components.map((c) => { const d = this.def(c); return d ? { x: c.x, y: c.y, w: d.w, h: d.h } : null; }).filter(Boolean);
+    const grid = new RouteGrid(parts);
+    const ends = this.project.wires.map((w) => [w, this.pinPos(w.from), this.pinPos(w.to)]).filter(([, a, b]) => a && b);
+    ends.sort((p, q) => (Math.abs(p[1].x - p[2].x) + Math.abs(p[1].y - p[2].y)) - (Math.abs(q[1].x - q[2].x) + Math.abs(q[1].y - q[2].y)));
+    const routes = new Map();
+    for (const [w, a, b] of ends) {
+      const pts = grid.route(a, b);
+      if (pts) { grid.occupy(pts); routes.set(w.id, roundedPath(pts)); }
+    }
+    return routes;
+  }
+
+  /** Coalesce wire redraws to one per frame (routing is heavier than drawing curves). */
+  scheduleWires() {
+    if (this._wiresQueued) return;
+    this._wiresQueued = true;
+    requestAnimationFrame(() => { this._wiresQueued = false; this.renderWires(); });
+  }
+
   renderWires() {
     let html = '';
+    const routes = this.project.wireStyle === 'tidy' ? this.routeAll() : null;
     this.project.wires.forEach((w, i) => {
       const a = this.pinPos(w.from), b = this.pinPos(w.to);
       if (!a || !b) return;
-      const d = this.wirePath(a, b); const col = this.wireColor(w, i);
+      const d = (routes && routes.get(w.id)) || this.wirePath(a, b); const col = this.wireColor(w, i);
       const sel = this.sel && this.sel.kind === 'wire' && this.sel.id === w.id;
       html += `<g class="cs-wire${sel ? ' cs-selected' : ''}" data-id="${esc(w.id)}"><path d="${d}" class="cs-wire-hit"/><path d="${d}" class="cs-wire-under"/><path d="${d}" class="cs-wire-line" stroke="${esc(col)}"/></g>`;
     });
@@ -223,7 +246,7 @@ class Canvas {
       dr.moved = true;
       const p = this.toLocal(e);
       dr.c.x = Math.round((p.x - dr.dx) / 5) * 5; dr.c.y = Math.round((p.y - dr.dy) / 5) * 5;
-      this.updateComp(dr.c); this.renderWires();
+      this.updateComp(dr.c); this.scheduleWires();
     } else if (this.pan) {
       this.view.x = this.pan.vx + (e.clientX - this.pan.sx);
       this.view.y = this.pan.vy + (e.clientY - this.pan.sy);

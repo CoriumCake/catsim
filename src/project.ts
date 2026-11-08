@@ -73,6 +73,7 @@ export function normalizeProject(p: unknown, defs: Record<string, PartDef>): Pro
     components: comps,
     wires,
   };
+  if (src.wireStyle === 'tidy') out.wireStyle = 'tidy';
   // compiled firmware for boards that run real machine code (Arduino Uno): Intel HEX text only
   const fw = src.firmware as Record<string, unknown> | undefined;
   if (fw && typeof fw === 'object' && typeof fw.hex === 'string' && fw.hex.length <= 200_000 && /^[:0-9A-Fa-f\r\n]*$/.test(fw.hex)) {
