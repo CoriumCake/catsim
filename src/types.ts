@@ -21,8 +21,15 @@ export interface Project {
   code: string;
   components: Component[];
   wires: Wire[];
+  /** 'tidy' = wires routed at right angles around parts; default: curves */
+  wireStyle?: 'tidy' | 'curved';
   /** compiled firmware (Intel HEX) for boards that run machine code, e.g. the Arduino Uno */
   firmware?: { name: string; hex: string };
+  /**
+   * Programs of the second and further boards, by board id. The first board's program stays in
+   * `code` / `firmware`, so single-board projects (and old share links) are unchanged.
+   */
+  programs?: Record<string, { code?: string; firmware?: { name: string; hex: string } }>;
 }
 
 /** Direction a wire leaves the pin: left, right, top, bottom. */

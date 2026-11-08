@@ -537,6 +537,57 @@ void loop() {
 `,
     },
     {
+      key: 'two-esp32', name: 'Two ESP32s talking over a wire',
+      components: [esp,
+        { id: 'esp2', type: 'esp32', x: 720, y: 80, props: {} },
+        { id: 'btn1', type: 'button', x: 520, y: 330, props: { color: 'blue' } },
+        { id: 'r1', type: 'resistor', x: 900, y: 262, props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: 1000, y: 190, props: { color: 'yellow' } }],
+      wires: [W('esp:D15', 'btn1:1'), W('btn1:2', 'esp:GND.R'),
+        W('esp:D23', 'esp2:D34', '#b06cff'),
+        W('esp2:D2', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp2:GND.R')],
+      code: `// Board "esp" (this tab): reads the button and drives a signal wire to the other board.
+// Each board runs its own sketch: open the esp2 tab above to see the other one.
+// Both boards share the same circuit and the same ground.
+const int BUTTON = 15;
+const int SIGNAL = 23;  // wired to esp2's GPIO34
+int last = -1;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON, INPUT_PULLUP);
+  pinMode(SIGNAL, OUTPUT);
+}
+
+void loop() {
+  int pressed = digitalRead(BUTTON) == LOW;
+  digitalWrite(SIGNAL, pressed ? HIGH : LOW);
+  if (pressed != last) { Serial.println(pressed ? "sending HIGH" : "sending LOW"); last = pressed; }
+  delay(10);
+}
+`,
+      programs: {
+        esp2: { code: `// Board "esp2": listens to the signal wire from "esp" and lights its LED.
+const int SIGNAL = 34;  // input-only pin, driven by esp's GPIO23
+const int LED = 2;
+int last = -1;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(SIGNAL, INPUT);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+  int v = digitalRead(SIGNAL);
+  digitalWrite(LED, v);
+  if (v != last) { Serial.println(v ? "received HIGH: LED on" : "received LOW: LED off"); last = v; }
+  delay(10);
+}
+` },
+      },
+    },
+    {
       key: 'traffic', name: 'Traffic light',
       components: [esp,
         { id: 'r1', type: 'resistor', x: 500, y: 100, props: { ohms: 220 } },

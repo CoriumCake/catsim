@@ -61,7 +61,8 @@ DEFS.esp32 = {
   pins: espPins, props: {},
   internal: () => [['GND.L', 'GND.R']],
   state(c, sim) {
-    const on = sim.mode[2] === OUTPUT ? (sim.pwm[2] ?? (sim.out[2] ? 1 : 0)) : 0;
+    const b = (sim.boardState && sim.boardState(c.id)) || sim; // several boards: this board's own pins
+    const on = b.mode[2] === OUTPUT ? (b.pwm[2] ?? (b.out[2] ? 1 : 0)) : 0;
     return { led2: on, power: sim.running };
   },
   render(c, s) {
@@ -262,7 +263,8 @@ DEFS.pir = {
 DEFS.buzzer = {
   type: 'buzzer', name: 'Piezo Buzzer', category: 'Output', w: 44, h: 62,
   pins: [{ id: '+', label: '+', x: 16, y: 62, dir: 'b' }, { id: '-', label: '−', x: 28, y: 62, dir: 'b' }],
-  props: {},
+  props: { muted: false },
+  controls: [{ key: 'muted', label: 'Mute sound', type: 'toggle' }],
   state(c, sim) {
     let f = 0;
     for (const g of sim.pinGpios(c, '+')) if (sim.tone[g]) f = sim.tone[g];
@@ -341,7 +343,10 @@ DEFS.uno = {
   hint: 'Runs real compiled firmware on an emulated ATmega328P (16 MHz). Upload a .hex file (Arduino IDE: Sketch → Export Compiled Binary).',
   pins: unoPins, props: {},
   internal: () => [['GND1', 'GND2'], ['GND2', 'GND3'], ['A4', 'SDA'], ['A5', 'SCL']],
-  state: (c, sim) => ({ L: sim.running && sim.out && sim.out[13] ? 1 : 0, on: !!sim.running, tx: sim.running && sim.txAt && performance.now() - sim.txAt < 80 }),
+  state: (c, sim) => {
+    const b = (sim.boardState && sim.boardState(c.id)) || sim;
+    return { L: sim.running && b.out && b.out[13] ? 1 : 0, on: !!sim.running, tx: sim.running && sim.txAt && performance.now() - sim.txAt < 80 };
+  },
   render(c, s) {
     let o = `<rect x="0" y="6" width="264" height="168" rx="6" fill="#0b6d8c" stroke="#064457" stroke-width="1.5"/>`;
     o += `<rect x="-14" y="32" width="46" height="36" rx="2" fill="#c9ced6" stroke="#8b929c"/><rect x="-10" y="40" width="20" height="20" fill="#9ea5af"/>`;
@@ -579,6 +584,7 @@ DEFS.lcd = {
 };
 
 const PALETTE = [
+  { cat: 'Boards', types: ['esp32', 'uno'] }, // picking one switches the project's board
   { cat: 'Output', types: ['led', 'buzzer', 'servo', 'lcd'] },
   { cat: 'Input', types: ['button', 'pot'] },
   { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },

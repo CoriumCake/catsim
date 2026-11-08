@@ -9,22 +9,36 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="btnSide" class="btn btn-icon hamburger" title="Hide the sidebar (Ctrl+B)" aria-label="Toggle sidebar" aria-controls="side" aria-expanded="true">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
     <div class="brand">
       <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M8 24V11l4 4h8l4-4v13z" fill="#0b1220"/><circle cx="13" cy="18" r="1.6" fill="var(--accent)"/><circle cx="19" cy="18" r="1.6" fill="var(--accent)"/></svg>
       <span class="brand-name">Cat<b>Sim</b></span>
       <span class="chip">ESP32</span>
     </div>
     <input id="projectName" class="proj-name" value="Untitled project" spellcheck="false" aria-label="Project name">
-    <select id="boardSelect" class="board-select" aria-label="Board" title="Microcontroller board"><option value="esp32">ESP32 DevKit</option><option value="uno">Arduino Uno</option></select>
-    <button id="btnFirmware" class="btn" hidden title="Load compiled firmware for the Uno (.hex)">Upload .hex</button>
+<button id="btnFirmware" class="btn" hidden title="Load compiled firmware for the Uno (.hex)">Upload .hex</button>
     <input type="file" id="firmwareFile" accept=".hex,.ihx,text/plain" hidden>
+    <div class="tb-spacer"></div>
+    <div class="tb-sim" role="toolbar" aria-label="Simulation">
+      <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
+      <button id="btnRestart" class="btn btn-icon" title="Restart simulation">↻</button>
+      <button id="btnPause" class="btn btn-icon" title="Pause simulation" aria-label="Pause" disabled>⏸</button>
+      <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
+      <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
+      </select>
+      <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span><span id="simLoad" class="sim-load" hidden title="The circuit is heavy to simulate, so simulated time runs slower than real time"></span></div>
+      <span class="bar-sep"></span>
+      <button class="btn btn-icon btn-ilabel" id="addPart" title="Add a part">＋<span class="lbl">Part</span></button>
+      <div class="view-seg" role="group" aria-label="View"><button id="view2d" class="on" title="2D diagram (edit)">2D</button><button id="view3d" title="3D view">3D</button></div>
+    </div>
     <div class="tb-spacer"></div>
     <div class="tb-group tb-files">
       <select id="exampleSelect" class="btn" aria-label="Load example"><option value="">Examples…</option></select>
-      <button id="btnNew" class="btn">New</button>
-      <button id="btnImport" class="btn">Import</button>
-      <button id="btnExport" class="btn">Export</button>
-      <button id="btnMute" class="btn btn-icon" title="Toggle buzzer sound">🔊</button>
+      <button id="btnNew" class="btn btn-ilabel" title="New project"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 3h7l3 3v11H5z M12 3v3h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">New</span></button>
+      <button id="btnImport" class="btn btn-ilabel" title="Import a project file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3 M6 7l4-4 4 4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Import</span></button>
+      <button id="btnExport" class="btn btn-ilabel" title="Export the project as a file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10 M6 9l4 4 4-4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Export</span></button>
       <button id="btnShare" class="btn btn-dark">Share</button>
     </div>
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
@@ -35,48 +49,54 @@
       <div class="tabs" data-group="editor">
         <button class="tab active" data-tab="editorPane">sketch.ino</button>
         <button class="tab" data-tab="partsPane">Parts</button>
-        <button class="tab" data-tab="refPane">API reference</button>
       </div>
       <div class="editor-wrap">
-        <div id="editorPane" class="tabpane active"><div id="unoBanner" class="uno-banner" hidden></div><div id="code" class="code-host"></div></div>
+        <div id="editorPane" class="tabpane active"><div id="boardTabs" class="board-tabs" role="tablist" aria-label="Board programs" hidden></div><div id="unoBanner" class="uno-banner" hidden></div><div id="code" class="code-host"></div></div>
   <div id="partsPane" class="tabpane palette">
         <input id="paletteSearch" class="search" placeholder="Search parts…" aria-label="Search parts">
         <div id="paletteList" class="palette-list"></div>
         <p class="palette-hint">Click or drag a part onto the canvas.<br>Click a pin, then another pin, to add a wire.<br><kbd>Del</kbd> removes the selection.</p>
       </div>
-        <div id="refPane" class="tabpane ref">
-          <h3>How CatSim runs your sketch</h3>
-          <p>Your Arduino C++ is translated to JavaScript and runs in the browser on a simulated ESP32 DevKit V1 (30 pins). Most everyday sketch code works: globals, functions, <code>#define</code>, arrays, <code>enum</code>, <code>switch</code>, <code>String</code>, interrupts. Not supported: <code>class</code>/<code>struct</code>, templates, pointers arithmetic, FreeRTOS tasks.</p>
-          <h4>Core</h4>
-          <p><code>pinMode</code> · <code>digitalWrite</code> · <code>digitalRead</code> · <code>analogRead</code> (12-bit) · <code>analogReadMilliVolts</code> · <code>analogWrite</code> · <code>dacWrite</code> · <code>delay</code> · <code>millis</code> · <code>micros</code> · <code>map</code> · <code>constrain</code> · <code>random</code> · <code>attachInterrupt</code> · <code>tone</code>/<code>noTone</code></p>
-          <h4>ESP32 PWM (LEDC)</h4>
-          <p>Core 3.x: <code>ledcAttach(pin, freq, bits)</code>, <code>ledcWrite(pin, duty)</code>, <code>ledcWriteTone</code>. Core 2.x: <code>ledcSetup(ch, freq, bits)</code>, <code>ledcAttachPin(pin, ch)</code>, <code>ledcWrite(ch, duty)</code>.</p>
-          <h4>Serial</h4>
-          <p><code>begin</code> · <code>print</code>/<code>println</code> (with <code>HEX</code>/<code>BIN</code> or decimals) · <code>printf</code> · <code>available</code> · <code>read</code> · <code>readString</code> · <code>readStringUntil</code> · <code>parseInt</code> · <code>parseFloat</code></p>
-          <h4>IoT</h4>
-          <p><b>WiFi.h</b> — <code>WiFi.begin</code>, <code>status</code>, <code>localIP</code>, <code>RSSI</code>, <code>macAddress</code>, <code>softAP</code>. Any SSID connects after ~1.5 s.<br>
-          <b>PubSubClient.h</b> — <code>setServer</code>, <code>setCallback</code>, <code>connect</code>, <code>publish</code>, <code>subscribe</code>, <code>loop</code>. Talks to the built-in broker in the <i>IoT · MQTT</i> tab.<br>
-          <b>HTTPClient.h</b> — <code>begin</code>, <code>GET</code>, <code>POST</code>, <code>getString</code>. Makes real requests via <code>fetch</code> (server must allow CORS).</p>
-          <h4>Libraries</h4>
-          <p><b>DHT.h</b> (DHT22) · <b>ESP32Servo.h</b> / <b>Servo</b> · <b>LiquidCrystal_I2C.h</b> (16×2, SDA 21 / SCL 22, or <code>Wire.begin(sda, scl)</code>) · <b>Wire.h</b> · <code>ESP.getFreeHeap()</code>, <code>ESP.restart()</code></p>
-          <h4>ESP32 checks</h4>
-          <p>The console warns about real ESP32 pitfalls: GPIO 6–11 (flash), output on input-only pins 34–39, missing pull-ups on 34–39, ADC2 pins used while WiFi is on, floating inputs, missing ground or power on parts.</p>
-          <h4>Limitations</h4>
-          <p>Numbers are JavaScript doubles; integer division is applied when assigning to <code>int</code>/<code>long</code> variables. Char literals behave as one-letter strings.</p>
-        </div>
       </div>
-
+    </section>
+    <div class="splitter-v" id="splitV" title="Drag to resize"></div>
+    <div class="center" id="center">
+    <section class="stage" id="stage">
+      <svg id="canvas" class="canvas" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="cs-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cs-grid-dot"/></pattern>
+          <filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
+          <linearGradient id="cs-metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e3e6ea"/><stop offset=".5" stop-color="#b9bfc8"/><stop offset="1" stop-color="#d5d9df"/></linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#cs-grid)"/>
+        <g id="cs-viewport">
+          <g id="cs-wires"></g>
+          <g id="cs-comps"></g>
+          <path id="cs-temp" class="cs-temp"/>
+        </g>
+      </svg>
+      <div class="stage-tools">
+        <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
+        <span id="zoomLabel">100%</span>
+        <button class="btn btn-icon" id="zoomIn" title="Zoom in">+</button>
+        <button class="btn btn-icon" id="zoomFit" title="Fit diagram">⤢</button>
+        <button class="btn btn-icon" id="btnTidy" title="Tidy wires: route them at right angles around parts" aria-pressed="false"><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 5h6v10h8 M3 15h3 M14 5h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div id="stageHint" class="stage-hint"></div>
+      <div id="props" class="props" hidden></div>
+    </section>
       <div class="splitter-h" id="splitH" title="Drag to resize"></div>
 
       <div class="bottom" id="bottom">
         <div class="tabs" data-group="bottom">
           <button class="tab active" data-tab="serialPane">Terminal</button>
-          <button class="tab" data-tab="iotPane">IoT · MQTT <span id="iotDot" class="mini-dot"></span></button>
+          <button class="tab" data-tab="iotPane" title="IoT: WiFi and the built-in MQTT broker">MQTT <span id="iotDot" class="mini-dot"></span></button>
           <button class="tab" data-tab="scopePane">Scope</button>
           <button class="tab" data-tab="consolePane">Console <span id="consoleBadge" class="badge" hidden>0</span></button>
           <div class="tabs-actions">
-            <label class="check"><input type="checkbox" id="autoScroll" checked> Autoscroll</label>
-            <button id="btnClear" class="btn btn-sm">Clear</button>
+            <label class="check" id="autoScrollWrap" title="Keep the newest output in view"><input type="checkbox" id="autoScroll" checked> Autoscroll</label>
+            <button id="btnDock" class="btn btn-sm btn-icon" title="Hide the panel" aria-label="Hide the panel" aria-expanded="true"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button id="btnClear" class="btn btn-sm btn-icon" title="Clear this tab" aria-label="Clear"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M4 6h12 M8 6V4h4v2 M6 6l1 11h6l1-11" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>
         </div>
         <div id="serialPane" class="tabpane active serial">
@@ -105,46 +125,7 @@
         <div id="scopePane" class="tabpane scope"></div>
         <div id="consolePane" class="tabpane console"><div id="consoleOut"></div></div>
       </div>
-    </section>
-    <div class="splitter-v" id="splitV" title="Drag to resize"></div>
-    <section class="stage" id="stage">
-      <svg id="canvas" class="canvas" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="cs-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cs-grid-dot"/></pattern>
-          <filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
-          <linearGradient id="cs-metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e3e6ea"/><stop offset=".5" stop-color="#b9bfc8"/><stop offset="1" stop-color="#d5d9df"/></linearGradient>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#cs-grid)"/>
-        <g id="cs-viewport">
-          <g id="cs-wires"></g>
-          <g id="cs-comps"></g>
-          <path id="cs-temp" class="cs-temp"/>
-        </g>
-      </svg>
-      <div class="float-bar">
-        <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
-        <button id="btnRestart" class="btn btn-icon" title="Restart simulation">↻</button>
-        <button id="btnPause" class="btn btn-icon" title="Pause simulation" aria-label="Pause" disabled>⏸</button>
-        <select id="simSpeed" class="speed-select" title="Simulation speed" aria-label="Simulation speed">
-          <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
-        </select>
-        <div class="sim-clock" title="Simulated time since boot"><span id="simDot" class="dot"></span><span id="simTime">00:00.000</span><span id="simLoad" class="sim-load" hidden title="The circuit is heavy to simulate, so simulated time runs slower than real time"></span></div>
-        <span class="bar-sep"></span>
-        <button class="btn btn-icon" id="addPart" title="Add a part">＋ Part</button>
-        <div class="view-seg" role="group" aria-label="View"><button id="view2d" class="on" title="2D diagram (edit)">2D</button><button id="view3d" title="3D view">3D</button></div>
-      </div>
-      <div class="stage-tools">
-        <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
-        <span id="zoomLabel">100%</span>
-        <button class="btn btn-icon" id="zoomIn" title="Zoom in">+</button>
-        <button class="btn btn-icon" id="zoomFit" title="Fit diagram">⤢</button>
-      </div>
-      <div id="stageHint" class="stage-hint"></div>
-      <div id="props" class="props" hidden></div>
-    </section>
-
-
-
+    </div>
   </main>
   <div id="toast" class="toast" role="status"></div>
 

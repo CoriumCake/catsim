@@ -14,16 +14,38 @@ import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
+// starting programs for boards added to a project
+const ESP_TEMPLATE = `// This board runs its own sketch, alongside the other boards in the circuit.
+// Wire its pins to another board to make them talk.
+void setup() {
+  Serial.begin(115200);
+  Serial.println("ready");
+}
+
+void loop() {
+  delay(1000);
+}
+`;
+const UNO_TEMPLATE = `// This Arduino Uno runs compiled firmware: write the sketch in the Arduino IDE,
+// export the compiled binary (Sketch > Export Compiled Binary) and click "Upload .hex".
+void setup() {
+}
+
+void loop() {
+}
+`;
+const SIDE_STORE = 'catsim.sideHidden';
+const DOCK_STORE = 'catsim.dockCollapsed';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // ---------- audio for buzzers ----------
 const Audio = {
-  ctx: null, osc: new Map(), muted: false,
+  ctx: null, osc: new Map(),
   ensure() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { /* no audio */ } } if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
   set(id, f) {
     if (!this.ctx) return;
     let o = this.osc.get(id);
-    if (f > 0 && !this.muted) {
+    if (f > 0) {
       if (!o) {
         const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
         osc.type = 'square'; g.gain.value = 0.04; osc.connect(g).connect(this.ctx.destination); osc.start();
@@ -48,9 +70,11 @@ const App = {
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
     this.buildPalette(); this.bindUi(); this.bindSplitters();
     this.load(await this.initialProject());
-    this.editor.onChange(() => { this.project.code = this.editor.get(); this.save(); });
+    this.editor.onChange(() => { if (this._loadingEditor) return; this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() }); this.save(); });
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
+    try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
+    try { if (localStorage.getItem(DOCK_STORE)) this.toggleDock(true); } catch (_) { /* ignore */ }
     if (v === '3d') this.setView('3d');
     window.addEventListener('resize', () => this.editor.refresh());
   },
@@ -68,7 +92,7 @@ const App = {
 
   fromExample(key) {
     const ex = EXAMPLES.find((e) => e.key === key);
-    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}) };
+    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}), ...(ex.programs ? { programs: clone(ex.programs) } : {}) };
   },
 
   normalize(p) { return normalizeProject(p, DEFS); },
@@ -77,14 +101,15 @@ const App = {
     this.stop();
     this.project = this.normalize(p);
     $('#projectName').value = this.project.name;
-    this.editor.set(this.project.code); this.editor.clear();
+    this.activeBoard = ''; this.term = {};
+    this.switchBoard(this.primaryId());
     this.sim.resetHw(); this.sim.invalidate();
     this.canvas.select(null);
     this.canvas.renderAll();
     requestAnimationFrame(() => this.canvas.fit());
     this.view3d.dirty = true; this.view3d.camFitted = false;
     if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
-    this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi();
+    this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi(); this.refreshTidy();
     this.renderIot(); this.save();
   },
 
@@ -108,6 +133,7 @@ const App = {
   },
   addComponent(type, x, y) {
     const d = DEFS[type];
+    if (d.board) { this.addBoard(type); return; }
     if (x === undefined) { const c = this.canvas.centerPoint(); x = c.x - d.w / 2 + (Math.random() * 60 - 30); y = c.y - d.h / 2 + (Math.random() * 60 - 30); }
     const c = { id: this.nextId(type), type, x: Math.round(x / 5) * 5, y: Math.round(y / 5) * 5, props: { ...d.props } };
     this.project.components.push(c);
@@ -126,7 +152,8 @@ const App = {
     if (s.kind === 'wire') this.project.wires = this.project.wires.filter((w) => w.id !== s.id);
     else {
       const c = this.project.components.find((x) => x.id === s.id);
-      if (!c || DEFS[c.type].fixed) { this.toast('The ESP32 board cannot be removed'); return; }
+      if (!c) return;
+      if (DEFS[c.type].board) { this.removeBoard(c); return; }
       this.project.components = this.project.components.filter((x) => x.id !== s.id);
       this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(s.id + ':') && !w.to.startsWith(s.id + ':'));
       Audio.set(s.id, 0);
@@ -139,11 +166,12 @@ const App = {
   start() {
     Audio.ensure();
     this.editor.clear();
-    $('#serialOut').textContent = '';
+    this.term = {}; this.renderTerminal();
     this.clearConsole();
-    this.project.code = this.editor.get();
-    if (this.boardType() === 'uno' && !this.project.firmware) {
-      this.log('The Arduino Uno runs compiled firmware. Click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.', 'error');
+    this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() });
+    const missing = this.boards().filter((b) => b.type === 'uno' && !this.program(b.id).firmware).map((b) => b.id);
+    if (missing.length) {
+      this.log(`The Arduino Uno runs compiled firmware: ${missing.join(', ')} has none yet. Open its tab, click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.`, 'error');
       this.showTab('bottom', 'consolePane');
       return;
     }
@@ -151,6 +179,36 @@ const App = {
   },
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
   restartSim() { this.stop(); this.start(); },
+  /** Show or hide the left sidebar (editor, parts, terminal…). The choice is remembered. */
+  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden')) {
+    $('#workspace').classList.toggle('side-hidden', hidden);
+    const b = $('#btnSide');
+    b.setAttribute('aria-expanded', String(!hidden));
+    b.title = hidden ? 'Show the sidebar (Ctrl+B)' : 'Hide the sidebar (Ctrl+B)';
+    try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ }
+    if (!hidden) requestAnimationFrame(() => this.editor.refresh());
+  },
+  /** Fold the Terminal/MQTT/Scope/Console panel down to its tab bar, or open it again. Remembered. */
+  toggleDock(collapsed = !$('#bottom').classList.contains('collapsed')) {
+    $('#bottom').classList.toggle('collapsed', collapsed);
+    $('#center').classList.toggle('dock-collapsed', collapsed);
+    const b = $('#btnDock'), label = collapsed ? 'Show the panel' : 'Hide the panel';
+    b.title = label; b.setAttribute('aria-label', label); b.setAttribute('aria-expanded', String(!collapsed));
+    try { localStorage.setItem(DOCK_STORE, collapsed ? '1' : ''); } catch (_) { /* ignore */ }
+    if (!collapsed && $('#scopePane').classList.contains('active')) requestAnimationFrame(() => this.scope.render(true));
+  },
+  /** Switch wires between free curves and tidy right-angle routes (saved with the project). */
+  toggleTidy() {
+    const tidy = this.project.wireStyle !== 'tidy';
+    if (tidy) this.project.wireStyle = 'tidy'; else delete this.project.wireStyle;
+    this.refreshTidy(); this.canvas.renderWires(); this.save();
+    this.toast(tidy ? 'Wires tidied: they now route around parts as you edit' : 'Wires back to curves');
+  },
+  refreshTidy() {
+    const on = this.project.wireStyle === 'tidy', b = $('#btnTidy');
+    b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on);
+    b.title = on ? 'Wires are tidy (click for curves)' : 'Tidy wires: route them at right angles around parts';
+  },
   togglePause() {
     if (!this.sim.running) return;
     if (this.sim.paused) this.sim.resume(); else this.sim.pause();
@@ -179,16 +237,43 @@ const App = {
     if (this.sim.running) {
       this.canvas.renderDynamic();
       for (const c of this.project.components) {
-        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, this.sim.paused ? 0 : s.f); }
+        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, this.sim.paused || c.props.muted ? 0 : s.f); }
       }
       this.flushSerial(); this.updateClock();
       if (this._iotDirty) this.renderIot();
       if ($('#scopePane').classList.contains('active')) this.scope.render();
     }
+    if (!$('#props').hidden) this.positionProps(); // follows pan, zoom, drag and 3D orbit
     requestAnimationFrame(() => this.frame());
-  },
+    },
 
-  onScopeSamples(t, v) { this.scope.addSamples(t, v); },
+    /** Float the edit card just above the selected part or wire (below it if there's no room), inside the canvas. */
+    positionProps() {
+    const panel = $('#props'), sel = this.canvas.sel; if (!sel) return;
+    const stage = $('#stage').getBoundingClientRect();
+    let box = null;
+    if (this.view3d.active && sel.kind === 'comp') {
+      const c = this.project.components.find((x) => x.id === sel.id); const d = c && DEFS[c.type];
+      if (d) {
+        const a = this.view3d.screenPoint(c.x, 30, c.y), b = this.view3d.screenPoint(c.x + d.w, 0, c.y + d.h);
+        box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) };
+      }
+    } else {
+      const el = sel.kind === 'comp' ? this.canvas.compsG.querySelector(`.cs-comp[data-id="${CSS.escape(sel.id)}"] .cs-body`)
+        : this.canvas.wiresG.querySelector(`.cs-wire[data-id="${CSS.escape(sel.id)}"] .cs-wire-line`);
+      if (el) box = el.getBoundingClientRect();
+    }
+    if (!box) return;
+    const w = panel.offsetWidth, h = panel.offsetHeight, gap = 12, m = 8;
+    const cx = (box.left + box.right) / 2 - stage.left;
+    let top = box.top - stage.top - h - gap;
+    if (top < m) top = box.bottom - stage.top + gap; // no room above: show it below
+    const left = Math.min(Math.max(m, cx - w / 2), stage.width - w - m);
+    top = Math.min(Math.max(m, top), stage.height - h - m);
+    panel.style.left = `${Math.round(left)}px`; panel.style.top = `${Math.round(top)}px`;
+    },
+
+    onScopeSamples(t, v) { this.scope.addSamples(t, v); },
   /** Human-readable summary of pasted SPICE text: what it defines, or where it fails to parse. */
   spiceStatus(text) {
     const lib = spiceLib(text);
@@ -197,32 +282,87 @@ const App = {
     const found = [...[...lib.models.entries()].map(([n, m]) => `.model ${n} (${m.type.toUpperCase()})`), ...[...lib.subckts.values()].map((s) => `.subckt ${s.name} (${s.ports.length} pins)`)];
     return found.length ? `Found ${found.join(', ')}` : 'No .model or .subckt found.';
   },
-  boardType() { const b = this.project.components.find((c) => DEFS[c.type] && DEFS[c.type].board); return b ? b.type : 'esp32'; },
-  /** Switch the project's microcontroller board. Wires to the old board's pins are removed. */
-  setBoard(type) {
-    if (type === this.boardType() || !DEFS[type] || !DEFS[type].board) return;
-    this.stop();
-    const old = this.project.components.find((c) => DEFS[c.type].board);
-    const id = type === 'uno' ? 'uno' : 'esp';
-    const before = this.project.wires.length;
-    if (old) {
-      this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(old.id + ':') && !w.to.startsWith(old.id + ':'));
-      this.project.components = this.project.components.filter((c) => c !== old);
+  // ---------- boards and their programs ----------
+  boards() { return this.project.components.filter((c) => DEFS[c.type] && DEFS[c.type].board); },
+  primaryId() { const b = this.boards()[0]; return b ? b.id : ''; },
+  /** type of the board whose program is open in the editor */
+  boardType() { const b = this.boards().find((x) => x.id === this.activeBoard) || this.boards()[0]; return b ? b.type : 'esp32'; },
+  /** A board's program. The first board's lives in project.code/firmware (single-board projects unchanged). */
+  program(id) {
+    if (!id || id === this.primaryId()) return { code: this.project.code, firmware: this.project.firmware };
+    return (this.project.programs && this.project.programs[id]) || {};
+  },
+  setProgram(id, patch) {
+    if (!id || id === this.primaryId()) {
+      if ('code' in patch) this.project.code = patch.code;
+      if ('firmware' in patch) { if (patch.firmware) this.project.firmware = patch.firmware; else delete this.project.firmware; }
+      return;
     }
-    this.project.components.unshift({ id, type, x: old ? old.x : 300, y: old ? old.y : 80, props: {} });
-    this.changed(); this.refreshBoardUi(); requestAnimationFrame(() => this.canvas.fit());
-    const removed = before - this.project.wires.length;
-    this.toast(`Switched to ${DEFS[type].name}${removed ? `. ${removed} wire${removed > 1 ? 's' : ''} to the old board removed` : ''}`);
+    this.project.programs = this.project.programs || {};
+    this.project.programs[id] = { ...(this.project.programs[id] || {}), ...patch };
+  },
+  /** Open a board's program in the editor (and its serial output in the Terminal). */
+  switchBoard(id) {
+    if (!this.boards().some((b) => b.id === id)) id = this.primaryId();
+    if (this.activeBoard && this.activeBoard !== id && this.boards().some((b) => b.id === this.activeBoard)) this.setProgram(this.activeBoard, { code: this.editor.get() });
+    this.activeBoard = id;
+    this._loadingEditor = true; this.editor.set(this.program(id).code || ''); this._loadingEditor = false;
+    this.editor.clear();
+    this.refreshBoardUi(); this.renderTerminal();
+  },
+  /** Add another microcontroller; it gets its own program tab. */
+  addBoard(type) {
+    const base = type === 'uno' ? 'uno' : 'esp';
+    let id = base, i = 2; while (this.project.components.some((c) => c.id === id)) id = base + i++;
+    let maxX = 0, minY = Infinity;
+    for (const c of this.project.components) { const d = DEFS[c.type]; if (d) { maxX = Math.max(maxX, c.x + d.w); minY = Math.min(minY, c.y); } }
+    this.project.components.push({ id, type, x: Math.round((maxX + 80) / 5) * 5, y: Number.isFinite(minY) ? minY : 80, props: {} });
+    if (this.boards().length > 1) this.setProgram(id, { code: type === 'uno' ? UNO_TEMPLATE : ESP_TEMPLATE });
+    this.changed(); requestAnimationFrame(() => this.canvas.fit());
+    this.switchBoard(id);
+    this.showTab('editor', 'editorPane'); // land on the new board's program
+    this.toast(`Added ${DEFS[type].name} "${id}": its program is in the ${id} tab above the editor`);
+  },
+  removeBoard(c) {
+    const boards = this.boards();
+    if (boards.length < 2) { this.toast('A project needs at least one board'); return; }
+    this.stop();
+    if (this.activeBoard) this.setProgram(this.activeBoard, { code: this.editor.get() });
+    if (boards[0].id === c.id) { // the next board becomes the first one: its program moves into code/firmware
+      const next = boards[1], np = this.program(next.id);
+      this.project.code = np.code || '';
+      if (np.firmware) this.project.firmware = np.firmware; else delete this.project.firmware;
+      if (this.project.programs) delete this.project.programs[next.id];
+    } else if (this.project.programs) delete this.project.programs[c.id];
+    this.project.components = this.project.components.filter((x) => x !== c);
+    this.project.wires = this.project.wires.filter((w) => !w.from.startsWith(c.id + ':') && !w.to.startsWith(c.id + ':'));
+    this.activeBoard = '';
+    this.canvas.select(null); this.changed();
+    this.switchBoard(this.primaryId());
   },
   refreshBoardUi() {
-    const uno = this.boardType() === 'uno';
-    $('#boardSelect').value = this.boardType();
+    const uno = this.boardType() === 'uno', boards = this.boards(), multi = boards.length > 1;
+    const tabs = $('#boardTabs'); tabs.hidden = !multi;
+    if (multi) {
+      tabs.textContent = '';
+      for (const b of boards) {
+        const t = document.createElement('button');
+        t.className = 'board-tab' + (b.id === this.activeBoard ? ' active' : '');
+        t.setAttribute('role', 'tab'); t.setAttribute('aria-selected', String(b.id === this.activeBoard));
+        t.dataset.board = b.id;
+        t.textContent = `${b.id} · ${b.type === 'uno' ? 'firmware' : 'sketch'}`;
+        t.title = `${DEFS[b.type].name} "${b.id}"`;
+        t.onclick = () => this.switchBoard(b.id);
+        tabs.appendChild(t);
+      }
+    }
+    document.querySelectorAll('#paletteList .part').forEach((b) => { if (DEFS[b.dataset.type].board) b.title = `Add a ${DEFS[b.dataset.type].name}`; });
     document.querySelector('.brand .chip').textContent = uno ? 'UNO' : 'ESP32';
-    $('#serialInput').placeholder = `Message to ${uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
+    $('#serialInput').placeholder = `Message to ${multi ? this.activeBoard : uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
     $('#btnFirmware').hidden = !uno;
     const b = $('#unoBanner'); b.hidden = !uno;
     if (uno) {
-      const fw = this.project.firmware;
+      const fw = this.program(this.activeBoard).firmware;
       b.textContent = '';
       const msg = document.createElement('span');
       msg.textContent = fw ? `Running firmware “${fw.name}”. This sketch is shown for reference: edit it in the Arduino IDE, export the compiled binary and upload the .hex.` : 'The Uno runs real compiled firmware. Compile this sketch in the Arduino IDE (Sketch → Export Compiled Binary) and click “Upload .hex”.';
@@ -237,7 +377,7 @@ const App = {
       const flash = parseIntelHex(text);
       let used = flash.length; while (used > 0 && flash[used - 1] === 0) used--;
       this.stop();
-      this.project.firmware = { name: file.name.slice(0, 120), hex: text };
+      this.setProgram(this.activeBoard || this.primaryId(), { firmware: { name: file.name.slice(0, 120), hex: text } });
       this.save(); this.refreshBoardUi();
       this.toast(`Loaded ${file.name} (${used.toLocaleString()} bytes)`);
     } catch (e) {
@@ -267,23 +407,44 @@ const App = {
     $('#simTime').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
   },
 
+  /** Serial output per board; the Terminal shows the board whose program is open. */
   flushSerial() {
-    if (!this.sim.serialOut) return;
+    const chunks = this.sim.takeSerial ? this.sim.takeSerial() : {};
+    let mine = false;
+    for (const [id0, text] of Object.entries(chunks)) {
+      if (!text) continue;
+      const id = id0 || this.primaryId();
+      let t = (this.term[id] || '') + text; if (t.length > 60000) t = t.slice(-50000);
+      this.term[id] = t;
+      if (id === this.activeBoard) mine = true;
+      else { const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(id)}"]`); if (tab) tab.classList.add('unseen'); }
+    }
+    if (!mine) return;
+    this.renderTerminal();
+    // new output you can't see (panel folded, or another tab open): mark the Terminal tab
+    if ($('#bottom').classList.contains('collapsed') || !$('#serialPane').classList.contains('active')) $('.tab[data-tab="serialPane"]').classList.add('unseen');
+  },
+  renderTerminal() {
     const el = $('#serialOut');
-    let t = el.textContent + this.sim.serialOut; this.sim.serialOut = '';
-    if (t.length > 60000) t = t.slice(-50000);
-    el.textContent = t;
+    el.textContent = (this.term && this.term[this.activeBoard]) || '';
     if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
+    const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(this.activeBoard || '')}"]`); if (tab) tab.classList.remove('unseen');
   },
 
   // ---------- console ----------
-  log(msg, level = 'info', line) {
+  log(msg, level = 'info', line, board) {
     const out = $('#consoleOut');
     const d = document.createElement('div'); d.className = `log ${level}`;
     const ms = Math.floor(this.sim ? this.sim.millis() : 0);
+    const multi = this.project && this.boards().length > 1;
     d.innerHTML = `<span class="tm">${(ms / 1000).toFixed(3)}s</span><span></span>`;
-    d.lastChild.textContent = msg;
-    if (line) { const a = document.createElement('a'); a.href = '#'; a.textContent = ` → line ${line}`; a.onclick = (e) => { e.preventDefault(); this.showTab('editor', 'editorPane'); this.editor.focusLine(line); }; d.lastChild.appendChild(a); this.editor.mark(line); }
+    d.lastChild.textContent = (multi && board ? `[${board}] ` : '') + msg;
+    if (line) {
+      const a = document.createElement('a'); a.href = '#'; a.textContent = ` → line ${line}`;
+      a.onclick = (e) => { e.preventDefault(); if (board && board !== this.activeBoard) this.switchBoard(board); this.showTab('editor', 'editorPane'); this.editor.focusLine(line); this.editor.mark(line); };
+      d.lastChild.appendChild(a);
+      if (!board || board === this.activeBoard) this.editor.mark(line);
+    }
     out.appendChild(d); while (out.children.length > 300) out.firstChild.remove();
     out.parentElement.scrollTop = out.parentElement.scrollHeight;
     if (level !== 'info' && !$('#consolePane').classList.contains('active')) {
@@ -292,12 +453,12 @@ const App = {
     }
   },
   clearConsole() { $('#consoleOut').textContent = ''; this._unseen = 0; $('#consoleBadge').hidden = true; },
-  reportError(e) {
+  reportError(e, board) {
     const m = String(e && e.stack || '').match(/(?:<anonymous>|Function):(\d+):\d+/);
     const line = m ? +m[1] - 2 : undefined;
     let msg = (e && e.message) || String(e);
     if (/is not defined/.test(msg)) msg += ' — it may be a function or library CatSim does not simulate yet';
-    this.log(`Runtime error: ${msg}`, 'error', line > 0 ? line : undefined);
+    this.log(`Runtime error: ${msg}`, 'error', line > 0 ? line : undefined, board);
     this.showTab('bottom', 'consolePane');
   },
 
@@ -352,6 +513,11 @@ const App = {
     const tabs = document.querySelector(`.tabs[data-group="${group}"]`);
     tabs.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
     const pane = $('#' + id); pane.parentElement.querySelectorAll(':scope > .tabpane').forEach((p) => p.classList.toggle('active', p === pane));
+    if (group === 'bottom') {
+      $('#autoScrollWrap').hidden = id !== 'serialPane'; // only the terminal scrolls
+      if (id === 'serialPane') $('.tab[data-tab="serialPane"]').classList.remove('unseen');
+      if ($('#bottom').classList.contains('collapsed')) this.toggleDock(false);
+    }
     if (id === 'consolePane') { this._unseen = 0; $('#consoleBadge').hidden = true; }
     if (id === 'editorPane') this.editor.refresh();
     if (id === 'iotPane') this.renderIot();
@@ -389,6 +555,9 @@ const App = {
     } else {
       const c = this.project.components.find((x) => x.id === sel.id); if (!c) { panel.hidden = true; return; }
       const d = DEFS[c.type];
+      // boards have no settings and can't be deleted: nothing worth a card (pin info is in the tooltips)
+      // a lone board has no settings and can't be deleted; with several boards its card offers Delete
+      if (d.board && this.boards().length < 2) { panel.hidden = true; return; }
       const rows = (d.controls || []).map((ct) => {
         const v = c.props[ct.key];
         if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${esc(v)}" data-key="${ct.key}"></div>`;
@@ -402,9 +571,9 @@ const App = {
         }
         return '';
       }).join('');
-      const hint = d.hint ? `<p class="hint">${d.hint}</p>` : d.type === 'esp32' ? '<p class="hint">Hover a pin to see its GPIO number and functions. The blue LED is on GPIO2.</p>' : '';
+      const hint = d.hint ? `<p class="hint">${d.hint}</p>` : '';
       panel.innerHTML = `<h4>${esc(d.name)}</h4><div class="sub">${esc(c.id)}</div>${rows}${hint}
-        ${d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
+        ${d.board ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
       panel.querySelectorAll('[data-key]').forEach((inp) => {
         inp.addEventListener('input', () => {
           const ct = d.controls.find((x) => x.key === inp.dataset.key);
@@ -428,14 +597,17 @@ const App = {
     }));
     const del = panel.querySelector('[data-act="delete"]'); if (del) del.onclick = () => this.deleteSelection();
     panel.hidden = false;
-  },
+    this.positionProps();
+    },
 
   bindUi() {
     $('#btnRun').onclick = () => this.toggleRun();
     $('#btnRestart').onclick = () => this.restartSim();
     $('#btnPause').onclick = () => this.togglePause();
-    $('#boardSelect').onchange = (e) => this.setBoard(e.target.value);
-    $('#btnFirmware').onclick = () => $('#firmwareFile').click();
+    $('#btnSide').onclick = () => this.toggleSidebar();
+    $('#btnDock').onclick = () => this.toggleDock();
+    $('#btnTidy').onclick = () => this.toggleTidy();
+$('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
     $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     $('#addPart').onclick = () => this.showTab('editor', 'partsPane');
@@ -470,14 +642,16 @@ const App = {
       const url = location.href.split('#')[0] + await encodeShare(this.project);
       try { await navigator.clipboard.writeText(url); this.toast('Share link copied to clipboard'); } catch (_) { prompt('Copy this link:', url); }
     };
-    $('#btnMute').onclick = (e) => { Audio.muted = !Audio.muted; e.currentTarget.textContent = Audio.muted ? '🔇' : '🔊'; if (Audio.muted) Audio.stopAll(); };
 
     document.querySelectorAll('.tabs').forEach((tabs) => tabs.addEventListener('click', (e) => {
-      const t = e.target.closest('.tab'); if (t) this.showTab(tabs.dataset.group, t.dataset.tab);
+      const t = e.target.closest('.tab'); if (!t) return;
+      // clicking the open tab of the bottom panel folds the panel away (like an IDE)
+      if (tabs.dataset.group === 'bottom' && t.classList.contains('active') && !$('#bottom').classList.contains('collapsed')) { this.toggleDock(true); return; }
+      this.showTab(tabs.dataset.group, t.dataset.tab);
     }));
     $('#btnClear').onclick = () => {
       const active = document.querySelector('.tabs[data-group="bottom"] .tab.active').dataset.tab;
-      if (active === 'serialPane') $('#serialOut').textContent = '';
+      if (active === 'serialPane') { this.term[this.activeBoard] = ''; this.renderTerminal(); }
       else if (active === 'consolePane') this.clearConsole();
       else { this.sim.broker.log = []; this.sim.broker.topics.clear(); this.renderIot(); }
     };
@@ -485,7 +659,7 @@ const App = {
       e.preventDefault();
       const inp = $('#serialInput'); const end = $('#lineEnding').value.replace('\\r', '\r').replace('\\n', '\n');
       if (!this.sim.running) { this.toast('Start the simulation first'); return; }
-      this.sim.sendSerial(inp.value + end); inp.value = '';
+      this.sim.sendSerial(inp.value + end, this.activeBoard); inp.value = '';
     };
     $('#mqttForm').onsubmit = (e) => {
       e.preventDefault();
@@ -502,6 +676,7 @@ const App = {
       const typing = e.target.closest('input, textarea, select, .cm-editor');
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); this.toggleRun(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); this.save(); this.toast('Saved in this browser'); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !e.target.closest('.cm-editor')) { e.preventDefault(); this.toggleSidebar(); return; }
       if (typing) return;
       if (e.key === 'Escape') { this.canvas.cancelWire(); this.canvas.select(null); }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); this.deleteSelection(); }
@@ -516,7 +691,8 @@ const App = {
       el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
     });
     drag($('#splitV'), (e) => { const r = ws.getBoundingClientRect(); const w = Math.min(r.width * 0.7, Math.max(320, e.clientX - r.left)); document.documentElement.style.setProperty('--side-w', w + 'px'); });
-    drag($('#splitH'), (e) => { const r = side.getBoundingClientRect(); const h = Math.min(r.height - 140, Math.max(120, r.bottom - e.clientY)); document.documentElement.style.setProperty('--bottom-h', h + 'px'); this.editor.refresh(); });
+    // the terminal/scope dock sits under the canvas: drag the divider to share the centre column
+    drag($('#splitH'), (e) => { const r = $('#center').getBoundingClientRect(); const h = Math.min(r.height - 160, Math.max(120, r.bottom - e.clientY)); document.documentElement.style.setProperty('--bottom-h', h + 'px'); });
   },
 };
 
