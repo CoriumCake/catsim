@@ -489,6 +489,15 @@ class Simulator {
         return undefined;
       },
       __i: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : v),
+      // integer types: wrap to the type's width like C (non-numbers, e.g. a char string, pass through)
+      __i32: (v) => (typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) | 0 : v) : typeof v === 'boolean' ? +v : v),
+      __u32: (v) => (typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) >>> 0 : v) : typeof v === 'boolean' ? +v : v),
+      __i16: (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 16) >> 16 : typeof v === 'boolean' ? +v : v),
+      __u16: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xffff : typeof v === 'boolean' ? +v : v),
+      __i8: (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 24) >> 24 : v),
+      __u8: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xff : typeof v === 'boolean' ? +v : v),
+      __b: (v) => (typeof v === 'number' || typeof v === 'boolean' ? !!v : v),
+      __idiv: (a, b) => (typeof a === 'number' && typeof b === 'number' && b !== 0 ? Math.trunc(a / b) : a / b),
       __arr: zeros,
       // int a[5] = {1, 2}; → the missing elements are zero, as in C
       __pad: function pad(a, n, ...rest) {

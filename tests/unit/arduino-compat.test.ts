@@ -81,6 +81,24 @@ const cases: Array<[string, string, string, string?]> = [
   ['bitSet on an array element', 'int f[2] = {0, 0}; bitSet(f[1], 1); Serial.print(f[1]);', '2'],
   ['String.replace replaces every match', 'String s = "a-b-c"; s.replace("-", "+"); Serial.print(s);', 'a+b+c'],
   ['2D partial init', 'int g[2][3] = {{1}}; Serial.print(g[0][2]); Serial.print(g[1][1]);', '00'],
+  ['int variable division', 'int a = 7, b = 2; Serial.print(a / b);', '3'],
+  ['byte wraps', 'byte b = 255; b++; Serial.print(b);', '0'],
+  ['uint8_t wraps', 'uint8_t b = 250; b += 10; Serial.print(b);', '4'],
+  ['unsigned long wraps below 0', 'unsigned long u = 0; u--; Serial.print(u);', '4294967295'],
+  ['int16_t wraps', 'int16_t s = 32767; s++; Serial.print(s);', '-32768'],
+  ['int overflow wraps', 'int x = 2147483647; x++; Serial.print(x);', '-2147483648'],
+  ['int from float truncates', 'int a = 3.9; Serial.print(a);', '3'],
+  ['int function return truncates', 'Serial.print(half(5));', '2', 'int half(int v) { return v / 2; }'],
+  // guards for integer type tracking
+  ['wrapping keeps values in range', 'unsigned long last = 0; unsigned long now = 5000; Serial.print(now - last >= 1000);', '1'],
+  ['average with int division', 'int sum = 10, count = 4; int avg = sum / count; Serial.print(avg);', '2'],
+  ['float var division stays float', 'float total = 10; int n = 4; Serial.print(total / n);', '2.50'],
+  ['int param wraps', 'Serial.print(twice(5));', '10', 'int twice(int v) { v *= 2; return v; }'],
+  ['same name, different types per function', 'Serial.print(fa()); Serial.print(" "); Serial.print(fb());', '2 2.50', 'int fa() { int x = 5; x = x / 2; return x; }\nfloat fb() { float x = 5; x = x / 2; return x; }'],
+  ['long counter keeps counting', 'long c = 0; for (int i = 0; i < 5; i++) c += 100000; Serial.print(c);', '500000'],
+  ['uint16_t wraps', 'uint16_t w = 65535; w++; Serial.print(w);', '0'],
+  ['int8_t wraps', 'int8_t s = 127; s++; Serial.print(s);', '-128'],
+  ['bool stays bool', 'bool on = 5; Serial.print(on);', '1'],
 ];
 
 // Known gaps: the ESP32 runner is a regex transpiler to JavaScript, so types are not tracked. Each of
@@ -90,18 +108,10 @@ const gaps: Array<[string, string, string, string?]> = [
   ['char cast to int', "Serial.print((int)'A');", '65'],
   ['char arithmetic', "Serial.print('A' + 1);", '66'],
   ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
-  ['int variable division', 'int a = 7, b = 2; Serial.print(a / b);', '3'],
   ['float = int/int', 'float f = 7 / 2; Serial.print(f);', '3.00'],
-  ['byte wraps', 'byte b = 255; b++; Serial.print(b);', '0'],
-  ['uint8_t wraps', 'uint8_t b = 250; b += 10; Serial.print(b);', '4'],
-  ['unsigned long wraps below 0', 'unsigned long u = 0; u--; Serial.print(u);', '4294967295'],
-  ['int16_t wraps', 'int16_t s = 32767; s++; Serial.print(s);', '-32768'],
-  ['int overflow wraps', 'int x = 2147483647; x++; Serial.print(x);', '-2147483648'],
   ['sqrt prints as float', 'Serial.print(sqrt(16));', '4.00'],
   ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
   ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
-  ['int from float truncates', 'int a = 3.9; Serial.print(a);', '3'],
-  ['int function return truncates', 'Serial.print(half(5));', '2', 'int half(int v) { return v / 2; }'],
   ['unsigned subtraction wraps', 'unsigned int a = 1, b = 2; Serial.print(a - b);', '4294967295'],
 ];
 
