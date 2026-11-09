@@ -6,9 +6,9 @@
   --line-2: #d5d9e0;
   --text: #1c2230;
   --muted: #6b7385;
-  --accent: #f5b301;
-  --accent-2: #ffc933;
-  --accent-ink: #1c1600;
+  --accent: #ff9f5f; /* the logo's ember orange */
+  --accent-2: #ffb47f;
+  --accent-ink: #2b2b2b;
   --ok: #16a34a;
   --danger: #dc2626;
   --warn: #b45309;
@@ -36,8 +36,8 @@ code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 4px; bor
 .brand { display: flex; align-items: center; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); height: 100%; }
 .brand-mark { flex: none; display: block; }
 .brand-name { font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
-.brand-name b { color: #F08A3E; } /* the logo's orange, a shade deeper for text */
-.chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff4d1; color: #8a6400; border: 1px solid #f3dc94; }
+.brand-name b { color: #f08a3e; } /* the logo's orange, a shade deeper for text */
+.chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff1e6; color: #a8501a; border: 1px solid #ffd2b3; }
 .proj-name { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; width: 200px; min-width: 90px; flex: 0 1 auto; color: var(--text); font-weight: 600; }
 .proj-name:hover, .proj-name:focus { border-color: var(--line-2); outline: none; background: var(--panel-2); }
 .tb-group { display: flex; align-items: center; gap: 6px; }
@@ -88,7 +88,7 @@ select.btn { padding-right: 6px; }
 .palette-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
 .palette-cat { grid-column: 1 / -1; font: 700 10.5px var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 10px 2px 0; }
 .part { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: grab; text-align: center; }
-.part:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(245, 179, 1, .18); }
+.part:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(255, 159, 95, .22); }
 .part svg { width: 64px; height: 48px; }
 .part span { font-size: 12px; font-weight: 500; line-height: 1.25; }
 .palette-hint { font-size: 11.5px; color: var(--muted); margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -120,7 +120,7 @@ select.btn { padding-right: 6px; }
 .iot-log .dir { width: 18px; text-align: center; font-weight: 700; }
 .iot-log .dev .dir { color: var(--info); }
 .iot-log .ui .dir { color: var(--ok); }
-.iot-log .tp { color: #8a6400; }
+.iot-log .tp { color: #a8501a; }
 .iot-log .pl { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .iot-empty { color: var(--muted); padding: 10px 2px; font-family: var(--sans); white-space: normal; }
 
@@ -214,10 +214,10 @@ select.btn { padding-right: 6px; }
 .props .row { margin: 8px 0; }
 .props label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .props label b { color: var(--text); font: 11.5px var(--mono); }
-.props input[type=range] { width: 100%; accent-color: #d99a00; }
+.props input[type=range] { width: 100%; accent-color: #f08a3e; }
 .props select { width: 100%; padding: 5px 6px; border-radius: 7px; background: #fff; border: 1px solid var(--line-2); }
 .props .toggle { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; justify-content: flex-start; }
-.props .toggle input { accent-color: #d99a00; width: 16px; height: 16px; }
+.props .toggle input { accent-color: #f08a3e; width: 16px; height: 16px; }
 .props .hint { font-size: 11.5px; color: var(--muted); margin: 6px 0 0; }
 .props .actions { display: flex; gap: 6px; margin-top: 10px; }
 .props .danger { color: var(--danger); border-color: #f3c4c4; }

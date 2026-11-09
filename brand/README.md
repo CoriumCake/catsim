@@ -7,9 +7,9 @@ Its whiskers are circuit traces ending in solder pads, and its eye is a via, so 
 
 | File | Use |
 |---|---|
-| `catsim-symbol.svg` | The mark, full colour, light backgrounds. 48 px and up. |
+| `catsim-symbol.svg` | The mark, full colour, light backgrounds. Also the favicon and app icons. |
 | `catsim-symbol-on-dark.svg` | The mark on dark backgrounds (light bracket). |
-| `catsim-symbol-small.svg` / `-small-on-dark.svg` | Small-size cut for 16 to 47 px: solid head, eye knocked out, no traces. |
+| `catsim-symbol-small.svg` / `-small-on-dark.svg` | Optional small-size cut (solid head, eye knocked out, no traces) for tiny print or embroidery. The favicon and app icons use the full mark. |
 | `catsim-horizontal.svg` / `-on-dark.svg` | Mark and wordmark side by side: README headers, social cards, slides. |
 | `catsim-horizontal-black.svg` / `-white.svg` / `-mono-ff9f5f.svg` | One-colour versions for print, stamps and embroidery (PNGs at 1200 px next to them). |
 | `catsim-wordmark.svg` | Name only, for where the mark already appears nearby. |
@@ -24,12 +24,14 @@ Its whiskers are circuit traces ending in solder pads, and its eye is a via, so 
 | Paper | `#F4EFE9` | 244 239 233 | Bracket and "Cat" on dark backgrounds |
 | Icon tile | `#FFF4EC` | 255 244 236 | App-icon background |
 
+The app's UI accent (`--accent` in `src/style.css`) is the same ember orange, with `#2B2B2B` text on it.
+
 For orange **text** in the UI, use `#F08A3E`, a shade deeper. `#FF9F5F` on white is fine for the mark but too light for body text.
 
 ## Rules
 
 - **Clear space:** keep at least the height of the left ear (28 units on the 256 grid) empty around the mark.
-- **Minimum size:** the full mark at 48 px wide. Below that, use the small cut. The wordmark should be at least 16 px tall.
+- **Minimum size:** the full mark down to 16 px (the favicon). Below about 48 px the traces blur into the orange; that's accepted for icons. The wordmark should be at least 16 px tall.
 - **Backgrounds:** use the light versions on white or light greys, and the `-on-dark` versions on dark greys and black. On photos or busy backgrounds, use one-colour white or black.
 - **Don't:** recolour the parts (the bracket stays ink or paper, the cat stays orange); rotate or skew it; add shadows, outlines or gradients; redraw the traces; set the name in another font next to the mark.
 
