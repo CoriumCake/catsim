@@ -133,6 +133,18 @@ const cases: Array<[string, string, string, string?]> = [
   ['char loop', "for (char c = 'a'; c <= 'c'; c++) Serial.print(c);", 'abc'],
   ['escaped char literal', "Serial.print((int)'\\n');", '10'],
   ['charAt minus a char', 'String s = "42"; Serial.print(s.charAt(0) - \'0\');', '4'],
+  ['char in a sum chain', "int sum = 0; char c = '7'; sum = sum + c - '0'; Serial.print(sum);", '7'],
+  ['int + char - char', "int n = 2; char c = '3'; Serial.print(n + c - '0');", '5'],
+  ['zero char is falsy and equals 0', 'char c = 0; Serial.print(c == 0); Serial.print(c ? 1 : 0);', '10'],
+  ['char compared with a number', "char c = 'A'; Serial.print(c == 65); Serial.print(c >= 32 && c < 127);", '11'],
+  // declarations without a value start at zero, as C globals do
+  ['uninitialised int', 'count++; Serial.print(count);', '1', 'int count;'],
+  ['uninitialised unsigned long', 'Serial.print(millis() - last < 100000);', '1', 'unsigned long last;'],
+  ['uninitialised float', 'Serial.print(t);', '0.00', 'float t;'],
+  ['uninitialised String', 's += "a"; Serial.print(s);', 'a', 'String s;'],
+  ['uninitialised bool', 'Serial.print(on);', '0', 'bool on;'],
+  ['several uninitialised ints', 'a++; b += 2; Serial.print(a + b);', '3', 'int a, b;'],
+  ['two structs in one declaration', 'Point a, b; a.x = 1; b.x = 2; Serial.print(a.x + b.x);', '3', 'struct Point { int x; int y; };'],
   // float printing
   ['whole float prints 2 decimals', 'float t = 21; Serial.println(t);', '21.00\r\n'],
   ['float param prints 2 decimals', 'show(3);', '3.00', 'void show(float v) { Serial.print(v); }'],

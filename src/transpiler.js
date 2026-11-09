@@ -152,6 +152,10 @@ function transpile(source) {
       });
       return `function __new_${name}(v) { v = v || []; return { ${props.join(', ')} }; }`;
     });
+    if (structNames.length) { // Point a, b;  → Point a; Point b;
+      code = code.replace(new RegExp(`(?:\\bstruct\\s+)?\\b(${structNames.join('|')})\\s+([A-Za-z_]\\w*(?:\\s*,\\s*[A-Za-z_]\\w*)+)\\s*;`, 'g'),
+        (mm, t, names) => names.split(',').map((n) => `${t} ${n.trim()};`).join(' '));
+    }
     // declarations: Point p;  Point p = {1, 2};  Point q = p;  Point ps[3];  Point ps[2] = {{1, 2}, {3, 4}};
     if (structNames.length) {
       const declRe = new RegExp(`(?:\\bstruct\\s+)?\\b(${structNames.join('|')})(\\s*\\*\\s*|\\s+)([A-Za-z_]\\w*)\\s*((?:\\[[^\\]]*\\]\\s*)*)(=\\s*)?`, 'g');
@@ -332,6 +336,11 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       const out = parts.map((pt) => {
         const dm = pt.match(/^(\s*)([A-Za-z_]\w*)(\s*)(=\s*)?([\s\S]*)$/);
         if (!dm || (!dm[4] && dm[5].trim())) return null; // not a plain `name` / `name = value`
+        if (!dm[4]) { // int count;  → 0, like a C global (locals are garbage in C; 0 is the friendly choice)
+          const z = w || isFloatType(type) ? '0' : /^\s*(?:(?:static|const|volatile)\s+)*String\s*$/.test(type) ? '""' : null;
+          noteVar(dm[2], w); noteFloat(dm[2], isFloatType(type));
+          return z ? `${dm[1]}${dm[2]} = ${z}` : pt;
+        }
         noteVar(dm[2], w); noteFloat(dm[2], isFloatType(type));
         const plainInt = /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+)$/.test(dm[5].trim()) && w !== '__b' && w !== '__ch' && w !== '__u8' && w !== '__i8' && w !== '__u16' && w !== '__i16';
         return dm[4] && w && !plainInt ? `${dm[1]}${dm[2]}${dm[3]}${dm[4]}${w}(${dm[5].trim()})` : pt;
@@ -349,19 +358,26 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       const isNum = (t) => /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+(?:\.\d*)?)$/.test(t);
       const charish = (t) => isCharLit(t) || W(t) === '__ch';
       const numeric = (t) => isNum(t) || charish(t) || (W(t) && W(t) !== '__ch');
-      const conv = (t) => { const lit = isCharLit(t); return lit ? String(code1(lit)) : isNum(t) ? t : `__ord(${t})`; };
-      const OPND = '(?<![\\w.\\]])([A-Za-z_]\\w*(?:\\s*\\[[^\\]]*\\])*|\\d+(?:\\.\\d*)?)(?![\\w(.\\[])';
-      const OP = '(<<|>>|(?<![-+&|])[-*/%^](?![-=])|(?<![&])&(?![&=])|(?<![|])\\|(?![|=])|(?<!\\+)\\+(?![+=]))';
+      const isOrd = (t) => /^__ord\(/.test(t); // already converted by an earlier pair
+      const conv = (t) => { const lit = isCharLit(t); return lit ? String(code1(lit)) : isNum(t) || isOrd(t) ? t : `__ord(${t})`; };
+      const OPND = '(?<![\\w.\\]])(__ord\\([^()]*\\)|[A-Za-z_]\\w*(?:\\s*\\[[^\\]]*\\])*|\\d+(?:\\.\\d*)?)(?![\\w(.\\[])';
+      const OP = '(<<|>>|==|!=|<=|>=|(?<![<>])[<>](?![<>=])|(?<![-+&|])[-*/%^](?![-=])|(?<![&])&(?![&=])|(?<![|])\\|(?![|=])|(?<!\\+)\\+(?![+=]))';
       const pair = new RegExp(`${OPND}(\\s*)${OP}(\\s*)${OPND}`, 'g');
-      let prev;
-      do {
-        prev = code;
-        code = code.replace(pair, (mm, l, s1, op, s2, r) => {
-          if (!charish(l) && !charish(r)) return mm;
-          if (op === '+' ? !(numeric(l) && numeric(r)) : false) return mm; // String + 'c' stays text
-          return `${conv(l)}${s1}${op}${s2}${conv(r)}`;
-        });
-      } while (code !== prev);
+      // Scan by hand: when a pair is not about chars, step past its left operand only, so `n + c - '0'`
+      // still pairs `c - '0'` (a plain replace would swallow `n + c` and skip it).
+      let pm; pair.lastIndex = 0;
+      while ((pm = pair.exec(code))) {
+        const [mm, l, s1, op, s2, r] = pm;
+        const cl = charish(l) || (isOrd(l) && !isNum(r)), cr = charish(r) || (isOrd(r) && !isNum(l));
+        let ok = cl || cr;
+        if (ok && op === '+') ok = (numeric(l) || isOrd(l)) && (numeric(r) || isOrd(r)); // String + 'c' stays text
+        if (ok && /[<>=!]/.test(op) && op.length <= 2 && !/^(<<|>>)$/.test(op)) ok = (cl && isNum(r)) || (cr && isNum(l)); // c == 65, not c == 'a'
+        if (ok && isOrd(l) && isOrd(r)) ok = false;
+        if (!ok) { pair.lastIndex = pm.index + l.length; continue; }
+        const rep2 = `${conv(l)}${s1}${op}${s2}${conv(r)}`;
+        code = code.slice(0, pm.index) + rep2 + code.slice(pm.index + mm.length);
+        pair.lastIndex = pm.index + rep2.length - conv(r).length; // the right operand can start the next pair
+      }
     }
     // c++ / c-- on a char anywhere (for headers too): the next/previous letter
     const chars = [...varWrap].filter(([, w]) => w === '__ch').map(([n]) => n);
