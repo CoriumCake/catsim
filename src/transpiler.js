@@ -160,14 +160,20 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   const fnNames = []; const fnWrap = new Map(); // int-returning function → wrap helper
   const varWrap = new Map(); // integer variable → wrap helper (null when a name has conflicting types)
   const noteVar = (name, w) => varWrap.set(name, varWrap.has(name) && varWrap.get(name) !== w ? null : w);
+  // float/double variables and functions, so print(x) shows 2 decimals even for whole numbers
+  const floatVar = new Map(); // name → true (always float) / false (declared with another type somewhere)
+  const floatFns = new Set(['sqrt', 'pow', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'log', 'log10', 'fabs', 'floor', 'ceil', 'fmod']);
+  const isFloatType = (t) => /^\s*(?:(?:static|const|volatile|constexpr)\s+)*(?:float|double|long double)\s*$/.test(t);
+  const noteFloat = (name, f) => floatVar.set(name, floatVar.has(name) ? floatVar.get(name) && f : f);
   const intTypeRe = new RegExp(`^\\s*${QUAL}(?:${INTS}|bool|boolean)\\s*$`); // types whose values wrap/convert on assignment
   code = code.replace(new RegExp(`(^|[;}\\n])([ \\t]*)(${QUAL}(?:void|${TYPES}))((?:\\s*[\\*&]\\s*|\\s+))([A-Za-z_]\\w*)\\s*\\(([^()]*)\\)\\s*\\{`, 'g'),
     (m, a, ws, rtype, sep, name, params) => {
       fnNames.push(name);
       if (intTypeRe.test(rtype) && !/[*&]/.test(sep)) fnWrap.set(name, wrapFor(rtype));
+      if (isFloatType(rtype) && !/[*&]/.test(sep)) floatFns.add(name); else floatFns.delete(name);
       for (const prm of params.split(',')) {
         const pm = prm.trim().match(/^(.*?)\s*([*&]?)\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*(?:=.*)?$/);
-        if (pm && pm[1] && !/[\[]/.test(prm)) noteVar(pm[3], intTypeRe.test(pm[1]) && !pm[2] ? wrapFor(pm[1]) : null);
+        if (pm && pm[1] && !/[\[]/.test(prm)) { noteVar(pm[3], intTypeRe.test(pm[1]) && !pm[2] ? wrapFor(pm[1]) : null); noteFloat(pm[3], isFloatType(pm[1])); }
       }
       const nl = '\n'.repeat((m.slice(a.length).match(/\n/g) || []).length);
       return `${a}${ws}async function ${name}(${convParams(params)}) {${nl}`;
@@ -225,7 +231,7 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       const out = parts.map((pt) => {
         const dm = pt.match(/^(\s*)([A-Za-z_]\w*)(\s*)(=\s*)?([\s\S]*)$/);
         if (!dm || (!dm[4] && dm[5].trim())) return null; // not a plain `name` / `name = value`
-        noteVar(dm[2], w);
+        noteVar(dm[2], w); noteFloat(dm[2], isFloatType(type));
         const plainInt = /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+)$/.test(dm[5].trim()) && w !== '__b' && w !== '__u8' && w !== '__i8' && w !== '__u16' && w !== '__i16';
         return dm[4] && w && !plainInt ? `${dm[1]}${dm[2]}${dm[3]}${dm[4]}${w}(${dm[5].trim()})` : pt;
       });
@@ -251,6 +257,27 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       code = code.replace(new RegExp(`(?<![\\w.)\\]*\\/%\\u0001]\\s*)(?<![\\w.)\\]*\\/%\\u0001])\\b${opnd}\\s*\\/\\s*${opnd}\\b(?![\\w.(\\[])`, 'g'),
         (mm, l, r) => keepNl(mm, `__idiv(${l}, ${r})`));
     }
+    // print(x) / String(x) of a float shows 2 decimals, even when the value is whole: float f = 3; → 3.00
+    {
+      const floats = [...floatVar].filter(([, f]) => f).map(([n]) => n);
+      const isFloatExpr = (arg) => {
+        const a = arg.trim();
+        if (!a || /__STR|[<>=!&|?,~]/.test(a)) return false;
+        const call = a.match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/);
+        if (call && floatFns.has(call[1]) && matchClose(a, a.indexOf('('), '(', ')') === a.length - 1) return true;
+        if (/[()]/.test(a)) return false; // keep it to plain arithmetic: (int)(t * 10) is not a float
+        const ids = a.match(/[A-Za-z_]\w*/g) || [];
+        if (ids.some((id) => !floats.includes(id) && !(varWrap.get(id)))) return false; // only known numeric names
+        return ids.some((id) => floats.includes(id)) || /\d\.\d*|\.\d/.test(a);
+      };
+      const callRe = /\.\s*(?:print|println)\s*\(|(?<![\w.])String\s*\(/g; const closes = []; let cm;
+      while ((cm = callRe.exec(code))) {
+        const open = cm.index + cm[0].length - 1; const close = matchClose(code, open, '(', ')');
+        if (close > 0 && isFloatExpr(code.slice(open + 1, close))) closes.push(close);
+      }
+      for (const c of closes.sort((a, b) => b - a)) code = code.slice(0, c) + ', 2' + code.slice(c);
+    }
+
     // int-returning functions return whole numbers of their type
     for (const [fname, w] of fnWrap) {
       const fm = new RegExp(`async function ${fname}\\([^)]*\\) \\{`).exec(code); if (!fm) continue;

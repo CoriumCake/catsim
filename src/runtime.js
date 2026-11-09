@@ -40,9 +40,9 @@ function fmtValue(v, f) {
   if (v instanceof Number && !(f instanceof Number)) v = +v;
   if (typeof v === 'number') {
     if (f instanceof Number) { const n = Math.trunc(v); return +f === 10 ? String(n) : (n < 0 ? n >>> 0 : n).toString(+f).toUpperCase(); }
-    if (f !== undefined) return v.toFixed(Math.max(0, Math.min(20, +f)));
-    if (Number.isNaN(v)) return 'nan';
+    if (Number.isNaN(v)) return 'nan'; // also with digits: a failed DHT read prints nan, not NaN
     if (!Number.isFinite(v)) return v > 0 ? 'inf' : '-inf';
+    if (f !== undefined) return v.toFixed(Math.max(0, Math.min(20, +f)));
     return Number.isInteger(v) ? String(v) : v.toFixed(2);
   }
   if (v == null) return '';
