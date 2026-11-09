@@ -697,4 +697,4 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
 };
 
 
-export { App };
+export { App, Audio };

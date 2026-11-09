@@ -374,3 +374,18 @@ test('a buzzer is muted from its own card; the toolbar has no global sound butto
   await box.uncheck();
   expect(await muted()).toBe(false);
 });
+
+test('muting a buzzer stops its sound while the simulation keeps running', async ({ page }) => {
+  await loadExample(page, 'alarm'); await startSim(page);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.components.find((x: { type: string }) => x.type === 'pir').props.motion = true; A.sim.syncProject(); });
+  const playing = () => page.evaluate(() => window.CatSim.Audio.osc.has('bz1'));
+  // asserts on the oscillator, not audible output: headless Chrome may keep the AudioContext suspended
+  test.skip(!(await page.evaluate(() => !!window.CatSim.Audio.ctx)), 'no Web Audio in this browser');
+  await expect.poll(playing).toBe(true);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'bz1' }));
+  await page.locator('#props input[data-key="muted"]').check();
+  await expect.poll(playing).toBe(false);
+  expect((await partState(page, 'buzzer')).some((st: { f: number }) => st.f > 0)).toBe(true); // still driven, just silent
+  await page.locator('#props input[data-key="muted"]').uncheck();
+  await expect.poll(playing).toBe(true);
+});

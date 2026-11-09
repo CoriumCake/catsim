@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 
 // The page exposes window.CatSim = { App, DEFS } for debugging and tests.
 type AnyApp = any; // eslint-disable-line @typescript-eslint/no-explicit-any
-declare global { interface Window { CatSim: { App: AnyApp; DEFS: AnyApp }; __pwned?: unknown } }
+declare global { interface Window { CatSim: { App: AnyApp; DEFS: AnyApp; Audio: AnyApp }; __pwned?: unknown } }
 
 export async function collectErrors(page: Page) {
   const errors: string[] = [];
