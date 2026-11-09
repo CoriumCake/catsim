@@ -563,6 +563,7 @@ DEFS.relay = {
 };
 
 DEFS.lcd = {
+  pinLabels: false,
   type: 'lcd', name: 'LCD 16×2 (I2C)', category: 'Output', w: 236, h: 86,
   pins: [
     { id: 'GND', label: 'GND', x: 0, y: 22, dir: 'l' },

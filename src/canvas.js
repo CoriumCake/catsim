@@ -4,6 +4,18 @@ import { breadboardContacts, snapToBreadboard } from './contacts.js';
 import { esc } from './util.ts';
 import { RouteGrid, roundedPath } from './router.ts';
 const SVGNS = 'http://www.w3.org/2000/svg';
+
+/** A printed name for every pin, outside the part, so a child can read it without hovering. Pins on the top and
+ * bottom edges get their names turned to run vertically, so neighbouring pins don't overlap. */
+export function pinLabelsSvg(d) {
+  return d.pins.map((p) => {
+    const t = esc(p.label ?? p.id), x = p.x, y = p.y;
+    if (p.dir === 'l') return `<text class="cs-pin-lbl" x="${x - 7}" y="${y}" text-anchor="end" dominant-baseline="central">${t}</text>`;
+    if (p.dir === 'r') return `<text class="cs-pin-lbl" x="${x + 7}" y="${y}" text-anchor="start" dominant-baseline="central">${t}</text>`;
+    if (p.dir === 't') return `<text class="cs-pin-lbl" transform="translate(${x} ${y - 7}) rotate(-90)" text-anchor="start" dominant-baseline="central">${t}</text>`;
+    return `<text class="cs-pin-lbl" transform="translate(${x} ${y + 7}) rotate(90)" text-anchor="start" dominant-baseline="central">${t}</text>`;
+  }).join('');
+}
 const DIRS = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
 const WIRE_COLORS = ['#2ecc71', '#3d8bff', '#f39c12', '#b06cff', '#ffd60a', '#1abc9c', '#ff6b9a', '#e8eaed'];
 
@@ -100,7 +112,9 @@ class Canvas {
         const key = `${c.id}:${p.id}`;
         pins += `<g class="cs-pin${connected.has(key) ? ' cs-connected' : ''}" data-ref="${esc(key)}"><circle cx="${p.x}" cy="${p.y}" r="7" class="cs-pin-hit"/><rect x="${p.x - 3}" y="${p.y - 3}" width="6" height="6" rx="1.2" class="cs-pin-dot"/><title>${esc(p.title || p.label)}</title></g>`;
       }
-      g.innerHTML = `<rect class="cs-sel" x="-6" y="-6" width="${d.w + 12}" height="${d.h + 12}" rx="6"/><g class="cs-body"></g><text class="cs-id" x="${d.w / 2}" y="${d.h + 16}">${esc(c.id)}</text><g class="cs-pins">${pins}</g>`;
+      // parts that already print their own pin names (chips, boards, the LCDs…) set pinLabels: false
+      const labels = d.pinLabels !== false && !d.board && !d.dip && !d.noPinHeaders ? pinLabelsSvg(d) : '';
+      g.innerHTML = `<rect class="cs-sel" x="-6" y="-6" width="${d.w + 12}" height="${d.h + 12}" rx="6"/><g class="cs-body"></g><text class="cs-id" x="${d.w / 2}" y="${d.h + 16}">${esc(c.id)}</text><g class="cs-pins">${pins}</g><g class="cs-pin-labels">${labels}</g>`;
       this.compsG.appendChild(g);
     }
     this.renderWires();

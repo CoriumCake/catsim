@@ -552,3 +552,23 @@ test('the parallel 16×2 LCD shows the sketch text in the app', async ({ page })
   const st = await partState(page, 'lcd_parallel');
   expect(st[0].d).toMatchObject({ kind: 'lcd', backlight: true });
 });
+
+test('every part prints a readable name next to each of its pins (for children, not just on hover)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await loadExample(page, 'blink');
+  const types = await page.evaluate(() => Object.keys(window.CatSim.DEFS).filter((t) => !window.CatSim.DEFS[t].board && t !== 'breadboard'));
+  await page.evaluate((ts) => { const A = window.CatSim.App; A.project.components = A.project.components.filter((c: { type: string }) => c.type === 'esp32'); ts.forEach((t: string, i: number) => A.addComponent(t, 40 + (i % 8) * 170, 380 + Math.floor(i / 8) * 260)); A.canvas.renderAll(); }, types);
+  const missing = await page.evaluate(() => {
+    const A = window.CatSim.App, D = window.CatSim.DEFS, out: string[] = [];
+    for (const c of A.project.components) {
+      const d = D[c.type]; if (!d || d.board || d.dip || d.noPinHeaders || d.pinLabels === false) continue;
+      const g = document.querySelector(`.cs-comp[data-id="${c.id}"] .cs-pin-labels`);
+      const n = g ? g.querySelectorAll('text.cs-pin-lbl').length : 0;
+      if (n !== d.pins.length) out.push(`${c.type}: ${n}/${d.pins.length}`);
+    }
+    return out;
+  });
+  expect(missing).toEqual([]);
+  const sample = await page.locator('.cs-comp[data-id] .cs-pin-labels text.cs-pin-lbl').first().evaluate((t) => getComputedStyle(t).fontSize);
+  expect(parseFloat(sample)).toBeGreaterThanOrEqual(8);
+});

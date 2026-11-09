@@ -148,7 +148,8 @@ const vibmotor = {
 
 // ---------- TP4056 charger with DW01 protection ----------
 const tp4056 = {
-  type: 'tp4056', name: 'TP4056 Charger (protected)', category: 'Power', w: 130, h: 56,
+  type: 'tp4056',
+  pinLabels: false, name: 'TP4056 Charger (protected)', category: 'Power', w: 130, h: 56,
   pins: [
     { id: 'IN+', label: 'IN+', x: 0, y: 12, dir: 'l', title: 'IN+ — 5 V charging input (the USB socket feeds it too)' },
     { id: 'IN-', label: 'IN−', x: 0, y: 44, dir: 'l', title: 'IN− — charging input ground' },
@@ -177,7 +178,8 @@ const tp4056 = {
 
 // ---------- 3.3 V buck-boost regulator ----------
 const buckboost = {
-  type: 'buckboost', name: 'Buck-Boost Regulator 3.3 V', category: 'Power', w: 76, h: 46,
+  type: 'buckboost',
+  pinLabels: false, name: 'Buck-Boost Regulator 3.3 V', category: 'Power', w: 76, h: 46,
   pins: [
     { id: 'VIN', label: 'VIN', x: 0, y: 12, dir: 'l', title: 'VIN — 1.8 to 5.5 V in' },
     { id: 'GND', label: 'GND', x: 0, y: 34, dir: 'l' },
@@ -343,7 +345,8 @@ const c3Pins = [
 ];
 c3Pins.forEach((p) => { p.title = p.kind === 'gpio' ? `GPIO${p.gpio}${C3_NOTE[p.gpio] ? ` — ${C3_NOTE[p.gpio]}` : ''}` : p.kind === 'gnd' ? 'GND' : p.id === '5V' ? '5V — USB 5 V, or a 3.5–5.5 V input' : '3V3 — 3.3 V (output on USB, or feed 3.3 V here from a battery regulator)'; });
 const esp32c3 = {
-  type: 'esp32c3', name: 'ESP32-C3 Super Mini', category: 'Boards', w: C3_W, h: 176, fixed: true, board: true,
+  type: 'esp32c3',
+  pinLabels: false, name: 'ESP32-C3 Super Mini', category: 'Boards', w: C3_W, h: 176, fixed: true, board: true,
   pins: c3Pins,
   props: { power: 'usb' },
   structural: ['power'],
