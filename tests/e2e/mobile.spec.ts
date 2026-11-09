@@ -63,3 +63,17 @@ test('a battery-powered glove runs on a phone', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => document.querySelector('#serialOut')?.textContent ?? ''), { timeout: 5000 }).toContain('calibrated');
   expect((await partState(page, 'esp32c3'))[0].off).toBe(false);
 });
+
+test('tapping a part in the Parts list adds it and brings the diagram into view', async ({ page }) => {
+  await loadExample(page, 'blink');
+  await page.locator('.tabs .tab', { hasText: 'Parts' }).first().tap();
+  const n0 = await page.evaluate(() => window.CatSim.App.project.components.length);
+  await page.locator('#paletteList .part[data-type="led"]').tap();
+  expect(await page.evaluate(() => window.CatSim.App.project.components.length)).toBe(n0 + 1);
+  await expect(page.locator('#toast')).toContainText('Added LED');
+  // the diagram (where the new part landed) is on screen, not scrolled away
+  await expect.poll(async () => {
+    const b = await page.locator('#stage').boundingBox();
+    return b ? b.y < 400 && b.y + b.height > 100 : false;
+  }, { timeout: 3000 }).toBe(true);
+});

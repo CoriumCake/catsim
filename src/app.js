@@ -541,7 +541,15 @@ const App = {
       return `<svg viewBox="-8 -8 ${d.w + 16} ${d.h + 16}" preserveAspectRatio="xMidYMid meet">${d.render(c, { b: 0, angle: 90, f: 0 })}${pins}</svg>`;
     };
     list.innerHTML = PALETTE.map((g) => `<div class="palette-group"><div class="palette-cat">${g.cat}</div>${g.types.map((t) => `<button class="part" draggable="true" data-type="${t}" title="Add ${esc(DEFS[t].name)}">${draw(t)}<span>${esc(DEFS[t].name)}</span></button>`).join('')}</div>`).join('');
-    list.addEventListener('click', (e) => { const b = e.target.closest('.part'); if (b) this.addComponent(b.dataset.type); });
+    list.addEventListener('click', (e) => {
+      const b = e.target.closest('.part'); if (!b) return;
+      this.addComponent(b.dataset.type);
+      // on a phone the diagram is above the Parts list: bring it into view so the new part can be seen and moved
+      if (window.matchMedia('(max-width: 900px)').matches && !DEFS[b.dataset.type].board) {
+        $('#stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.toast(`Added ${DEFS[b.dataset.type].name}: drag it into place, or tap it to set it`);
+      }
+    });
     list.addEventListener('dragstart', (e) => { const b = e.target.closest('.part'); if (b) { e.dataTransfer.setData('text/catsim-part', b.dataset.type); e.dataTransfer.effectAllowed = 'copy'; } });
     $('#paletteSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
