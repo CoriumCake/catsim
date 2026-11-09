@@ -24,7 +24,8 @@ export function oledPath(d, y0 = 0, y1 = d.h, ox = 0, oy = 0) {
   return p;
 }
 const oled = {
-  type: 'oled', name: 'OLED 128×64 (SSD1306, I2C)', category: 'Output', w: 140, h: 100,
+  type: 'oled',
+  pinLabels: false, name: 'OLED 128×64 (SSD1306, I2C)', category: 'Output', w: 140, h: 100,
   pins: [
     { id: 'GND', label: 'GND', x: 52, y: 0, dir: 't' },
     { id: 'VCC', label: 'VCC', x: 64, y: 0, dir: 't', title: 'VCC — 3.3 V or 5 V' },
@@ -169,7 +170,8 @@ const hcsr04 = {
 // ---------- DS3231 RTC (ZS-042 board) ----------
 const ds3231 = {
   optional: ['32K', 'SQW'],
-  type: 'ds3231', name: 'Real-Time Clock (DS3231)', category: 'Sensors', w: 100, h: 84,
+  type: 'ds3231',
+  pinLabels: false, name: 'Real-Time Clock (DS3231)', category: 'Sensors', w: 100, h: 84,
   pins: [
     { id: '32K', label: '32K', x: 0, y: 12, dir: 'l', title: '32K — 32.768 kHz output (not simulated)' },
     { id: 'SQW', label: 'SQW', x: 0, y: 24, dir: 'l', title: 'SQW — square wave / alarm output (not simulated)' },
@@ -326,7 +328,8 @@ const mpu6050 = {
 // ---------- 16×2 LCD, parallel (HD44780) ----------
 const LCDP_PINS = ['VSS', 'VDD', 'V0', 'RS', 'RW', 'E', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'A', 'K'];
 const lcdParallel = {
-  type: 'lcd_parallel', name: 'LCD 16×2 (parallel)', category: 'Output', w: 236, h: 104,
+  type: 'lcd_parallel',
+  pinLabels: false, name: 'LCD 16×2 (parallel)', category: 'Output', w: 236, h: 104,
   pins: LCDP_PINS.map((id, i) => ({ id, label: id, x: 28 + i * 12, y: 0, dir: 't', title: { VSS: 'VSS — GND', VDD: 'VDD — 5 V', V0: 'V0 — contrast: a 10 kΩ pot wiper (or GND)', RS: 'RS — register select', RW: 'RW — read/write: tie to GND', E: 'E — enable', A: 'A — backlight + (through 220 Ω to 5 V)', K: 'K — backlight − (GND)' }[id] || `${id} — data${['D0', 'D1', 'D2', 'D3'].includes(id) ? ' (unused in 4-bit mode)' : ''}` })),
   props: {},
   optional: ['D0', 'D1', 'D2', 'D3', 'A', 'K', 'V0'],

@@ -203,6 +203,7 @@ select.btn { padding-right: 6px; }
 .cs-dark { fill: #374151; }
 .cs-part-lbl { font: 9px var(--mono); fill: #6b5a3a; text-anchor: middle; }
 .cs-lcd { font: 15px var(--mono); }
+.cs-pin-lbl { font: 700 9px var(--sans); fill: #2b2f36; paint-order: stroke; stroke: #fff8ee; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
 .cs-key { font: 700 13px var(--mono); text-anchor: middle; pointer-events: none; }
 .cs-key-sm { font: 700 7px var(--mono); text-anchor: middle; pointer-events: none; }
 .cs-pulse { animation: pulse .35s infinite alternate; }
