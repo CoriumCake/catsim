@@ -271,8 +271,13 @@ select.btn { padding-right: 6px; }
   .proj-name { flex: 1 1 0; width: auto; min-width: 0; max-width: none; }
   .tb-sim { flex: 1 1 100%; }
   /* the sidebar (Parts, code) is a sheet over the bottom of the screen; the hamburger opens and closes it */
-  .side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 80vh; z-index: 30; border-radius: 16px 16px 0 0; box-shadow: 0 -12px 32px rgba(0, 0, 0, .22); background: var(--panel); }
+  .side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 50vh; z-index: 30; border-radius: 16px 16px 0 0; box-shadow: 0 -12px 32px rgba(0, 0, 0, .22); background: var(--panel); display: flex; flex-direction: column; }
+  .side > .sheet-handle { display: flex; }
+  .side > .tabpane, .side > .tabs { flex: none; }
+  .side > .tabpane.active { flex: 1 1 auto; min-height: 0; }
 }
+.sheet-handle { display: none; justify-content: center; align-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
+.sheet-handle span { width: 42px; height: 5px; border-radius: 3px; background: var(--line-2); }
 
 /* oscilloscope */
 .scope { overflow: hidden; background: var(--panel); }

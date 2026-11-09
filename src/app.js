@@ -73,7 +73,7 @@ const App = {
     });
     this.plotter = new Plotter($('#plotCanvas'), $('#plotLegend'), $('#plotEmpty'));
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
-    this.buildPalette(); this.bindUi(); this.bindSplitters();
+    this.buildPalette(); this.bindUi(); this.bindSplitters(); this.bindSheetHandle();
     this.load(await this.initialProject());
     this.editor.onChange(() => { if (this._loadingEditor) return; this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() }); this.save(); });
     requestAnimationFrame(() => this.frame());
@@ -181,7 +181,30 @@ const App = {
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
   restartSim() { this.stop(); this.start(); },
   /** Show or hide the left sidebar (editor, parts, terminal…). The choice is remembered. */
+  /** Phones: the sheet's height. Closed, half the screen (the default) or full (under the top bar). */
+  setSheetHeight(px) { const s = $('#side'); s.style.height = px == null ? '' : `${Math.round(px)}px`; },
+  /** Drag the sheet's handle: up enlarges it to the full screen, down collapses it (past a quarter of its height it closes). */
+  bindSheetHandle() {
+    const h = $('#sheetHandle'), side = $('#side');
+    let drag = null;
+    const full = () => window.innerHeight - $('.topbar').getBoundingClientRect().bottom;
+    h.addEventListener('pointerdown', (e) => { drag = { y: e.clientY, h: side.getBoundingClientRect().height }; h.setPointerCapture(e.pointerId); });
+    h.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      this.setSheetHeight(Math.min(full(), Math.max(0, drag.h - (e.clientY - drag.y))));
+    });
+    const end = () => {
+      if (!drag) return;
+      const cur = side.getBoundingClientRect().height, half = window.innerHeight / 2, top = full();
+      drag = null;
+      if (cur < half * 0.5) { this.setSheetHeight(null); this.toggleSidebar(true, false); return; } // closed
+      this.setSheetHeight(cur > (half + top) / 2 ? top : half); // snap: half or full
+    };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+  },
   toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden'), remember = true) {
+    if (hidden) this.setSheetHeight(null); // the next opening starts at half the screen again
     $('#workspace').classList.toggle('side-hidden', hidden);
     const b = $('#btnSide');
     b.setAttribute('aria-expanded', String(!hidden));

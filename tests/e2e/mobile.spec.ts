@@ -94,3 +94,30 @@ test('tapping a part in the Parts list adds it and brings the diagram into view'
     return b ? b.y < 400 && b.y + b.height > 100 : false;
   }, { timeout: 3000 }).toBe(true);
 });
+
+test('the sheet opens at half the screen; drag its handle up to fill the screen and down to collapse it', async ({ page }) => {
+  await loadExample(page, 'blink');
+  await page.locator('#btnSide').tap();
+  const side = page.locator('#side'), handle = page.locator('#sheetHandle');
+  await expect(side).toBeVisible();
+  const h0 = (await side.boundingBox())!.height;
+  expect(h0).toBeGreaterThan(844 * 0.45); expect(h0).toBeLessThan(844 * 0.55);
+  const hb = (await handle.boundingBox())!;
+  const drag = async (dy: number) => {
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + dy / 2, { steps: 5 });
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + dy, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag(-400); // up
+  const h1 = (await side.boundingBox())!.height;
+  expect(h1).toBeGreaterThan(844 * 0.75); // fills the screen below the top bar, so the hamburger stays reachable
+  const hb2 = (await handle.boundingBox())!;
+  await page.mouse.move(hb2.x + hb2.width / 2, hb2.y + hb2.height / 2); await page.mouse.down();
+  await page.mouse.move(hb2.x + hb2.width / 2, hb2.y + hb2.height / 2 + 600, { steps: 10 });
+  await page.mouse.up(); // down, well past the bottom
+  await expect(side).toBeHidden();
+  await page.locator('#btnSide').tap();
+  await expect(side).toBeVisible();
+  expect(Math.round((await side.boundingBox())!.height)).toBeGreaterThan(844 * 0.45);
+});
