@@ -51,7 +51,11 @@ export class Plotter {
     const ink = css.getPropertyValue('--text').trim() || '#222', grid = css.getPropertyValue('--line').trim() || '#e5e7eb';
     x.clearRect(0, 0, W, H);
     this.empty.hidden = this.series.size > 0;
-    this.legend.innerHTML = [...this.series.keys()].map((k, i) => `<span><i style="background:${COLORS[i]}"></i>${k.replace(/[<>&]/g, '')}</span>`).join('');
+    this.legend.textContent = '';
+    [...this.series.keys()].forEach((k, i) => {
+      const s = document.createElement('span'), dot = document.createElement('i');
+      dot.style.background = COLORS[i]; s.append(dot, k); this.legend.appendChild(s);
+    });
     if (!this.series.size) return;
     let lo = Infinity, hi = -Infinity, n = 0;
     for (const s of this.series.values()) { for (const v of s) { if (v < lo) lo = v; if (v > hi) hi = v; } n = Math.max(n, s.length); }

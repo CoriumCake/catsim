@@ -545,3 +545,10 @@ test('the sketch downloads as an .ino for the Arduino IDE, with the board and wi
   expect(text).toContain('c3:IO0');
   expect(text).toContain('void setup()');
 });
+
+test('the parallel 16×2 LCD shows the sketch text in the app', async ({ page }) => {
+  await loadExample(page, 'uno-lcd'); await startSim(page);
+  await expect(page.locator('.cs-comp[data-id="lcd1"] text.cs-lcd').first()).toHaveText(/hello, world!/, { timeout: 5000 });
+  const st = await partState(page, 'lcd_parallel');
+  expect(st[0].d).toMatchObject({ kind: 'lcd', backlight: true });
+});

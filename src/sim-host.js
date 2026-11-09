@@ -26,6 +26,9 @@ const cleanDev = (d) => {
       out[id] = { kind: 'pixels', rgb: v.rgb.slice(0, 64).map((x) => (typeof x === 'number' && Number.isFinite(x) ? x & 0xffffff : 0)) };
     } else if (v.kind === 'seg7' && Array.isArray(v.segs)) {
       out[id] = { kind: 'seg7', segs: [0, 1, 2, 3].map((i) => (finite(v.segs[i]) | 0) & 0xff), bright: Math.max(0, Math.min(7, finite(v.bright, 7) | 0)), on: v.on !== false };
+    } else if (v.kind === 'lcd' && Array.isArray(v.buf)) { // parallel 16×2 LCD (LiquidCrystal)
+      const buf = [0, 1].map((r) => Array.from({ length: 16 }, (_, i) => { const ch = Array.isArray(v.buf[r]) ? v.buf[r][i] : ' '; return typeof ch === 'string' && ch.length ? [...ch][0] : ' '; }));
+      out[id] = { kind: 'lcd', buf, on: v.on !== false, backlight: v.backlight === true, contrast: Math.max(0, Math.min(1, finite(v.contrast, 1))) };
     } else if (v.kind === 'stepper') {
       out[id] = { kind: 'stepper', angle: finite(v.angle), coils: [0, 1, 2, 3].map((i) => (Array.isArray(v.coils) && v.coils[i] ? 1 : 0)) };
     }
