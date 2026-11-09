@@ -79,6 +79,8 @@ const App = {
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
     try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
+    // on a phone the sidebar is a sheet that opens from the hamburger: it starts closed, so the diagram is on screen
+    if (window.matchMedia('(max-width: 900px)').matches) this.toggleSidebar(true, false);
     try { if (localStorage.getItem(DOCK_STORE)) this.toggleDock(true); } catch (_) { /* ignore */ }
     if (v === '3d') this.setView('3d');
     window.addEventListener('resize', () => this.editor.refresh());
@@ -179,12 +181,13 @@ const App = {
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
   restartSim() { this.stop(); this.start(); },
   /** Show or hide the left sidebar (editor, parts, terminal…). The choice is remembered. */
-  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden')) {
+  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden'), remember = true) {
     $('#workspace').classList.toggle('side-hidden', hidden);
     const b = $('#btnSide');
     b.setAttribute('aria-expanded', String(!hidden));
     b.title = hidden ? 'Show the sidebar (Ctrl+B)' : 'Hide the sidebar (Ctrl+B)';
-    try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ }
+    if (remember) { try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ } }
+    if (!hidden && window.matchMedia('(max-width: 900px)').matches) this.showTab('editor', 'partsPane'); // a phone's sheet opens on the Parts
     if (!hidden) requestAnimationFrame(() => this.editor.refresh());
   },
   /** Fold the Terminal/MQTT/Scope/Console panel down to its tab bar, or open it again. Remembered. */
@@ -546,6 +549,7 @@ const App = {
       this.addComponent(b.dataset.type);
       // on a phone the diagram is above the Parts list: bring it into view so the new part can be seen and moved
       if (window.matchMedia('(max-width: 900px)').matches && !DEFS[b.dataset.type].board) {
+        this.toggleSidebar(true, false); // the sheet closes, so the diagram is what you see next
         $('#stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
         this.toast(`Added ${DEFS[b.dataset.type].name}: drag it into place, or tap it to set it`);
       }

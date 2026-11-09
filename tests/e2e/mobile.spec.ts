@@ -64,13 +64,30 @@ test('a battery-powered glove runs on a phone', async ({ page }) => {
   expect((await partState(page, 'esp32c3'))[0].off).toBe(false);
 });
 
+test('the hamburger opens the sidebar at the top of the screen, without scrolling to the bottom', async ({ page }) => {
+  await loadExample(page, 'blink');
+  await expect(page.locator('#workspace .side')).toBeHidden();
+  await page.locator('#btnSide').tap();
+  const side = page.locator('#workspace .side');
+  await expect(side).toBeVisible();
+  const b = await side.boundingBox();
+  expect(b!.y).toBeGreaterThanOrEqual(0);
+  expect(b!.y + b!.height).toBeLessThanOrEqual(844);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.locator('#paletteList .part[data-type="led"]')).toBeVisible(); // Parts is what opens first
+  await page.locator('#btnSide').tap(); // and the hamburger closes it again
+  await expect(side).toBeHidden();
+});
+
 test('tapping a part in the Parts list adds it and brings the diagram into view', async ({ page }) => {
   await loadExample(page, 'blink');
+  await page.locator('#btnSide').tap();
   await page.locator('.tabs .tab', { hasText: 'Parts' }).first().tap();
   const n0 = await page.evaluate(() => window.CatSim.App.project.components.length);
   await page.locator('#paletteList .part[data-type="led"]').tap();
   expect(await page.evaluate(() => window.CatSim.App.project.components.length)).toBe(n0 + 1);
   await expect(page.locator('#toast')).toContainText('Added LED');
+  await expect(page.locator('#workspace .side')).toBeHidden(); // the sheet closes
   // the diagram (where the new part landed) is on screen, not scrolled away
   await expect.poll(async () => {
     const b = await page.locator('#stage').boundingBox();

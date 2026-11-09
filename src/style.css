@@ -270,6 +270,8 @@ select.btn { padding-right: 6px; }
   .brand { flex: none; white-space: nowrap; height: auto; }
   .proj-name { flex: 1 1 0; width: auto; min-width: 0; max-width: none; }
   .tb-sim { flex: 1 1 100%; }
+  /* the sidebar (Parts, code) is a sheet over the bottom of the screen; the hamburger opens and closes it */
+  .side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 80vh; z-index: 30; border-radius: 16px 16px 0 0; box-shadow: 0 -12px 32px rgba(0, 0, 0, .22); background: var(--panel); }
 }
 
 /* oscilloscope */
