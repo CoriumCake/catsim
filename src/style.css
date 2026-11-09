@@ -34,11 +34,9 @@ code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 4px; bor
 /* ---------- top bar ---------- */
 .topbar { display: flex; align-items: center; gap: 12px; padding: 0 0 0 10px; height: 56px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .brand { display: flex; align-items: center; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); height: 100%; }
-.brand svg rect { fill: var(--accent); }
-.brand svg path { fill: #1c2230; }
-.brand svg circle { fill: var(--accent); }
+.brand-mark { flex: none; display: block; }
 .brand-name { font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
-.brand-name b { color: var(--accent); }
+.brand-name b { color: #F08A3E; } /* the logo's orange, a shade deeper for text */
 .chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff4d1; color: #8a6400; border: 1px solid #f3dc94; }
 .proj-name { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; width: 200px; min-width: 90px; flex: 0 1 auto; color: var(--text); font-weight: 600; }
 .proj-name:hover, .proj-name:focus { border-color: var(--line-2); outline: none; background: var(--panel-2); }

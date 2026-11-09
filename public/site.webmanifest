@@ -1,0 +1,26 @@
+{
+  "name": "CatSim \u2014 ESP32 & Arduino Simulator",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#FFF4EC",
+  "background_color": "#FFF4EC",
+  "display": "standalone",
+  "short_name": "CatSim",
+  "start_url": "/"
+}
