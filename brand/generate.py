@@ -37,7 +37,7 @@ def symbol_parts():
       'eye': circ(84,140,13)+" "+circ(84,140,5),          # a via: ring with a centre
       'half': f"{P(right)} {pad(158,124)} {pad(158,156)} {P(t1)} {P(t2)}",  # whisker traces knocked out
     }
-def symbol(bracket=DARK, accent=ORANGE, dx=0, dy=0):
+def symbol(bracket=ORANGE, accent=ORANGE, dx=0, dy=0):  # all orange: works on light and dark
     p=symbol_parts(); g=f'<g transform="translate({dx} {dy})">' if dx or dy else '<g>'
     return (g+f'<path fill="{bracket}" d="{p["bracket"]}"/>'
             f'<path fill="{accent}" d="{p["ear"]}"/>'
@@ -46,7 +46,7 @@ def symbol(bracket=DARK, accent=ORANGE, dx=0, dy=0):
 # small-size cut (16–32 px): solid left shard with the eye knocked out, no traces
 gl=89; sx=lambda y,b: b+(190-y)*0.5
 shard=[(28,140),(78,90),(90,62),(102,90),(sx(90,gl),90),(gl,190),(78,190)]
-def small(bracket=DARK, accent=ORANGE):
+def small(bracket=ORANGE, accent=ORANGE):
     return (f'<path fill="{bracket}" fill-rule="evenodd" d="{P(shard)} {circ(84,140,12)}"/>'
             f'<path fill="{accent}" d="{P(right)}"/>')
 # wordmark "CatSim": monoline, 45° chamfers like the mark; stroke 18, cap 100, x-height 76, baseline 200
@@ -69,11 +69,9 @@ def wordmark(cat_fill=DARK, sim_fill=ORANGE, dx=0, dy=0):
 if __name__ == '__main__':
     def out(name, body, vb="0 0 256 256", title='CatSim logo'): open(name, 'w').write(svg(title, body, vb))
     out('catsim-symbol.svg', symbol())
-    out('catsim-symbol-on-dark.svg', symbol(bracket=LIGHT))
     out('catsim-symbol-small.svg', small(), title='CatSim logo (small sizes)')
-    out('catsim-symbol-small-on-dark.svg', small(bracket=LIGHT), title='CatSim logo (small sizes)')
     wm, w = wordmark(dy=-64, dx=4); out('catsim-wordmark.svg', wm, f"0 0 {w+8} 120", 'CatSim wordmark')
     gap = 40; total = 228 + gap + w + 28
     out('catsim-horizontal.svg', symbol() + wordmark(dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
-    out('catsim-horizontal-on-dark.svg', symbol(bracket=LIGHT) + wordmark(cat_fill=LIGHT, dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
+    out('catsim-horizontal-on-dark.svg', symbol() + wordmark(cat_fill=LIGHT, dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
     print('wrote the CatSim logo SVGs')
