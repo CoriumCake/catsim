@@ -74,8 +74,8 @@ if __name__ == '__main__':
     gap = 40; total = 228 + gap + w + 28
     out('catsim-horizontal.svg', symbol() + wordmark(dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
     out('catsim-horizontal-on-dark.svg', symbol() + wordmark(cat_fill=LIGHT, dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
-    # tab icon: the mark on an ink circle, so it reads on light and dark tab bars
+    # tab icon: the mark in ink on an orange circle, so it pops on light and dark tab bars
     sc = 1.08; off = 128 - 128 * sc
-    out('web/favicon.svg', f'<circle cx="128" cy="128" r="128" fill="{DARK}"/>'
-        + symbol().replace('<g>', f'<g transform="translate({off:.2f} {off:.2f}) scale({sc})">', 1), title='CatSim')
+    out('web/favicon.svg', f'<circle cx="128" cy="128" r="128" fill="{ORANGE}"/>'
+        + symbol(bracket=DARK, accent=DARK).replace('<g>', f'<g transform="translate({off:.2f} {off:.2f}) scale({sc})">', 1), title='CatSim')
     print('wrote the CatSim logo SVGs')
