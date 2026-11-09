@@ -1,5 +1,6 @@
 /* CatSim — diagram canvas: parts, wires, pan/zoom, selection, wiring. */
 import { DEFS } from './components.js';
+import { breadboardContacts, snapToBreadboard } from './contacts.js';
 import { esc } from './util.ts';
 import { RouteGrid, roundedPath } from './router.ts';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -86,8 +87,9 @@ class Canvas {
   renderAll() {
     this.cache.clear();
     this.compsG.textContent = '';
-    const connected = new Set(this.project.wires.flatMap((w) => [w.from, w.to]));
-    for (const c of this.project.components) {
+    const connected = new Set([...this.project.wires.flatMap((w) => [w.from, w.to]), ...breadboardContacts(this.project, DEFS).flat()]);
+    // breadboards underneath, so parts plugged into them stay visible
+    for (const c of [...this.project.components].sort((a, b) => (a.type === 'breadboard' ? 0 : 1) - (b.type === 'breadboard' ? 0 : 1))) {
       const d = this.def(c); if (!d) continue;
       const g = document.createElementNS(SVGNS, 'g');
       g.setAttribute('class', `cs-comp${d.interactive ? ' cs-interactive' : ''}`);
@@ -221,8 +223,16 @@ class Canvas {
       const d = this.def(c);
       this.select({ kind: 'comp', id: c.id });
       if (this.app.sim.running && d.interactive === 'press') {
-        this.pressing = c.id; this.app.sim.setPressed(c.id, true); this.renderDynamic();
+        this.pressing = c.id; this.pressKey = undefined; this.app.sim.setPressed(c.id, true); this.renderDynamic();
         return;
+      }
+      if (this.app.sim.running && d.interactive === 'toggle') { // slide switch: a click flips it
+        c.props.on = !c.props.on; this.app.sim.syncProject(); this.app.save(); this.renderDynamic(); this.app.onSelection(this.sel);
+        return;
+      }
+      if (this.app.sim.running && d.interactive === 'keys') { // keypad / remote: which key was clicked
+        const p = this.toLocal(e); const key = d.keyAt(c, p.x - c.x, p.y - c.y);
+        if (key) { this.pressing = c.id; this.pressKey = key; this.app.sim.setPressed(c.id, true, key); this.renderDynamic(); return; }
       }
       const p = this.toLocal(e);
       this.drag = { c, dx: p.x - c.x, dy: p.y - c.y, sx: e.clientX, sy: e.clientY, moved: false };
@@ -255,8 +265,16 @@ class Canvas {
   }
 
   onUp() {
-    if (this.pressing) { this.app.sim.setPressed(this.pressing, false); this.pressing = null; this.renderDynamic(); }
-    if (this.drag) { if (this.drag.moved) this.app.changed({ structure: false }); this.drag = null; }
+    if (this.pressing) { this.app.sim.setPressed(this.pressing, false, this.pressKey); this.pressing = null; this.pressKey = undefined; this.renderDynamic(); }
+    if (this.drag) {
+      if (this.drag.moved) {
+        const s = snapToBreadboard(this.project, DEFS, this.drag.c); // legs drop into the holes
+        if (s) { this.drag.c.x = s.x; this.drag.c.y = s.y; this.updateComp(this.drag.c); }
+        this.app.changed({ structure: false });
+        if (this.project.components.some((c) => c.type === 'breadboard')) this.renderAll();
+      }
+      this.drag = null;
+    }
     if (this.pan) { this.pan = null; this.svg.classList.remove('cs-panning'); }
   }
 }

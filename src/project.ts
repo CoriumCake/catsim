@@ -73,25 +73,15 @@ seen.add(id);
     wires,
   };
   if (src.wireStyle === 'tidy') out.wireStyle = 'tidy';
-  // compiled firmware for boards that run real machine code (Arduino Uno): Intel HEX text only
-  const cleanFw = (fw: unknown) => {
-    const f = fw as Record<string, unknown> | undefined;
-    if (f && typeof f === 'object' && typeof f.hex === 'string' && f.hex.length <= 200_000 && /^[:0-9A-Fa-f\r\n]*$/.test(f.hex)) {
-      return { name: String(typeof f.name === 'string' ? f.name : 'firmware.hex').slice(0, 120), hex: f.hex };
-    }
-    return undefined;
-  };
-  const fw = cleanFw(src.firmware);
-  if (fw) out.firmware = fw;
+  // (old projects may carry compiled Uno firmware: it is dropped, the board runs its sketch)
   // programs of the other boards
   const boards = comps.filter((c) => defs[c.type].board);
   const progs = src.programs && typeof src.programs === 'object' ? src.programs as Record<string, unknown> : {};
   for (const b of boards.slice(1)) {
     const pr = progs[b.id] as Record<string, unknown> | undefined;
     if (!pr || typeof pr !== 'object' || !Object.prototype.hasOwnProperty.call(progs, b.id)) continue;
-    const entry: { code?: string; firmware?: { name: string; hex: string } } = {};
+    const entry: { code?: string } = {};
     if (typeof pr.code === 'string') entry.code = pr.code.slice(0, MAX_CODE);
-    const f = cleanFw(pr.firmware); if (f) entry.firmware = f;
     (out.programs ??= {})[b.id] = entry;
   }
   return out;

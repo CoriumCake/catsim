@@ -3,16 +3,38 @@ import { INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN } from './pins.js';
 import { DEFS, ESP } from './components.js';
 import { transpile } from './transpiler.js';
 import { SimClock } from './clock.ts';
+import { createLibs, ESP_ONLY_LIBS, KNOWN_HEADERS, LIBRARY_LIST } from './libs/index.js';
+import { i2cCheck } from './libs/util.js';
+import { breadboardContacts } from './contacts.js';
+import { jsonScalar as J } from './libs/json.js';
 const STOP = { stop: true };
+const CHIPS_VCC = (d) => (d.chip ? d.chip.vcc : 'VCC');
+const CHIPS_GND = (d) => (d.chip ? d.chip.gnd : 'GND');
 const STRICT_RESERVED = new Set(['yield', 'let', 'static', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'eval', 'arguments', 'await', 'enum']);
+const ONBOARD_LED = { esp32: 2, uno: 13, esp32c3: 8 };
 const VALID_GPIO = new Set([0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39]);
+// Arduino Uno: D0–D13 are pins 0–13, A0–A5 are pins 14–19
+const UNO_PWM = new Set([3, 5, 6, 9, 10, 11]);
+const UNO_PWM_HZ = { 5: 980, 6: 980 }; // Timer0 pins; the others run at 490 Hz
+// ESP32-only API names: on an Uno they stop the sketch with an explanation instead of pretending to work
+const ESP_ONLY = ['WiFi', 'PubSubClient', 'WiFiClient', 'WiFiClientSecure', 'HTTPClient', 'ESP', 'Serial2', 'dacWrite', 'touchRead', 'hallRead',
+  'temperatureRead', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcAttachChannel', 'ledcWrite', 'ledcWriteTone', 'ledcDetach', 'ledcDetachPin',
+  'analogReadMilliVolts', 'analogReadResolution', 'analogSetAttenuation', 'analogSetPinAttenuation', 'analogSetWidth', 'analogWriteResolution',
+  'analogWriteFrequency', 'esp_random', ...ESP_ONLY_LIBS];
+// ESP32-C3 Super Mini: GPIO 0–10, 20, 21 on the headers (11–17 are the flash, 18/19 the USB port)
+const C3_GPIO = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21]);
+const C3_ADC1 = { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4 }, C3_ADC2 = { 5: 0 };
+// ESP32 features the C3 doesn't have
+const C3_MISSING = ['dacWrite', 'touchRead', 'hallRead', 'Serial2'];
 const DEVKIT_GPIO = new Set([1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39]);
 // Base constants are Number objects so Serial.print(x, BIN) can tell a base from a decimal count.
 const BASE = { BIN: new Number(2), OCT: new Number(8), DEC: new Number(10), HEX: new Number(16) };
 
 const mc = new MessageChannel(); const mcQueue = [];
 mc.port1.onmessage = () => { const f = mcQueue.shift(); if (f) f(); };
-const macrotask = () => new Promise((r) => { mcQueue.push(r); mc.port2.postMessage(0); });
+// (Node, in the tests: setImmediate — a MessagePort there drains in one go and would starve timers)
+const macrotask = typeof setImmediate === 'function' ? () => new Promise((r) => setImmediate(r))
+  : () => new Promise((r) => { mcQueue.push(r); mc.port2.postMessage(0); });
 
 function makeUF() {
   const p = new Map();
@@ -23,6 +45,17 @@ function makeUF() {
     return r;
   };
   return { find, union: (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) p.set(ra, rb); } };
+}
+
+/** UI state of a pressed part, with a short queue of key events ({ seq, key, down, t }). */
+function pressEvent(prev, on, key, t) {
+  const u = { ...(prev || {}), pressed: !!on };
+  if (key !== undefined && key !== null) {
+    u.key = on ? key : u.key;
+    const seq = (u.seq || 0) + 1; u.seq = seq;
+    u.events = [...(u.events || []), { seq, key: on ? key : (prev && prev.key) || key, down: !!on, t }].slice(-32);
+  }
+  return u;
 }
 
 function topicMatch(filter, topic) {
@@ -102,6 +135,8 @@ class Simulator {
     // With several boards the clock and the circuit are shared: only their owner resets them.
     this.ownsClock = true; this.ownsAnalog = true;
     this.boardId = undefined; // which board this runtime drives in the circuit (undefined = the only one)
+    this.boardType = 'esp32'; // 'uno': run the sketch with Arduino Uno pins, 16-bit int, 10-bit ADC and 5 V logic
+    this.nv = {}; // saved data (EEPROM, Preferences, RTC offset): set by the host before start, kept across resets
     this.resetHw();
   }
 
@@ -112,9 +147,12 @@ class Simulator {
     this.mqtt = { connected: false, clientId: '', host: '', subs: [], queue: [] };
     this.broker = { log: [], topics: new Map() };
     this.ledcPin = {}; this.ledcCh = {}; this.warned = new Set();
-    this.i2c = { sda: 21, scl: 22 }; this.adcBits = 12; this.pwmBits = 8;
+    const uno = this.boardType === 'uno';
+    this.i2c = uno ? { sda: 18, scl: 19 } : this.boardType === 'esp32c3' ? { sda: 8, scl: 9 } : { sda: 21, scl: 22 }; this.adcBits = uno ? 10 : 12; this.pwmBits = 8;
     this.lastYield = performance.now(); this.stoppedAt = 0;
     this._nets = null;
+    this.dev = {}; // state of parts driven by a library (OLED buffer, LED strip colors…), by component id
+    this.devState = {}; this.sonarArmed = new Set();
   }
 
   millis() { return this.running ? this.clock.millis() : this.stoppedAt; }
@@ -123,6 +161,47 @@ class Simulator {
   setSpeed(s) { this.clock.setSpeed(+s); }
   invalidate() { this._nets = null; }
   comp(id) { return this.app.project.components.find((c) => c.id === id); }
+
+  /** The sketch changed saved data (EEPROM commit, Preferences put, RTC adjust). */
+  nvChanged() { this.app.nvChanged?.(this.nv); }
+
+  /** Outputs changed: let parts that watch pin levels react (stepper coils, HC-SR04 trigger). Writes made in the
+   * same synchronous stretch of the sketch count as simultaneous (they are microseconds apart on a real board),
+   * so a motor never "sees" the half-written pattern between two digitalWrite() calls. */
+  pinsChanged() {
+    if (this._watchQueued || !this.nets().watch.length) return;
+    this._watchQueued = true;
+    queueMicrotask(() => { this._watchQueued = false; this.evalWatch(); });
+  }
+
+  evalWatch() {
+    const watch = this.nets().watch; if (!watch.length || !this.running) return;
+    for (const c of watch) {
+      const st = this.devState[c.id] || (this.devState[c.id] = { steps: 0, phase: null, trig: 0 });
+      if (c.type === 'hcsr04') {
+        if (!this.pinGpios(c, 'TRIG').length) continue;
+        const lv = this.pinLevel(c, 'TRIG') >= 0.5 ? 1 : 0;
+        if (st.trig === 1 && lv === 0) this.sonarArmed.add(c.id); // a HIGH pulse just ended: the module sends a ping
+        st.trig = lv;
+      } else if (c.type === 'stepper') {
+        const ins = ['IN1', 'IN2', 'IN3', 'IN4'];
+        if (!ins.some((p) => this.pinGpios(c, p).length)) continue; // driven by another board
+        const powered = this.powered(c);
+        const on = ins.map((p) => (powered && this.pinLevel(c, p) >= 0.5 ? 1 : 0));
+        // the rotor follows the magnetic field of the energised coils (A, B, C, D at 90° steps)
+        let x = 0, y = 0; on.forEach((v, k) => { if (v) { x += Math.cos((k * Math.PI) / 2); y += Math.sin((k * Math.PI) / 2); } });
+        if (Math.hypot(x, y) > 0.1) {
+          const a = (Math.atan2(y, x) * 180) / Math.PI;
+          if (st.phase == null) st.phase = a;
+          else {
+            const d = ((a - st.phase + 540) % 360) - 180;
+            if (Math.abs(Math.abs(d) - 180) > 1) { st.steps += d / 90; st.phase = a; } // opposite coils: no pull, the rotor stays
+          }
+        }
+        this.dev[c.id] = { kind: 'stepper', angle: (st.steps / 2048) * 360, coils: on };
+      }
+    }
+  }
 
   warnOnce(key, msg, level = 'warn') {
     if (this.warned.has(key)) return;
@@ -133,13 +212,15 @@ class Simulator {
   nets() {
     if (this._nets) return this._nets;
     const uf = makeUF(); const p = this.app.project;
-    const myBoard = (p.components.find((c) => DEFS[c.type] && DEFS[c.type].board && c.type === 'esp32') || {}).id;
+    const myBoard = (p.components.find((c) => DEFS[c.type] && DEFS[c.type].board && c.type === this.boardType) || {}).id;
     for (const c of p.components) {
       const d = DEFS[c.type]; if (!d) continue;
       for (const pin of d.pins) uf.find(c.id + ':' + pin.id);
       if (d.internal) for (const [a, b] of d.internal(c, this)) uf.union(c.id + ':' + a, c.id + ':' + b);
+      for (const [a, b] of d.bonded || []) uf.union(c.id + ':' + a, c.id + ':' + b);
     }
     for (const w of p.wires) uf.union(w.from, w.to);
+    for (const [a, b] of breadboardContacts(p, DEFS)) uf.union(a, b); // legs plugged into a breadboard
     const keyNet = new Map(); const info = new Map(); const gpioNet = new Map();
     for (const c of p.components) {
       const d = DEFS[c.type]; if (!d) continue;
@@ -155,15 +236,33 @@ class Simulator {
           if (pin.kind === 'gnd') n.gnd = true;
           else if (pin.kind === 'vcc') n.vcc = true;
           else if (pin.kind === 'gpio') {
-            if (mine && c.type === 'esp32') { n.gpios.push(pin.gpio); gpioNet.set(pin.gpio, n); } else n.foreign = true;
+            if (mine) { n.gpios.push(pin.gpio); gpioNet.set(pin.gpio, n); } else n.foreign = true;
           }
         }
         if (d.drive && d.drive[pin.id]) n.drivers.push({ c, fn: d.drive[pin.id] });
         if (d.analog && d.analog[pin.id]) n.analog.push({ c, fn: d.analog[pin.id] });
       }
     }
-    this._nets = { keyNet, info, gpioNet };
+    const watch = p.components.filter((c) => c.type === 'stepper' || c.type === 'hcsr04');
+    this._nets = { keyNet, info, gpioNet, watch };
+    if (this.running) this.checkWiring();
     return this._nets;
+  }
+
+  /** A part that is wired in but has a required pin left unconnected can't work: say which pin. */
+  checkWiring() {
+    const { info, keyNet } = this._nets;
+    for (const c of this.app.project.components) {
+      const d = DEFS[c.type]; if (!d || d.board || d.optional === true) continue;
+      const own = (k) => k.startsWith(c.id + ':');
+      const netOf = (p) => info.get(keyNet.get(c.id + ':' + p.id));
+      if (!d.pins.some((p) => (netOf(p)?.keys || []).some((k) => !own(k)))) continue; // not wired in at all
+      const required = d.dip ? d.pins.filter((p) => p.id === CHIPS_VCC(d) || p.id === CHIPS_GND(d)) : d.pins.filter((p) => !(d.optional || []).includes(p.id));
+      for (const p of required) {
+        if ((netOf(p)?.keys || []).some((k) => !own(k))) continue;
+        this.warnOnce(`unwired:${c.id}:${p.id}`, `${c.id}: pin ${p.label} isn't connected to anything${p.title ? ` (${p.title.replace(/^[^—]*—\s*/, '')})` : ''}, so the ${d.name} can't work properly.`);
+      }
+    }
   }
 
   netOf(key) { const n = this.nets(); return n.info.get(n.keyNet.get(key)); }
@@ -196,12 +295,28 @@ class Simulator {
       if (a != null) return a;
     }
     let v = this.level(this.netOfGpio(g), g);
-    if (v == null) v = (this.mode[g] === INPUT_PULLUP && g < 34) ? 1 : 0;
+    if (v == null) v = (this.mode[g] === INPUT_PULLUP && (g < 34 || this.boardType === 'uno')) ? 1 : 0;
     return v >= 0.5 ? 1 : 0;
   }
 
-  setPressed(id, on) {
-    this.ui[id] = { ...(this.ui[id] || {}), pressed: on };
+  /** A part was pressed or released; `key` names the key of a keypad or remote (its events are queued for the libraries). */
+  /** A module on this pin's net has its own pull-up (encoder CLK/DT, a sensor module's DO, I2C pull-ups). */
+  pulledByPart(pin) {
+    const n = this.netOfGpio(pin); if (!n) return false;
+    return n.keys.some((k) => { const [id, pid] = k.split(':'); const c = this.comp(id); return !!(c && (DEFS[c.type]?.pulled || []).includes(pid)); });
+  }
+
+  /** The sketch switched a pin on that has nothing wired to it (and no on-board LED): usually a wrong pin number. */
+  checkOutputWired(pin) {
+    if (pin === ONBOARD_LED[this.boardType] || this.warned.has('nc' + pin)) return;
+    const p = this.app.project; if (!p.components.some((c) => !DEFS[c.type]?.board)) return; // a bare board: nothing to check
+    const n = this.netOfGpio(pin);
+    if (n && n.keys.length > 1) return;
+    this.warnOnce('nc' + pin, `Pin ${pin} is set HIGH but nothing is wired to it. Check the pin number in your code against the wiring.`);
+  }
+
+  setPressed(id, on, key) {
+    this.ui[id] = pressEvent(this.ui[id], on, key, this.millis());
     this.invalidate(); this.pollInterrupts();
   }
 
@@ -243,8 +358,12 @@ class Simulator {
   async start(code) {
     this.stop(true);
     this.resetHw(); this.ui = {};
-    let js;
-    try { js = transpile(code).js; } catch (e) {
+    let js, unknown = [];
+    try {
+      const t = transpile(code, { board: this.boardType }); js = t.js;
+      unknown = t.includes.filter((h) => !KNOWN_HEADERS.has(h));
+      for (const h of unknown) this.app.log(`#include <${h}>: this library isn't available in CatSim, so its classes and functions don't exist. Available: ${LIBRARY_LIST}.`, 'warn');
+    } catch (e) {
       this.app.log(`Compile error${e.line ? ` (line ${e.line})` : ''}: ${e.message}`, 'error', e.line);
       return false;
     }
@@ -259,7 +378,7 @@ class Simulator {
       // eslint-disable-next-line no-new-func
       factory = new Function('__api', `"use strict"; return (async function(){ const { ${names.join(', ')} } = __api; { ${js}\n;return { setup: typeof setup === 'function' ? setup : null, loop: typeof loop === 'function' ? loop : null }; } })();`);
     } catch (e) {
-      this.app.log(`Compile error: ${e.message}. CatSim supports a subset of Arduino C++.`, 'error');
+      this.app.log(`Compile error: ${e.message}. ${unknown.length ? `This is probably the unsupported library <${unknown[0]}>.` : 'CatSim supports a subset of Arduino C++.'}`, 'error');
       console.debug('[CatSim] transpiled sketch:\n' + js);
       return false;
     }
@@ -267,6 +386,15 @@ class Simulator {
     this.running = true; this.lastYield = performance.now();
     if (this.analog && this.ownsAnalog) this.analog.reset();
     this.app.onSimState(true);
+    this._factory = factory; this.halted = false; this.powerWarned = false;
+    // a battery-powered board only starts when its supply is up
+    // (with several boards the shared circuit is not complete yet here: the first tick checks them)
+    if (this.analog && this.ownsAnalog) { this.touch(); if (this.checkPower()) return true; }
+    return this.run(factory, runId, api);
+  }
+
+  /** Run setup() and loop() until stopped (runId changes). */
+  async run(factory, runId, api) {
     try {
       const mod = await factory(api);
       if (!mod.setup || !mod.loop) throw new Error('The sketch must define both setup() and loop()');
@@ -281,6 +409,37 @@ class Simulator {
       if (this.runId === runId) this.stop();
     }
     return true;
+  }
+
+  /** Board powered from its pins: stop the sketch when the supply drops, run it again from setup() when it is back
+   * (like a real power-on reset). Returns true when the board is now off. */
+  checkPower() {
+    if (!this.running || !this.analog || !this.analog.boardSupply) return false;
+    const v = this.analog.boardSupply(this.boardId);
+    const th = 2.7; // brown-out level
+    if (v == null) { if (this.halted) this.reboot(); return false; }
+    if (!this.halted && v < th) {
+      this.halted = true; this.runId++;
+      for (const s of this.sleeps) s.reject(STOP);
+      this.sleeps.clear();
+      this.mode = {}; this.out = {}; this.pwm = {}; this.servo = {}; this.tone = {}; this.dac = {}; this.ledcPin = {}; this.ledcCh = {};
+      this.interrupts = []; this.dev = {}; this.lcd = null; this.mqtt.connected = false; this.wifi.status = 0;
+      const rail = this.boardType === 'uno' ? '5V' : '3V3';
+      this.app.log(`The board has no power (its ${rail} rail is at ${v.toFixed(2)} V): the sketch stopped. It restarts when the power comes back.`, this.powerWarned ? 'info' : 'warn');
+      this.powerWarned = true;
+      this.touch();
+      return true;
+    }
+    if (this.halted && v >= th + 0.1) { this.reboot(); return false; }
+    return this.halted;
+  }
+
+  reboot() {
+    if (!this.halted || !this._factory) return;
+    this.halted = false;
+    this.app.log('Power is back: the board restarts and runs setup() again.', 'info');
+    const runId = ++this.runId;
+    this.run(this._factory, runId, this.createApi(runId));
   }
 
   stop(silent) {
@@ -306,8 +465,20 @@ class Simulator {
         if (sim.runId === runId && sim.running) { sim.lastYield = performance.now(); resolve(); } else reject(STOP);
       });
     });
+    const uno = sim.boardType === 'uno';
+    const c3 = sim.boardType === 'esp32c3';
     const gpioCheck = (pin, what) => {
       pin = +pin;
+      if (uno) {
+        if (!(Number.isInteger(pin) && pin >= 0 && pin <= 19)) { sim.warnOnce('inv' + pin, `Pin ${pin} does not exist on the Arduino Uno (${what}): use 0–13 or A0–A5.`, 'error'); return false; }
+        if ((pin === 0 || pin === 1) && sim.baud) sim.warnOnce('ser' + pin, `Pin ${pin} is the Uno's USB serial ${pin ? 'TX' : 'RX'} line, which Serial is using.`);
+        return true;
+      }
+      if (c3) {
+        if (pin >= 11 && pin <= 17) { sim.warnOnce('flash' + pin, `GPIO${pin} is wired to the SPI flash on the ESP32-C3 (${what}) — use 0–10, 20 or 21.`, 'error'); return false; }
+        if (!C3_GPIO.has(pin)) { sim.warnOnce('inv' + pin, `GPIO${pin} is not on the ESP32-C3 Super Mini's headers (${what}): use 0–10, 20 or 21.`, 'error'); return false; }
+        return true;
+      }
       if (pin >= 6 && pin <= 11) { sim.warnOnce('flash' + pin, `GPIO${pin} is wired to the SPI flash on ESP32 — using it will crash a real board.`, 'error'); return false; }
       if (!VALID_GPIO.has(pin)) { sim.warnOnce('inv' + pin, `GPIO${pin} does not exist on the ESP32 (${what}).`, 'error'); return false; }
       if (!DEVKIT_GPIO.has(pin)) sim.warnOnce('nb' + pin, `GPIO${pin} is not broken out on the 30-pin DevKit V1 board.`);
@@ -315,6 +486,7 @@ class Simulator {
     };
     const setPwm = (pin, frac) => {
       sim.mode[pin] = OUTPUT; sim.pwm[pin] = Math.min(1, Math.max(0, frac));
+      if (uno) sim.ledcPin[pin] = { freq: UNO_PWM_HZ[pin] || 490 };
       sim.touch();
     };
 
@@ -441,7 +613,10 @@ class Simulator {
     }
 
     class Servo {
-      attach(pin) { pin = +pin; gpioCheck(pin, 'Servo'); this.pin = pin; sim.mode[pin] = OUTPUT; if (sim.servo[pin] == null) sim.servo[pin] = 90; sim.touch(); return 1; }
+      attach(pin) {
+        pin = +pin; gpioCheck(pin, 'Servo'); this.pin = pin;
+        for (const c of sim.app.project.components) if (c.type === 'servo' && sim.pinGpios(c, 'SIG').includes(pin) && !sim.powered(c, 'V+', 'GND')) sim.warnOnce('servop' + c.id, `${c.id} has no power: wire its V+ (red) to 5 V (VIN) and GND (brown) to GND, or it won't move.`);
+        sim.mode[pin] = OUTPUT; if (sim.servo[pin] == null) sim.servo[pin] = 90; sim.touch(); return 1; }
       write(a) { if (this.pin == null) return; a = +a; if (a > 200) return this.writeMicroseconds(a); sim.servo[this.pin] = Math.min(180, Math.max(0, a)); sim.touch(); }
       writeMicroseconds(us) { this.write(((+us - 544) / (2400 - 544)) * 180); }
       read() { return Math.round(sim.servo[this.pin] ?? 90); }
@@ -453,7 +628,7 @@ class Simulator {
         if (!sim.lcd) sim.lcd = { cols: 16, rows: 2, buf: [], cx: 0, cy: 0, backlight: false, display: true };
         this.s = sim.lcd; this.clear();
       }
-      init() { this.clear(); } begin() { this.clear(); }
+      init() { this.clear(); i2cCheck(sim, 'lcd', 'LCD'); } begin() { this.clear(); i2cCheck(sim, 'lcd', 'LCD'); }
       clear() { this.s.buf = [0, 1].map(() => Array(16).fill(' ')); this.s.cx = 0; this.s.cy = 0; }
       home() { this.s.cx = 0; this.s.cy = 0; }
       setCursor(c, r) { this.s.cx = Math.trunc(c); this.s.cy = Math.trunc(r); }
@@ -490,13 +665,13 @@ class Simulator {
       },
       __i: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : v),
       // integer types: wrap to the type's width like C (non-numbers, e.g. a char string, pass through)
-      __i32: (v) => (typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) | 0 : v) : typeof v === 'boolean' ? +v : v),
-      __u32: (v) => (typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) >>> 0 : v) : typeof v === 'boolean' ? +v : v),
-      __i16: (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 16) >> 16 : typeof v === 'boolean' ? +v : v),
-      __u16: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xffff : typeof v === 'boolean' ? +v : v),
-      __i8: (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 24) >> 24 : v),
-      __u8: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xff : typeof v === 'boolean' ? +v : v),
-      __b: (v) => (typeof v === 'number' || typeof v === 'boolean' ? !!v : v),
+      __i32: (v) => (v = J(v), typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) | 0 : v) : typeof v === 'boolean' ? +v : v),
+      __u32: (v) => (v = J(v), typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) >>> 0 : v) : typeof v === 'boolean' ? +v : v),
+      __i16: (v) => (v = J(v), typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 16) >> 16 : typeof v === 'boolean' ? +v : v),
+      __u16: (v) => (v = J(v), typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xffff : typeof v === 'boolean' ? +v : v),
+      __i8: (v) => (v = J(v), typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 24) >> 24 : v),
+      __u8: (v) => (v = J(v), typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xff : typeof v === 'boolean' ? +v : v),
+      __b: (v) => (v = J(v), typeof v === 'number' || typeof v === 'boolean' ? !!v : v),
       // chars are 1-letter strings: __ord gives the code for arithmetic, __ch turns a number back into a char
       // (0 and -1 stay numbers, so `if (c)` and `c == -1` from read() keep working)
       __ord: (x) => (typeof x === 'string' && x.length === 1 ? x.charCodeAt(0) : x),
@@ -534,6 +709,14 @@ class Simulator {
 
       pinMode(pin, m) {
         pin = +pin; if (!gpioCheck(pin, 'pinMode')) return;
+        if (uno) {
+          if (m === INPUT_PULLDOWN) { sim.warnOnce('pd' + pin, 'The Arduino Uno has no INPUT_PULLDOWN: use INPUT with an external pull-down resistor, or INPUT_PULLUP.', 'error'); m = INPUT; }
+          sim.mode[pin] = m;
+          if (m === OUTPUT && sim.out[pin] === undefined) sim.out[pin] = 0;
+          sim.touch();
+          sim.interrupts.forEach((it) => { if (it.pin === pin) it.last = sim.readPin(pin); });
+          return;
+        }
         if (pin >= 34 && m === OUTPUT) sim.warnOnce('io' + pin, `GPIO${pin} is input-only on ESP32 — it cannot be an OUTPUT.`, 'error');
         if (pin >= 34 && (m === INPUT_PULLUP || m === INPUT_PULLDOWN)) sim.warnOnce('pu' + pin, `GPIO${pin} has no internal pull-up/pull-down on ESP32 — add an external resistor.`);
         sim.mode[pin] = pin >= 34 && m === OUTPUT ? INPUT : m;
@@ -544,23 +727,27 @@ class Simulator {
       digitalWrite(pin, v) {
         pin = +pin;
         if (sim.mode[pin] !== OUTPUT) {
-          if (!VALID_GPIO.has(pin)) return gpioCheck(pin, 'digitalWrite');
+          if (uno ? !(pin >= 0 && pin <= 19) : !VALID_GPIO.has(pin)) return gpioCheck(pin, 'digitalWrite');
           sim.warnOnce('dw' + pin, `digitalWrite(${pin}) on a pin that is not an OUTPUT — call pinMode(${pin}, OUTPUT) first.`);
           return;
         }
         delete sim.pwm[pin]; delete sim.dac[pin]; sim.out[pin] = v && v !== '0' ? 1 : 0;
-        sim.touch();
+        if (sim.out[pin]) sim.checkOutputWired(pin);
+        sim.touch(); sim.pinsChanged();
       },
       digitalRead(pin) {
         pin = +pin;
         if (sim.mode[pin] === undefined) sim.warnOnce('dr' + pin, `digitalRead(${pin}) before pinMode() — pin is floating.`);
-        else if (sim.mode[pin] === INPUT && sim.level(sim.netOfGpio(pin), pin) == null && !(sim.netOfGpio(pin) || {}).foreign) sim.warnOnce('fl' + pin, `GPIO${pin} is floating (nothing drives it). Use INPUT_PULLUP or a pull resistor.`);
+        else if (sim.mode[pin] === INPUT && sim.level(sim.netOfGpio(pin), pin) == null && !(sim.netOfGpio(pin) || {}).foreign && !sim.pulledByPart(pin)) sim.warnOnce('fl' + pin, `GPIO${pin} is floating (nothing drives it). Use INPUT_PULLUP or a pull resistor.`);
         return sim.readPin(pin);
       },
       analogRead(pin) {
         pin = +pin;
-        if (!(pin in ESP.ADC1) && !(pin in ESP.ADC2)) { sim.warnOnce('adc' + pin, `GPIO${pin} is not an ADC pin.`, 'error'); return 0; }
-        if (pin in ESP.ADC2 && sim.wifi.status !== 0) {
+        if (uno) {
+          if (pin >= 0 && pin <= 5) pin += 14; // analogRead(0) reads A0, as on a real Uno
+          if (!(pin >= 14 && pin <= 19)) { sim.warnOnce('adc' + pin, `analogRead(${pin}): only A0–A5 are analog inputs on the Arduino Uno.`, 'error'); return 0; }
+        } else if (c3 ? !(pin in C3_ADC1) && !(pin in C3_ADC2) : !(pin in ESP.ADC1) && !(pin in ESP.ADC2)) { sim.warnOnce('adc' + pin, `GPIO${pin} is not an ADC pin${c3 ? ' (the ESP32-C3 has ADC on GPIO 0–4)' : ''}.`, 'error'); return 0; }
+        if ((c3 ? pin in C3_ADC2 : pin in ESP.ADC2) && sim.wifi.status !== 0) {
           sim.warnOnce('adc2' + pin, `GPIO${pin} is on ADC2, which is unavailable while WiFi is on. Use an ADC1 pin (32–39).`, 'error');
           return 0;
         }
@@ -568,7 +755,7 @@ class Simulator {
         if (sim.analog && sim.running) {
           sim.analog.sync();
           const v = sim.analog.gpioVoltage(pin, sim.boardId);
-          if (v != null) return Math.round(Math.min(1, Math.max(0, v / 3.3)) * max);
+          if (v != null) return Math.round(Math.min(1, Math.max(0, v / (uno ? 5 : 3.3))) * max);
         }
         const n = sim.netOfGpio(pin);
         if (n && n.analog.length) return Math.round(Math.min(1, Math.max(0, n.analog[0].fn(n.analog[0].c, sim))) * max);
@@ -578,7 +765,14 @@ class Simulator {
       analogReadMilliVolts(pin) { return Math.round((api.analogRead(pin) / ((1 << sim.adcBits) - 1)) * 3300); },
       analogReadResolution(b) { sim.adcBits = Math.min(16, Math.max(1, b | 0)); },
       analogSetAttenuation() {}, analogSetPinAttenuation() {}, analogSetWidth(b) { sim.adcBits = b | 0; },
-      analogWrite(pin, v) { pin = +pin; if (!gpioCheck(pin, 'analogWrite')) return; setPwm(pin, v / ((1 << sim.pwmBits) - 1)); },
+      analogWrite(pin, v) {
+        pin = +pin; if (!gpioCheck(pin, 'analogWrite')) return;
+        if (uno && !UNO_PWM.has(pin)) { // the Arduino core falls back to a plain HIGH/LOW on non-PWM pins
+          sim.warnOnce('pwm' + pin, `analogWrite(${pin}): pin ${pin} has no PWM on the Arduino Uno (only 3, 5, 6, 9, 10, 11), so it is just switched ${v >= 128 ? 'HIGH' : 'LOW'}.`);
+          sim.mode[pin] = OUTPUT; delete sim.pwm[pin]; sim.out[pin] = v >= 128 ? 1 : 0; sim.touch(); return;
+        }
+        setPwm(pin, (uno ? Math.min(255, Math.max(0, v)) : v) / ((1 << sim.pwmBits) - 1));
+      },
       analogWriteResolution(b) { sim.pwmBits = b | 0; }, analogWriteFrequency() {},
       dacWrite(pin, v) { if (pin !== 25 && pin !== 26) { sim.warnOnce('dac' + pin, `dacWrite: GPIO${pin} is not a DAC pin (only 25 and 26).`, 'error'); return; } sim.dac[+pin] = Math.min(255, Math.max(0, +v)) / 255; setPwm(+pin, v / 255); },
       touchRead(pin) { return 60 + Math.round(Math.random() * 8); },
@@ -613,9 +807,16 @@ class Simulator {
           api.digitalWrite(clockPin, 0);
         }
       },
-      attachInterrupt(pin, fn, mode) { pin = +pin; sim.interrupts = sim.interrupts.filter((i) => i.pin !== pin); sim.interrupts.push({ pin, fn, mode, last: sim.readPin(pin) }); },
-      detachInterrupt(pin) { sim.interrupts = sim.interrupts.filter((i) => i.pin !== +pin); },
-      digitalPinToInterrupt: (p) => p, interrupts() {}, noInterrupts() {},
+      attachInterrupt(pin, fn, mode) {
+        pin = +pin;
+        if (uno) { // takes an interrupt number: INT0 is pin 2, INT1 is pin 3
+          if (pin !== 0 && pin !== 1) { sim.warnOnce('int' + pin, 'attachInterrupt: the Arduino Uno has external interrupts only on pins 2 and 3 — use digitalPinToInterrupt(2) or digitalPinToInterrupt(3).', 'error'); return; }
+          pin += 2;
+        }
+        sim.interrupts = sim.interrupts.filter((i) => i.pin !== pin); sim.interrupts.push({ pin, fn, mode, last: sim.readPin(pin) });
+      },
+      detachInterrupt(pin) { pin = +pin + (uno ? 2 : 0); sim.interrupts = sim.interrupts.filter((i) => i.pin !== pin); },
+      digitalPinToInterrupt: (p) => (uno ? (+p === 2 ? 0 : +p === 3 ? 1 : -1) : p), interrupts() {}, noInterrupts() {},
 
       millis: () => Math.floor(sim.millis()),
       micros: () => Math.floor(sim.millis() * 1000),
@@ -644,8 +845,30 @@ class Simulator {
       __sprintf: (fmt, ...a) => sprintf(fmt, ...a), __snprintf: (n, fmt, ...a) => sprintf(fmt, ...a).slice(0, Math.max(0, n - 1)),
       __dtostrf: (v, w, p) => Number(v).toFixed(p).padStart(w),
     };
+    Object.assign(api, createLibs({ sim, api, uno, gpioCheck, fmtValue, sprintf, sleep, check, runId }));
+    if (uno) {
+      Object.assign(api, {
+        LED_BUILTIN: 13, A0: 14, A1: 15, A2: 16, A3: 17, A4: 18, A5: 19, SDA: 18, SCL: 19, MOSI: 11, MISO: 12, SCK: 13, SS: 10, TX: 1, RX: 0,
+        NOT_AN_INTERRUPT: -1,
+      });
+      for (const k of ['A6', 'A7', 'A10', 'A11', 'A12', 'A13', 'A14', 'A15', 'A16', 'A17', 'A18', 'A19', 'T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'DAC1', 'DAC2']) delete api[k];
+      const why = (name) => new Error(`${name} is ESP32-only: the Arduino Uno has no ${/WiFi|HTTP|PubSub/.test(name) ? 'WiFi' : /^ledc/.test(name) ? 'LEDC peripheral (use analogWrite)' : 'such feature'}. Use an ESP32 board for this sketch.`);
+      for (const name of ESP_ONLY) {
+        const stub = function () { throw why(name); };
+        api[name] = new Proxy(stub, { get(t, k) { if (k === 'prototype' || typeof k === 'symbol') return t[k]; throw why(name); } });
+      }
+    }
+    if (c3) {
+      Object.assign(api, { LED_BUILTIN: 8, BUILTIN_LED: 8, A0: 0, A1: 1, A2: 2, A3: 3, A4: 4, A5: 5, SDA: 8, SCL: 9, MOSI: 6, MISO: 5, SCK: 4, SS: 7, TX: 21, RX: 20, BOOT_PIN: 9 });
+      for (const k of ['A6', 'A7', 'A10', 'A11', 'A12', 'A13', 'A14', 'A15', 'A16', 'A17', 'A18', 'A19', 'T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'DAC1', 'DAC2']) delete api[k];
+      for (const name of C3_MISSING) {
+        const err = () => new Error(`${name}: the ESP32-C3 has no ${name === 'dacWrite' ? 'DAC (use PWM with analogWrite / ledcWrite)' : name === 'touchRead' ? 'touch pins' : name === 'Serial2' ? 'third UART on its headers (use Serial1)' : 'Hall sensor'}.`);
+        api[name] = new Proxy(function () { throw err(); }, { get(t, k) { if (k === 'prototype' || typeof k === 'symbol') return t[k]; throw err(); } });
+      }
+      api.ESP = { ...api.ESP, getChipModel: () => 'ESP32-C3', getChipCores: () => 1, getCpuFreqMHz: () => 160 };
+    }
     return api;
   }
 }
 
-export { topicMatch, Simulator, STOP };
+export { topicMatch, Simulator, STOP, pressEvent };

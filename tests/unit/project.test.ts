@@ -81,13 +81,17 @@ describe('several boards', () => {
   it('keeps every board and the programs of the extra ones; drops programs for unknown boards', () => {
     const n = normalizeProject({ code: 'first', components: [
       { id: 'esp', type: 'esp32' }, { id: 'esp2', type: 'esp32' }, { id: 'uno', type: 'uno' },
-    ], programs: { esp2: { code: 'second' }, uno: { firmware: { name: 'a.hex', hex: ':00000001FF' } }, ghost: { code: 'x' }, esp: { code: 'ignored' } } }, DEFS);
+    ], programs: { esp2: { code: 'second' }, uno: { code: 'third' }, ghost: { code: 'x' }, esp: { code: 'ignored' } } }, DEFS);
     expect(n.components.map((c) => c.id)).toEqual(['esp', 'esp2', 'uno']);
     expect(n.code).toBe('first');
-    expect(n.programs).toEqual({ esp2: { code: 'second' }, uno: { firmware: { name: 'a.hex', hex: ':00000001FF' } } });
+    expect(n.programs).toEqual({ esp2: { code: 'second' }, uno: { code: 'third' } });
   });
-  it('rejects firmware that is not Intel HEX text', () => {
-    const n = normalizeProject({ components: [{ id: 'esp', type: 'esp32' }, { id: 'uno', type: 'uno' }], programs: { uno: { firmware: { name: 'x', hex: '<script>' } } } }, DEFS);
+  it('keeps an Uno sketch', () => {
+    const n = normalizeProject({ components: [{ id: 'esp', type: 'esp32' }, { id: 'uno', type: 'uno' }], programs: { uno: { code: 'void setup() {}\nvoid loop() {}' } } }, DEFS);
+    expect(n.programs).toEqual({ uno: { code: 'void setup() {}\nvoid loop() {}' } });
+  });
+  it('drops compiled firmware from old projects (the Uno runs its sketch)', () => {
+    const n = normalizeProject({ firmware: { name: 'a.hex', hex: ':00000001FF' }, components: [{ id: 'esp', type: 'esp32' }, { id: 'uno', type: 'uno' }], programs: { uno: { firmware: { name: 'x', hex: ':00000001FF' } } } }, DEFS);
     expect(n.programs).toEqual({ uno: {} });
   });
 });

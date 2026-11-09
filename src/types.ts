@@ -23,13 +23,11 @@ export interface Project {
   wires: Wire[];
   /** 'tidy' = wires routed at right angles around parts; default: curves */
   wireStyle?: 'tidy' | 'curved';
-  /** compiled firmware (Intel HEX) for boards that run machine code, e.g. the Arduino Uno */
-  firmware?: { name: string; hex: string };
   /**
    * Programs of the second and further boards, by board id. The first board's program stays in
-   * `code` / `firmware`, so single-board projects (and old share links) are unchanged.
+   * `code`, so single-board projects (and old share links) are unchanged.
    */
-  programs?: Record<string, { code?: string; firmware?: { name: string; hex: string } }>;
+  programs?: Record<string, { code?: string }>;
 }
 
 /** Direction a wire leaves the pin: left, right, top, bottom. */
@@ -84,11 +82,23 @@ export interface PartDef {
   fixed?: boolean;
   /** a microcontroller board (exactly one per project) */
   board?: boolean;
-  interactive?: 'press';
+  /** 'press': hold to press; 'keys': keyAt() says which key was clicked; 'toggle': a click flips props.on */
+  interactive?: 'press' | 'keys' | 'toggle';
+  keyAt?: (c: Component, x: number, y: number) => string | null;
+  /** DIP logic chips: their pin count */
+  dip?: number;
+  /** output pins the module pulls up itself (so an INPUT pin on them is not floating) */
+  pulled?: string[];
+  /** props that change how the part is built in the circuit (a change rebuilds it) */
+  structural?: string[];
+  /** pins that may stay unconnected (the wiring check doesn't report them); true = all of them */
+  optional?: string[] | true;
   hint?: string;
   // ---- electrical model (logic-level today; Phase 1 adds an analog model reference here) ----
   /** Pairs of this part's pins that are connected internally (resistor, pressed button…) */
   internal?: (c: Component, sim: SimView) => Array<[string, string]>;
+  /** pin pairs always joined inside the part (e.g. a tactile switch's leg pairs) */
+  bonded?: Array<[string, string]>;
   /** Pins this part drives to a logic level (0..1) */
   drive?: Record<string, (c: Component, sim: SimView) => number>;
   /** Pins that output an analog level (0..1 of 3.3 V) */

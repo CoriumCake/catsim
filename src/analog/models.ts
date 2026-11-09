@@ -75,13 +75,27 @@ export interface PartModel {
   led?: Diode;
   /** 0..1 activity shown on the part (transistor conducting) */
   activity?: (x: Float64Array) => number;
+  /** several LEDs in one part (RGB LED, 7-segment): brightness is reported as "id:key" */
+  leds?: Record<string, Diode>;
+  /** state that follows the solved voltages (regulator on/off, battery protection): called between solver
+   * runs; returns true when it changed something (the circuit is then re-solved) */
+  settle?: (x: Float64Array) => boolean;
+  /** called after every accepted solver step (state that integrates over time: battery charge) */
+  step?: (x: Float64Array, dt: number) => void;
+  /** power sources the part provides, checked for shorts and overload */
+  supply?: Supply[];
+  /** a board running from its pins: the voltage of the rail its chip runs on */
+  power?: (x: Float64Array) => number;
 }
+export interface Supply { key: string; what: string; current: (x: Float64Array) => number; max: number; short: number; advice: string }
 
 // Device parameters from the parts' published SPICE models (simplified to what the engine supports).
 export const Q2N2222: BjtModel = { type: 'npn', is: 14.34e-15, bf: 255.9, br: 6.092, vaf: 74.03 };
 export const Q2N2907: BjtModel = { type: 'pnp', is: 650.6e-18, bf: 231.7, br: 3.563, vaf: 115.7 };
 /** 2N7000 as a level-1 model: Vth ≈ 2.1 V, Rds(on) ≈ 1.8 Ω at Vgs = 4.5 V. */
 export const M2N7000: MosModel = { type: 'nmos', vto: 2.1, kp: 0.23, lambda: 0.01 };
+/** AO3400A (SOT-23 logic-level): Vth ≈ 1.05 V, Rds(on) ≈ 32 mΩ at Vgs = 4.5 V, ≈ 45 mΩ at 3.3 V. */
+export const MAO3400: MosModel = { type: 'nmos', vto: 1.05, kp: 9.5, lambda: 0.01 };
 export const DIODES: Record<string, DiodeModel> = {
   '1N4148': { is: 2.52e-9, n: 1.752, rs: 0.568 },
   '1N4007': { is: 7.03e-9, n: 1.808, rs: 0.0342 },
@@ -92,8 +106,8 @@ const bjtFrom = (type: 'npn' | 'pnp', p: Record<string, number>): BjtModel =>
 const ACT_FULL = 0.005; // collector/drain current shown as "fully on" (5 mA)
 /** Toy 3–6 V DC motor: ~9500 rpm and ~20 mA unloaded at 5 V, 0.5 A stall. */
 export const MOTOR = { ra: 10, la: 0.5e-3, k: 0.005, j: 1e-6, b: 1e-7 };
-/** 5 V relay: 70 Ω / 100 mH coil, pulls in above 35 mA, drops out below 15 mA. */
-export const RELAY = { r: 70, l: 0.1, pullIn: 0.035, dropOut: 0.015 };
+/** 5 V relay: 70 Ω / 100 mH coil (71 mA at 5 V); pulls in above 50 mA (≈ 3.5 V, the usual 70–75 % "must operate" voltage), drops out below 15 mA. */
+export const RELAY = { r: 70, l: 0.1, pullIn: 0.05, dropOut: 0.015 };
 export const CAP_VALUES: Record<string, number> = { '100nF': 100e-9, '1µF': 1e-6, '10µF': 10e-6, '100µF': 100e-6, '470µF': 470e-6 };
 
 /** Logic chip: driver source per output (initially high-impedance) and a small supply load. */
@@ -114,7 +128,8 @@ export function chipModel(def: ChipDef): ModelFn {
 
 export type PinNode = (pinId: string) => number;
 /** `cur()` returns the part as it is now: the worker receives a fresh copy of the project on every edit. */
-type ModelFn = (ckt: Circuit, c: Component, pin: PinNode, ui: () => { pressed?: boolean } | undefined, cur: () => Component) => PartModel;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ModelFn = (ckt: Circuit, c: Component, pin: PinNode, ui: () => any, cur: () => Component, now: () => number) => PartModel;
 
 const ldrOhms = (light: number) => 100_000 * Math.pow(0.01, Math.min(1, Math.max(0, light)));
 
@@ -142,6 +157,16 @@ export const MODELS: Record<string, ModelFn> = {
     const c = { get id() { return c0.id; }, get props() { return cur().props; } };
     const sw: Switch = ckt.switch(pin('1'), pin('2'), !!ui()?.pressed, c.id);
     return { update: () => { const on = !!ui()?.pressed; if (on === sw.closed) return false; sw.closed = on; return true; } };
+  },
+  keypad(ckt, c0, pin, ui) {
+    // 4×4 matrix: the pressed key closes the switch between its row and its column
+    const sw: Switch[] = [];
+    for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) sw.push(ckt.switch(pin('R' + (r + 1)), pin('C' + (k + 1)), false, `${c0.id}_${r}${k}`));
+    const closed = () => { const u = ui() as { pressed?: boolean; key?: string } | undefined; if (!u || !u.pressed || !u.key) return -1; const [r, k] = u.key.split(',').map(Number); return r * 4 + k; };
+    let cur0 = -1;
+    const apply = () => { const i = closed(); if (i === cur0) return false; cur0 = i; sw.forEach((s, j) => { s.closed = j === i; }); return true; };
+    apply();
+    return { update: apply };
   },
   pot(ckt, c0, pin, ui, cur) {
     const c = { get id() { return c0.id; }, get props() { return cur().props; } };
@@ -199,7 +224,7 @@ export const MODELS: Record<string, ModelFn> = {
     }
     const cm = customModel(c0.id, c0.props.spice, ['nmos']);
     if (cm && (cm.p.level ?? 1) !== 1) modelLog.fn(`${c0.id}: only LEVEL=1 MOSFET models are supported. Using the built-in model.`);
-    const mm: MosModel = cm && (cm.p.level ?? 1) === 1 ? { type: 'nmos', vto: cm.p.vto ?? 0, kp: cm.p.kp ?? 2e-5, lambda: cm.p.lambda ?? 0 } : M2N7000;
+    const mm: MosModel = cm && (cm.p.level ?? 1) === 1 ? { type: 'nmos', vto: cm.p.vto ?? 0, kp: cm.p.kp ?? 2e-5, lambda: cm.p.lambda ?? 0 } : c0.props.model === 'AO3400' ? MAO3400 : M2N7000;
     const m = ckt.add(new Mosfet(pin('D'), pin('G'), pin('S'), mm), c0.id);
     ckt.diode(pin('S'), pin('D'), { is: 1e-14, n: 1 }, `${c0.id}_body`); // body diode
     return { activity: (x) => Math.min(1, Math.abs(m.drainCurrent(x)) / ACT_FULL) };

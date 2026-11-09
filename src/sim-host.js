@@ -2,7 +2,7 @@
  * board state from the worker's snapshots so parts can render (net/level logic is inherited from
  * Simulator), and forwards UI input to the worker. A share link can contain any sketch, so every
  * message from the worker is validated and coerced here before it reaches the UI. */
-import { Simulator } from './runtime.js';
+import { Simulator, pressEvent } from './runtime.js';
 const LEVELS = new Set(['info', 'warn', 'error']);
 const boardId = (b) => (typeof b === 'string' && /^[\w-]{1,32}$/.test(b) ? b : undefined);
 const str = (v, max = 2000) => String(v ?? '').slice(0, max);
@@ -13,6 +13,45 @@ const numMap = (o) => {
   if (o && typeof o === 'object') for (const k of Object.keys(o)) if (/^\d{1,2}$/.test(k) && typeof o[k] === 'number' && Number.isFinite(o[k])) r[k] = o[k];
   return r;
 };
+const isId = (k) => /^[\w-]{1,32}$/.test(k);
+/** Parts driven by a library: OLED buffer, LED strip colors, 7-segment digits, stepper angle. */
+const cleanDev = (d) => {
+  const out = {};
+  if (!d || typeof d !== 'object') return out;
+  for (const [id, v] of Object.entries(d).slice(0, 200)) {
+    if (!isId(id) || !v || typeof v !== 'object') continue;
+    if (v.kind === 'oled' && v.buf instanceof Uint8Array && v.w === 128 && (v.h === 64 || v.h === 32) && v.buf.length === (v.w * v.h) / 8) {
+      out[id] = { kind: 'oled', w: 128, h: v.h, buf: v.buf, invert: v.invert === true, dim: v.dim === true, on: v.on !== false };
+    } else if (v.kind === 'pixels' && Array.isArray(v.rgb)) {
+      out[id] = { kind: 'pixels', rgb: v.rgb.slice(0, 64).map((x) => (typeof x === 'number' && Number.isFinite(x) ? x & 0xffffff : 0)) };
+    } else if (v.kind === 'seg7' && Array.isArray(v.segs)) {
+      out[id] = { kind: 'seg7', segs: [0, 1, 2, 3].map((i) => (finite(v.segs[i]) | 0) & 0xff), bright: Math.max(0, Math.min(7, finite(v.bright, 7) | 0)), on: v.on !== false };
+    } else if (v.kind === 'stepper') {
+      out[id] = { kind: 'stepper', angle: finite(v.angle), coils: [0, 1, 2, 3].map((i) => (Array.isArray(v.coils) && v.coils[i] ? 1 : 0)) };
+    }
+  }
+  return out;
+};
+/** Saved data a sketch wrote (EEPROM bytes, Preferences, RTC offset), size-limited. */
+const prim = (v) => (typeof v === 'number' && Number.isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 4000);
+const cleanVal = (v) => (prim(v) ? v : Array.isArray(v) && v.length <= 4096 && v.every((x) => typeof x === 'number' && Number.isFinite(x)) ? v.slice() : undefined);
+const cleanNv = (nv) => {
+  const out = {};
+  if (!nv || typeof nv !== 'object') return out;
+  if (nv.eeprom instanceof Uint8Array && nv.eeprom.length <= 4096) out.eeprom = nv.eeprom.slice();
+  if (nv.eput && typeof nv.eput === 'object') { out.eput = {}; for (const [k, v] of Object.entries(nv.eput).slice(0, 512)) if (/^\d{1,4}$/.test(k) && cleanVal(v) !== undefined) out.eput[k] = cleanVal(v); }
+  if (nv.prefs && typeof nv.prefs === 'object') {
+    out.prefs = {};
+    for (const [ns, tab] of Object.entries(nv.prefs).slice(0, 32)) {
+      if (typeof ns !== 'string' || ns.length > 15 || !tab || typeof tab !== 'object') continue;
+      out.prefs[ns] = {};
+      for (const [k, v] of Object.entries(tab).slice(0, 256)) if (k.length <= 15 && cleanVal(v) !== undefined) out.prefs[ns][k] = cleanVal(v);
+    }
+  }
+  if (typeof nv.rtc === 'number' && Number.isFinite(nv.rtc) && Math.abs(nv.rtc) < 4e9) out.rtc = Math.trunc(nv.rtc);
+  return out;
+};
+
 const cleanLcd = (l) => {
   if (!l || typeof l !== 'object' || !Array.isArray(l.buf)) return null;
   const buf = [0, 1].map((r) => Array.from({ length: 16 }, (_, i) => { const ch = l.buf[r] && l.buf[r][i]; return typeof ch === 'string' && ch.length ? [...ch][0] : ' '; }));
@@ -26,6 +65,7 @@ class SimHost extends Simulator {
     this.speed = 1; this.paused = false;
     this.analog = null; // { leds: {id: 0..1}, rtf, error } from the worker's analog engine
     this.boards = null; // several boards: per-board pin state, by board id
+    this.nvStore = {}; // saved data of each board (by board id), kept for this page session like real flash
     this.serialBy = {}; // serial output not yet shown, by board id ('' = the only board)
     this.probes = []; this.probeDtMax = 1e-3;
   }
@@ -62,16 +102,19 @@ class SimHost extends Simulator {
 
   start(code) {
     this.stop(true);
+    const first = this.app.boards ? this.app.boards()[0] : null;
+    this.boardType = first && (first.type === 'uno' || first.type === 'esp32c3') ? first.type : 'esp32'; // whose pins the page-side nets belong to
     this.resetHw(); this.ui = {};
     this.worker = this.spawn();
     if (!this.worker) return Promise.resolve(false);
     this.paused = false;
     this.analog = null;
+    if (this.nvProject !== this.app.project) { this.nvStore = {}; this.nvProject = this.app.project; } // saved data belongs to this project
     const boardComps = this.app.boards ? this.app.boards() : [];
-    const boards = boardComps.length > 1 ? boardComps.map((b) => { const pr = this.app.program(b.id); return { id: b.id, type: b.type, code: pr.code || '', firmware: pr.firmware ? pr.firmware.hex : '' }; }) : undefined;
+    const boards = boardComps.length > 1 ? boardComps.map((b) => { const pr = this.app.program(b.id); return { id: b.id, type: b.type, code: pr.code || '', nv: this.nvStore[b.id] || {} }; }) : undefined;
     const board = boardComps[0] ? boardComps[0].type : 'esp32';
     this.boards = null; this.serialBy = {};
-    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed, board, boards, firmware: board === 'uno' && this.app.project.firmware ? this.app.project.firmware.hex : undefined });
+    this.worker.postMessage({ type: 'start', code: String(code), project: this.app.project, speed: this.speed, board, boards, nv: boardComps[0] ? this.nvStore[boardComps[0].id] || {} : {} });
     if (this.probes.some(Boolean)) this.send({ type: 'probes', refs: this.probes, dtMax: this.probeDtMax });
     return new Promise((res) => { this.resolveRun = res; });
   }
@@ -93,7 +136,7 @@ class SimHost extends Simulator {
     this._syncQueued = true;
     queueMicrotask(() => { this._syncQueued = false; this.send({ type: 'project', project: this.app.project }); });
   }
-  setPressed(id, on) { this.ui[id] = { ...(this.ui[id] || {}), pressed: on }; this.invalidate(); this.send({ type: 'ui', id, pressed: !!on }); }
+  setPressed(id, on, key) { this.ui[id] = pressEvent(this.ui[id], on, key, this.millis()); this.invalidate(); this.send({ type: 'ui', id, pressed: !!on, key }); }
   sendSerial(text, board) { this.send({ type: 'serial', text: String(text), board: board ? String(board) : '' }); }
   /** Serial output received since the last call, by board id ('' = the only board). */
   takeSerial() {
@@ -135,7 +178,7 @@ class SimHost extends Simulator {
           const boards = {};
           for (const [id, b] of Object.entries(m.boards)) {
             if (!/^[\w-]{1,32}$/.test(id) || !b || typeof b !== 'object') continue;
-            boards[id] = { type: b.type === 'uno' ? 'uno' : 'esp32', running: b.running === true, mode: numMap(b.mode), out: numMap(b.out), pwm: numMap(b.pwm), servo: numMap(b.servo), tone: numMap(b.tone), lcd: cleanLcd(b.lcd) };
+            boards[id] = { type: b.type === 'uno' || b.type === 'esp32c3' ? b.type : 'esp32', running: b.running === true, mode: numMap(b.mode), out: numMap(b.out), pwm: numMap(b.pwm), servo: numMap(b.servo), tone: numMap(b.tone), lcd: cleanLcd(b.lcd), dev: cleanDev(b.dev), halted: b.halted === true };
             if (typeof b.serial === 'string' && b.serial) this.serialBy[id] = ((this.serialBy[id] || '') + b.serial).slice(-100000);
           }
           this.boards = boards;
@@ -145,6 +188,8 @@ class SimHost extends Simulator {
         this.mode = numMap(m.mode); this.out = numMap(m.out); this.pwm = numMap(m.pwm);
         this.servo = numMap(m.servo); this.tone = numMap(m.tone);
         this.lcd = cleanLcd(m.lcd);
+        this.halted = m.halted === true;
+        this.dev = m.boards ? Object.assign({}, ...Object.values(this.boards || {}).map((b) => b.dev)) : cleanDev(m.dev);
         const i2c = m.i2c || {}; this.i2c = { sda: finite(i2c.sda, 21), scl: finite(i2c.scl, 22) };
         const w = m.wifi || {}, q = m.mqtt || {};
         const wifi = { ...this.wifi, status: finite(w.status), ssid: str(w.ssid, 64) };
@@ -155,10 +200,10 @@ class SimHost extends Simulator {
         const an = m.analog;
         if (an && typeof an === 'object') {
           const leds = {};
-          if (an.leds && typeof an.leds === 'object') for (const k of Object.keys(an.leds)) if (/^[\w-]{1,32}$/.test(k)) leds[k] = Math.min(1, Math.max(0, finite(an.leds[k])));
+          if (an.leds && typeof an.leds === 'object') for (const k of Object.keys(an.leds)) if (/^[\w-]{1,32}(?::\w{1,3})?$/.test(k)) leds[k] = Math.min(1, Math.max(0, finite(an.leds[k]))); // "rgb1:R": one die of a multi-LED part
           const parts = {};
           if (an.parts && typeof an.parts === 'object') for (const k of Object.keys(an.parts)) if (/^[\w-]{1,32}$/.test(k)) parts[k] = Math.min(1, Math.max(0, finite(an.parts[k])));
-          const burnt = Array.isArray(an.burnt) ? an.burnt.filter((k) => typeof k === 'string' && /^[\w-]{1,32}$/.test(k)).slice(0, 200) : [];
+          const burnt = Array.isArray(an.burnt) ? an.burnt.filter((k) => typeof k === 'string' && /^[\w-]{1,32}(?::\w{1,3})?$/.test(k)).slice(0, 200) : [];
           const mech = { motors: {}, relays: {} };
           if (an.mech && typeof an.mech === 'object') {
             for (const [k, v] of Object.entries(an.mech.motors || {})) if (/^[\w-]{1,32}$/.test(k) && Array.isArray(v)) mech.motors[k] = [finite(v[0]), finite(v[1])];
@@ -175,6 +220,11 @@ class SimHost extends Simulator {
       }
       case 'log': this.app.log(str(m.msg), LEVELS.has(m.level) ? m.level : 'info', Number.isInteger(m.line) && m.line > 0 ? m.line : undefined, boardId(m.board)); break;
       case 'error': this.app.reportError({ message: str(m.message), stack: str(m.stack, 4000) }, boardId(m.board)); break;
+      case 'nv': {
+        const id = boardId(m.board) || (this.app.boards && this.app.boards()[0] ? this.app.boards()[0].id : '');
+        if (id) this.nvStore[id] = cleanNv(m.nv);
+        break;
+      }
       case 'pub': if (this.running && m.m) this.brokerPublish(m.m.topic, m.m.payload, 'device'); break;
       case 'restart': if (this.running) setTimeout(() => this.app.restartSim(), 0); break;
       case 'done': { const r = this.resolveRun; this.resolveRun = null; if (r) r(m.ok !== false); if (m.ok === false) this.stop(true); break; }

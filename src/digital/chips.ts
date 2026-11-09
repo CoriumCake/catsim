@@ -36,6 +36,8 @@ export interface ChipDef {
   init(): Record<string, unknown>;
   evaluate(ctx: ChipCtx, st: Record<string, unknown>): Record<string, Out>;
   hint?: string;
+  /** a module with its own drawing (not a DIP chip in the Logic palette) */
+  module?: boolean;
 }
 
 const gate = (type: string, name: string, op: (a: Level, b: Level) => Level, hint?: string): ChipDef => {
@@ -166,6 +168,22 @@ export const CHIPS: Record<string, ChipDef> = {
       else if (thresHigh) q = 0;
       st.q = q;
       return { OUT: q, DISCH: q ? 'z' : 0 };
+    },
+  },
+
+  // L298N dual H-bridge module: IN1/IN2 set OUT1/OUT2 while ENA is high (OUT3/OUT4 from IN3/IN4 and ENB);
+  // TTL inputs (≈ 2.3 V threshold, so 3.3 V logic works); the bipolar outputs lose ~2 V at 1 A
+  l298n: {
+    type: 'l298n', name: 'L298N motor driver', vcc: '12V', gnd: 'GND', module: true,
+    pins: ['IN1', 'IN2', 'IN3', 'IN4', 'ENA', 'ENB', 'OUT1', 'OUT2', 'OUT3', 'OUT4', '12V', 'GND', '5V'],
+    inputs: ['IN1', 'IN2', 'IN3', 'IN4', 'ENA', 'ENB'],
+    outputs: ['OUT1', 'OUT2', 'OUT3', 'OUT4'],
+    rout: 2,
+    thresholds: () => [1.5, 2.3],
+    init: () => ({}),
+    evaluate(c) {
+      const a = c.level('ENA'), b = c.level('ENB');
+      return { OUT1: a ? c.level('IN1') : 'z', OUT2: a ? c.level('IN2') : 'z', OUT3: b ? c.level('IN3') : 'z', OUT4: b ? c.level('IN4') : 'z' };
     },
   },
 };

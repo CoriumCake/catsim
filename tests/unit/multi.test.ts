@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { MultiRun } from '../../src/multi.ts';
 import { DEFS } from '../../src/components.js';
-import buttonHex from '../../src/firmware/uno-button.hex?raw';
+import unoButtonIno from '../../src/sketches/uno-button.ino?raw';
 
 type Comp = { id: string; type: string; x: number; y: number; props: Record<string, unknown> };
 const comp = (id: string, type: string, props = {}): Comp => ({ id, type, x: 0, y: 0, props: { ...DEFS[type].props, ...props } });
@@ -49,15 +49,15 @@ describe('several boards in one circuit', () => {
     await until(multi, () => multi.bridge.ledBrightness().l1 < 0.05);
   });
 
-  it('ESP32 drives a pin that real Uno firmware reads', async () => {
+  it('ESP32 drives a pin that an Uno sketch reads', async () => {
     const { multi, host } = setup([comp('esp', 'esp32'), comp('uno', 'uno'), comp('r1', 'resistor', { ohms: 220 }), comp('l1', 'led')], [
       ['esp:D23', 'uno:D2'],                         // the Uno's "button" input, driven by the ESP32
       ['uno:D9', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'uno:GND1'],
     ]);
-    // uno-button.hex: INPUT_PULLUP on D2, LED on D9 when D2 is LOW
+    // uno-button.ino: INPUT_PULLUP on D2, LED on D9 when D2 is LOW
     multi.start([
       { id: 'esp', type: 'esp32', code: 'void setup() { pinMode(23, OUTPUT); }\nvoid loop() { digitalWrite(23, HIGH); delay(150); digitalWrite(23, LOW); delay(150); }' },
-      { id: 'uno', type: 'uno', firmware: buttonHex },
+      { id: 'uno', type: 'uno', code: unoButtonIno },
     ]);
     await until(multi, () => multi.bridge.ledBrightness().l1 > 0.5, 5000); // ESP pulls D2 low → Uno lights the LED
     await until(multi, () => multi.bridge.ledBrightness().l1 < 0.05, 5000);

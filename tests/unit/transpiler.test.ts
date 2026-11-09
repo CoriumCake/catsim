@@ -6,7 +6,7 @@ import { EXAMPLES } from '../../src/examples.js';
 const compile = (js: string) => new Function('__api', `"use strict"; return (async function(){ { ${js}\n;return 1; } })();`);
 
 describe('transpiler', () => {
-  for (const ex of EXAMPLES.filter((e) => !('firmware' in e))) { // Uno examples run compiled firmware instead
+  for (const ex of EXAMPLES) {
     it(`example "${ex.key}" transpiles to valid JavaScript`, () => {
       const { js, functions } = transpile(ex.code);
       for (const pr of Object.values((ex as { programs?: Record<string, { code?: string }> }).programs || {})) if (pr.code) expect(() => compile(transpile(pr.code).js)).not.toThrow();

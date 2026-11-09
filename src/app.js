@@ -8,8 +8,8 @@ import { View3D } from './view3d.js';
 import { createEditor } from './editor.ts';
 import { normalizeProject, encodeShare, decodeShare } from './project.ts';
 import { Scope } from './scope.ts';
+import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
-import { parseIntelHex } from './avr/hex.ts';
 import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
@@ -26,12 +26,16 @@ void loop() {
   delay(1000);
 }
 `;
-const UNO_TEMPLATE = `// This Arduino Uno runs compiled firmware: write the sketch in the Arduino IDE,
-// export the compiled binary (Sketch > Export Compiled Binary) and click "Upload .hex".
+const UNO_TEMPLATE = `// Arduino Uno: blink the on-board LED (pin 13).
 void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
 }
 
 void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(500);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(500);
 }
 `;
 const SIDE_STORE = 'catsim.sideHidden';
@@ -67,6 +71,7 @@ const App = {
       setProbes: (refs, dtMax) => this.sim.setProbes(refs, dtMax),
       simTime: () => this.sim.millis() / 1000,
     });
+    this.plotter = new Plotter($('#plotCanvas'), $('#plotLegend'), $('#plotEmpty'));
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
     this.buildPalette(); this.bindUi(); this.bindSplitters();
     this.load(await this.initialProject());
@@ -92,7 +97,7 @@ const App = {
 
   fromExample(key) {
     const ex = EXAMPLES.find((e) => e.key === key);
-    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.firmware ? { firmware: { ...ex.firmware } } : {}), ...(ex.programs ? { programs: clone(ex.programs) } : {}) };
+    return { name: ex.name, code: ex.code, components: clone(ex.components), wires: ex.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })), ...(ex.programs ? { programs: clone(ex.programs) } : {}) };
   },
 
   normalize(p) { return normalizeProject(p, DEFS); },
@@ -127,7 +132,7 @@ const App = {
 
   // ---------- parts & wires ----------
   nextId(type) {
-    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u', capacitor: 'c', motor: 'mot', relay: 'k' }[type] || (DEFS[type] && DEFS[type].dip ? 'u' : type);
+    const base = { led: 'led', resistor: 'r', button: 'btn', pot: 'pot', dht22: 'dht', ldr: 'ldr', pir: 'pir', buzzer: 'bz', servo: 'servo', lcd: 'lcd', npn: 'q', pnp: 'q', nmos: 'm', diode: 'd', opamp: 'u', capacitor: 'c', motor: 'mot', relay: 'k', rgb_led: 'rgb', seg7: 'seg', slide_switch: 'sw', battery: 'bat', fsr: 'fsr', vibmotor: 'vib', tp4056: 'chg', buckboost: 'reg', joystick: 'joy', encoder: 'enc', l298n: 'drv', sound: 'mic', soil: 'soil', mq2: 'gas', breadboard: 'bb', bme280: 'bme', mpu6050: 'imu', lcd_parallel: 'lcd', oled: 'oled', tm1637: 'disp', ws2812_strip: 'strip', ws2812_ring: 'ring', ds18b20: 'temp', hcsr04: 'sonar', ds3231: 'rtc', keypad: 'keypad', ir_receiver: 'ir', ir_remote: 'remote', stepper: 'step' }[type] || (DEFS[type] && DEFS[type].dip ? 'u' : type);
     let i = 1; while (this.project.components.some((c) => c.id === base + i)) i++;
     return base + i;
   },
@@ -166,15 +171,9 @@ const App = {
   start() {
     Audio.ensure();
     this.editor.clear();
-    this.term = {}; this.renderTerminal();
-    this.clearConsole();
+    this.term = {}; this.renderTerminal(); this.plotter.clear();
+    this.clearConsole(); this.clearAlerts();
     this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() });
-    const missing = this.boards().filter((b) => b.type === 'uno' && !this.program(b.id).firmware).map((b) => b.id);
-    if (missing.length) {
-      this.log(`The Arduino Uno runs compiled firmware: ${missing.join(', ')} has none yet. Open its tab, click "Upload .hex" and pick the .hex file (Arduino IDE: Sketch → Export Compiled Binary), or load one of the Uno examples.`, 'error');
-      this.showTab('bottom', 'consolePane');
-      return;
-    }
     this.sim.start(this.project.code).then((ok) => { if (ok === false) this.showTab('bottom', 'consolePane'); });
   },
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
@@ -229,6 +228,9 @@ const App = {
     b.querySelector('.lbl').textContent = on ? 'Stop' : 'Start';
     $('#simDot').classList.toggle('on', on);
     this.updatePause();
+    // starting: the card shrinks to its live-only form; stopping: drop the selection, so a part clicked
+    // during the run (e.g. a pressed button) doesn't pop up its card
+    if (on) this.onSelection(this.canvas.sel); else this.canvas.select(null);
     if (!on) { Audio.stopAll(); this.flushSerial(); this.canvas.renderDynamic(); this.updateClock(); this.renderIot(); }
     else this.log('Simulation started', 'info');
   },
@@ -243,6 +245,7 @@ const App = {
       if (this._iotDirty) this.renderIot();
       if ($('#scopePane').classList.contains('active')) this.scope.render();
     }
+    if ($('#plotPane').classList.contains('active')) this.plotter.render();
     if (!$('#props').hidden) this.positionProps(); // follows pan, zoom, drag and 3D orbit
     requestAnimationFrame(() => this.frame());
     },
@@ -265,12 +268,18 @@ const App = {
     }
     if (!box) return;
     const w = panel.offsetWidth, h = panel.offsetHeight, gap = 12, m = 8;
-    const cx = (box.left + box.right) / 2 - stage.left;
-    let top = box.top - stage.top - h - gap;
-    if (top < m) top = box.bottom - stage.top + gap; // no room above: show it below
-    const left = Math.min(Math.max(m, cx - w / 2), stage.width - w - m);
-    top = Math.min(Math.max(m, top), stage.height - h - m);
-    panel.style.left = `${Math.round(left)}px`; panel.style.top = `${Math.round(top)}px`;
+    // the part's box in stage coordinates
+    const L = box.left - stage.left, R = box.right - stage.left, T = box.top - stage.top, B = box.bottom - stage.top;
+    const cx = (L + R) / 2, cy = (T + B) / 2;
+    const clampX = (x) => Math.min(Math.max(m, x), stage.width - w - m);
+    const clampY = (y) => Math.min(Math.max(m, y), stage.height - h - m);
+    // above, below, right, left: take the first spot that leaves the part uncovered, else the one covering least
+    const spots = [[cx - w / 2, T - h - gap], [cx - w / 2, B + gap], [R + gap, cy - h / 2], [L - w - gap, cy - h / 2]]
+      .map(([x, y]) => { const left = clampX(x), top = clampY(y);
+        const ox = Math.max(0, Math.min(R, left + w) - Math.max(L, left)), oy = Math.max(0, Math.min(B, top + h) - Math.max(T, top));
+        return { left, top, cover: ox * oy }; });
+    const best = spots.find((s) => s.cover === 0) || spots.reduce((a, b) => (b.cover < a.cover ? b : a));
+    panel.style.left = `${Math.round(best.left)}px`; panel.style.top = `${Math.round(best.top)}px`;
     },
 
     onScopeSamples(t, v) { this.scope.addSamples(t, v); },
@@ -287,15 +296,14 @@ const App = {
   primaryId() { const b = this.boards()[0]; return b ? b.id : ''; },
   /** type of the board whose program is open in the editor */
   boardType() { const b = this.boards().find((x) => x.id === this.activeBoard) || this.boards()[0]; return b ? b.type : 'esp32'; },
-  /** A board's program. The first board's lives in project.code/firmware (single-board projects unchanged). */
+  /** A board's program. The first board's lives in project.code (single-board projects unchanged). */
   program(id) {
-    if (!id || id === this.primaryId()) return { code: this.project.code, firmware: this.project.firmware };
+    if (!id || id === this.primaryId()) return { code: this.project.code };
     return (this.project.programs && this.project.programs[id]) || {};
   },
   setProgram(id, patch) {
     if (!id || id === this.primaryId()) {
       if ('code' in patch) this.project.code = patch.code;
-      if ('firmware' in patch) { if (patch.firmware) this.project.firmware = patch.firmware; else delete this.project.firmware; }
       return;
     }
     this.project.programs = this.project.programs || {};
@@ -309,10 +317,11 @@ const App = {
     this._loadingEditor = true; this.editor.set(this.program(id).code || ''); this._loadingEditor = false;
     this.editor.clear();
     this.refreshBoardUi(); this.renderTerminal();
+    this.plotter.clear(); this.plotter.feed((this.term && this.term[id]) || '');
   },
   /** Add another microcontroller; it gets its own program tab. */
   addBoard(type) {
-    const base = type === 'uno' ? 'uno' : 'esp';
+    const base = type === 'uno' ? 'uno' : type === 'esp32c3' ? 'c3' : 'esp';
     let id = base, i = 2; while (this.project.components.some((c) => c.id === id)) id = base + i++;
     let maxX = 0, minY = Infinity;
     for (const c of this.project.components) { const d = DEFS[c.type]; if (d) { maxX = Math.max(maxX, c.x + d.w); minY = Math.min(minY, c.y); } }
@@ -328,10 +337,9 @@ const App = {
     if (boards.length < 2) { this.toast('A project needs at least one board'); return; }
     this.stop();
     if (this.activeBoard) this.setProgram(this.activeBoard, { code: this.editor.get() });
-    if (boards[0].id === c.id) { // the next board becomes the first one: its program moves into code/firmware
+    if (boards[0].id === c.id) { // the next board becomes the first one: its program moves into code
       const next = boards[1], np = this.program(next.id);
       this.project.code = np.code || '';
-      if (np.firmware) this.project.firmware = np.firmware; else delete this.project.firmware;
       if (this.project.programs) delete this.project.programs[next.id];
     } else if (this.project.programs) delete this.project.programs[c.id];
     this.project.components = this.project.components.filter((x) => x !== c);
@@ -350,39 +358,16 @@ const App = {
         t.className = 'board-tab' + (b.id === this.activeBoard ? ' active' : '');
         t.setAttribute('role', 'tab'); t.setAttribute('aria-selected', String(b.id === this.activeBoard));
         t.dataset.board = b.id;
-        t.textContent = `${b.id} · ${b.type === 'uno' ? 'firmware' : 'sketch'}`;
+        t.textContent = `${b.id} · sketch`;
         t.title = `${DEFS[b.type].name} "${b.id}"`;
         t.onclick = () => this.switchBoard(b.id);
         tabs.appendChild(t);
       }
     }
     document.querySelectorAll('#paletteList .part').forEach((b) => { if (DEFS[b.dataset.type].board) b.title = `Add a ${DEFS[b.dataset.type].name}`; });
-    document.querySelector('.brand .chip').textContent = uno ? 'UNO' : 'ESP32';
-    $('#serialInput').placeholder = `Message to ${multi ? this.activeBoard : uno ? 'Arduino' : 'ESP32'} (Enter to send)`;
-    $('#btnFirmware').hidden = !uno;
-    const b = $('#unoBanner'); b.hidden = !uno;
-    if (uno) {
-      const fw = this.program(this.activeBoard).firmware;
-      b.textContent = '';
-      const msg = document.createElement('span');
-      msg.textContent = fw ? `Running firmware “${fw.name}”. This sketch is shown for reference: edit it in the Arduino IDE, export the compiled binary and upload the .hex.` : 'The Uno runs real compiled firmware. Compile this sketch in the Arduino IDE (Sketch → Export Compiled Binary) and click “Upload .hex”.';
-      b.appendChild(msg);
-    }
-  },
-  async loadFirmware(file) {
-    if (!file) return;
-    if (file.size > 200_000) { this.toast('That file is too large for an ATmega328P'); return; }
-    const text = await file.text();
-    try {
-      const flash = parseIntelHex(text);
-      let used = flash.length; while (used > 0 && flash[used - 1] === 0) used--;
-      this.stop();
-      this.setProgram(this.activeBoard || this.primaryId(), { firmware: { name: file.name.slice(0, 120), hex: text } });
-      this.save(); this.refreshBoardUi();
-      this.toast(`Loaded ${file.name} (${used.toLocaleString()} bytes)`);
-    } catch (e) {
-      this.log(`Could not load ${file.name}: ${e.message}`, 'error'); this.showTab('bottom', 'consolePane');
-    }
+    const c3 = this.boardType() === 'esp32c3';
+    document.querySelector('.brand .chip').textContent = uno ? 'UNO' : c3 ? 'ESP32-C3' : 'ESP32';
+    $('#serialInput').placeholder = `Message to ${multi ? this.activeBoard : uno ? 'Arduino' : c3 ? 'ESP32-C3' : 'ESP32'} (Enter to send)`;
   },
   /** Net choices for the scope, labelled by the pins on each net (ESP32 pins first). */
   refreshScopeNets() {
@@ -416,6 +401,7 @@ const App = {
       const id = id0 || this.primaryId();
       let t = (this.term[id] || '') + text; if (t.length > 60000) t = t.slice(-50000);
       this.term[id] = t;
+      if (id === this.activeBoard) this.plotter.feed(text);
       if (id === this.activeBoard) mine = true;
       else { const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(id)}"]`); if (tab) tab.classList.add('unseen'); }
     }
@@ -447,11 +433,34 @@ const App = {
     }
     out.appendChild(d); while (out.children.length > 300) out.firstChild.remove();
     out.parentElement.scrollTop = out.parentElement.scrollHeight;
+    if (level !== 'info') this.alert(msg, level, board);
     if (level !== 'info' && !$('#consolePane').classList.contains('active')) {
       this._unseen = (this._unseen || 0) + 1;
       const b = $('#consoleBadge'); b.hidden = false; b.textContent = this._unseen;
     }
   },
+  /** A problem the user should see now (wiring, current, sketch error): a popup that names and flags the part. */
+  alert(msg, level = 'warn', board) {
+    const box = $('#alerts'); if (!box) return;
+    const text = (board && this.boards().length > 1 ? `[${board}] ` : '') + msg;
+    if ([...box.children].some((a) => a.dataset.text === text)) return;
+    const part = this.project.components.find((c) => !DEFS[c.type]?.board && new RegExp(`(^|[\\s'"(])${c.id.replace(/[^\w-]/g, '')}(?=[\\s:'’)]|$)`).test(msg));
+    const a = document.createElement('div');
+    a.className = `alert ${level}`; a.dataset.text = text;
+    a.innerHTML = `<span class="ico">${level === 'error' ? '⛔' : '⚠️'}</span><span class="msg"></span><button class="x" aria-label="Dismiss">×</button>`;
+    a.querySelector('.msg').textContent = text;
+    const close = () => { a.classList.add('out'); setTimeout(() => a.remove(), 200); };
+    a.querySelector('.x').onclick = (e) => { e.stopPropagation(); close(); };
+    a.onclick = () => { if (part) this.canvas.select({ kind: 'comp', id: part.id }); this.showTab('bottom', 'consolePane'); close(); };
+    box.appendChild(a);
+    while (box.children.length > 4) box.firstChild.remove();
+    setTimeout(close, level === 'error' ? 15000 : 9000);
+    if (part) { // flash the part on the diagram
+      const g = document.querySelector(`.cs-comp[data-id="${CSS.escape(part.id)}"]`);
+      if (g) { g.classList.remove('cs-flag'); void g.getBoundingClientRect(); g.classList.add('cs-flag'); setTimeout(() => g.classList.remove('cs-flag'), 3200); }
+    }
+  },
+  clearAlerts() { const box = $('#alerts'); if (box) box.textContent = ''; },
   clearConsole() { $('#consoleOut').textContent = ''; this._unseen = 0; $('#consoleBadge').hidden = true; },
   reportError(e, board) {
     const m = String(e && e.stack || '').match(/(?:<anonymous>|Function):(\d+):\d+/);
@@ -544,24 +553,27 @@ const App = {
   onSelection(sel) {
     const panel = $('#props');
     if (!sel) { panel.hidden = true; return; }
+    const live = this.sim.running; // while running, the card holds only live inputs so it doesn't cover the circuit
     if (sel.kind === 'wire') {
       const w = this.project.wires.find((x) => x.id === sel.id); if (!w) { panel.hidden = true; return; }
       const cur = this.canvas.wireColor(w, this.project.wires.indexOf(w));
-      const cols = ['#5c6370', '#ff4d4d', ...WIRE_COLORS];
+      const cols = ['#1f2328', '#5c6370', '#ff4d4d', '#8b4513', ...WIRE_COLORS];
       panel.innerHTML = `<h4>Wire</h4><div class="sub">${esc(w.from)} → ${esc(w.to)}</div>
         <div class="row"><label>Color</label><div class="swatches">${cols.map((c) => `<button class="swatch${c === cur ? ' on' : ''}" style="background:${esc(c)}" data-color="${esc(c)}" aria-label="Color ${esc(c)}"></button>`).join('')}</div></div>
-        <div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete wire</button></div>`;
+        ${live ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete wire</button></div>'}`;
       panel.querySelectorAll('.swatch').forEach((b) => b.onclick = () => { w.color = b.dataset.color; this.changed({ structure: false }); this.canvas.renderWires(); this.onSelection(sel); });
     } else {
       const c = this.project.components.find((x) => x.id === sel.id); if (!c) { panel.hidden = true; return; }
       const d = DEFS[c.type];
       // boards have no settings and can't be deleted: nothing worth a card (pin info is in the tooltips)
       // a lone board has no settings and can't be deleted; with several boards its card offers Delete
-      if (d.board && this.boards().length < 2) { panel.hidden = true; return; }
-      const rows = (d.controls || []).map((ct) => {
+      if (d.board && this.boards().length < 2 && !(d.controls || []).length) { panel.hidden = true; return; }
+      const controls = (d.controls || []).filter((ct) => !live || ct.type === 'range' || ct.type === 'toggle');
+      if (live && !controls.length) { panel.hidden = true; return; }
+      const rows = controls.map((ct) => {
         const v = c.props[ct.key];
         if (ct.type === 'range') return `<div class="row"><label>${ct.label}<b data-out="${ct.key}">${esc(ct.fmt ? ct.fmt(v) : v)}</b></label><input type="range" min="${ct.min}" max="${ct.max}" step="${ct.step}" value="${esc(v)}" data-key="${ct.key}"></div>`;
-        if (ct.type === 'select') return `<div class="row"><label>${ct.label}</label><select data-key="${ct.key}">${ct.options.map((o) => `<option${String(o) === String(v) ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`;
+        if (ct.type === 'select') return `<div class="row"><label>${ct.label}</label><select data-key="${ct.key}">${ct.options.map((o) => `<option value="${esc(o)}"${String(o) === String(v) ? ' selected' : ''}>${esc(ct.fmt ? ct.fmt(o) : o)}</option>`).join('')}</select></div>`;
         if (ct.type === 'toggle') return `<div class="row"><label class="toggle"><input type="checkbox" data-key="${ct.key}"${v ? ' checked' : ''}> ${ct.label}</label></div>`;
         if (ct.type === 'spice') {
           return `<details class="row spice"${v ? ' open' : ''}><summary>${ct.label}</summary>
@@ -571,9 +583,9 @@ const App = {
         }
         return '';
       }).join('');
-      const hint = d.hint ? `<p class="hint">${d.hint}</p>` : '';
+      const hint = d.hint && !live ? `<p class="hint">${d.hint}</p>` : '';
       panel.innerHTML = `<h4>${esc(d.name)}</h4><div class="sub">${esc(c.id)}</div>${rows}${hint}
-        ${d.board ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
+        ${live ? '' : d.board ? (this.boards().length > 1 ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : '') : d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
       panel.querySelectorAll('[data-key]').forEach((inp) => {
         inp.addEventListener('input', () => {
           const ct = d.controls.find((x) => x.key === inp.dataset.key);
@@ -607,9 +619,7 @@ const App = {
     $('#btnSide').onclick = () => this.toggleSidebar();
     $('#btnDock').onclick = () => this.toggleDock();
     $('#btnTidy').onclick = () => this.toggleTidy();
-$('#btnFirmware').onclick = () => $('#firmwareFile').click();
-    $('#firmwareFile').onchange = (e) => { this.loadFirmware(e.target.files[0]); e.target.value = ''; };
-    $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
+$('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     $('#addPart').onclick = () => this.showTab('editor', 'partsPane');
     const is3d = () => this.view3d.active;
     $('#zoomIn').onclick = () => (is3d() ? this.view3d.zoom(1.2) : this.canvas.zoomCenter(1.2));
@@ -633,6 +643,20 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
       a.download = (this.project.name || 'catsim').replace(/[^\w-]+/g, '_') + '.catsim.json'; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
+    // the sketch of the board open in the editor, ready for the Arduino IDE (File → Open), with the wiring as a comment
+    $('#btnIno').onclick = () => {
+      const id = this.activeBoard || this.primaryId(), board = this.project.components.find((c) => c.id === id);
+      const code = this.editor.get();
+      const wiring = this.project.wires.filter((w) => w.from.startsWith(id + ':') || w.to.startsWith(id + ':')).map((w) => `//   ${w.from}  ->  ${w.to}`);
+      const boardName = board ? DEFS[board.type].name : 'board';
+      const ide = board && board.type === 'uno' ? 'Arduino Uno' : board && board.type === 'esp32c3' ? 'ESP32C3 Dev Module (or "Nologo ESP32C3 Super Mini")' : 'ESP32 Dev Module';
+      const head = `// ${this.project.name} — exported from CatSim for the Arduino IDE\n// Board: ${boardName}  (Tools → Board → ${ide})\n// Libraries used by #include lines: install them with Tools → Manage Libraries.\n${wiring.length ? `// Wiring:\n${wiring.join('\n')}\n` : ''}\n`;
+      const name = (this.project.name || 'sketch').replace(/[^\w-]+/g, '_');
+      const blob = new Blob([head + code], { type: 'text/plain' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${name}.ino`; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      this.toast('Sketch downloaded: open it in the Arduino IDE and press Upload');
+    };
     $('#btnImport').onclick = () => $('#fileInput').click();
     $('#fileInput').onchange = async (e) => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -652,6 +676,7 @@ $('#btnFirmware').onclick = () => $('#firmwareFile').click();
     $('#btnClear').onclick = () => {
       const active = document.querySelector('.tabs[data-group="bottom"] .tab.active').dataset.tab;
       if (active === 'serialPane') { this.term[this.activeBoard] = ''; this.renderTerminal(); }
+      else if (active === 'plotPane') { this.plotter.clear(); this.plotter.render(true); }
       else if (active === 'consolePane') this.clearConsole();
       else { this.sim.broker.log = []; this.sim.broker.topics.clear(); this.renderIot(); }
     };

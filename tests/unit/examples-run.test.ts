@@ -6,7 +6,6 @@ import { AnalogBridge } from '../../src/analog/bridge.ts';
 import { EXAMPLES } from '../../src/examples.js';
 import { normalizeProject } from '../../src/project.ts';
 import { DEFS } from '../../src/components.js';
-import { UnoRunner } from '../../src/avr/uno.ts';
 import { MultiRun } from '../../src/multi.ts';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -22,28 +21,22 @@ async function runExample(key: string, ms: number) {
     log(m: string, level = 'info') { host.logs.push([level, m]); }, reportError(e: unknown) { host.errors.push(e); },
     iotChanged() {}, onSimState() {}, restartSim() {},
   };
-  if ('firmware' in ex) host.project.firmware = { ...(ex as { firmware: { name: string; hex: string } }).firmware };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sim: any;
   const boards = host.project.components.filter((c) => DEFS[c.type].board);
   if (boards.length > 1) { // several boards: each runs its own program in the shared circuit
-    const progs = (ex as { programs?: Record<string, { code?: string; firmware?: { hex: string } }> }).programs || {};
+    const progs = (ex as { programs?: Record<string, { code?: string }> }).programs || {};
     const m = new MultiRun({ get project() { return host.project; }, log: (msg: string, level?: string) => host.log(msg, level), reportError: (e: unknown) => host.reportError(e) });
-    m.start(boards.map((b, i) => ({ id: b.id, type: b.type, code: i === 0 ? ex.code : progs[b.id]?.code, firmware: i === 0 ? (ex as { firmware?: { hex: string } }).firmware?.hex : progs[b.id]?.firmware?.hex })), 4);
+    m.start(boards.map((b, i) => ({ id: b.id, type: b.type, code: i === 0 ? ex.code : progs[b.id]?.code})), 4);
     for (let t = 0; t < ms; t += 50) { await wait(50); m.touch(); }
     m.stop();
     return { sim: { analog: m.bridge }, host };
   }
-  if (host.project.components.some((c) => c.type === 'uno')) {
-    sim = new UnoRunner(host); // real firmware on the emulated ATmega328P
-    sim.setSpeed(2);
-    expect(sim.start(host.project.firmware!.hex)).toBe(true);
-  } else {
-    sim = new Simulator(host);
-    sim.analog = new AnalogBridge(sim);
-    sim.setSpeed(4);
-    sim.start(ex.code);
-  }
+  sim = new Simulator(host);
+  if (boards[0]?.type === 'uno' || boards[0]?.type === 'esp32c3') sim.boardType = boards[0].type;
+  sim.analog = new AnalogBridge(sim);
+  sim.setSpeed(4);
+  sim.start(ex.code);
   for (let t = 0; t < ms; t += 50) { await wait(50); sim.touch(); }
   sim.stop(true);
   return { sim, host };
@@ -58,7 +51,8 @@ describe('examples are electrically sound', () => {
       expect(sim.analog.error).toBeNull();
       expect([...sim.analog.burnt]).toEqual([]);
       expect(host.logs.filter(([lvl, m]) => lvl !== 'info' && /burned out|is carrying|Analog simulation stopped/.test(m))).toEqual([]);
-    });
+      expect(host.logs.filter(([, m]) => /this library isn't available|no OLED|nothing is wired|has no power|no pull-up|isn't connected to anything|wrong way round|barely lights|Short circuit|Not enough current|won't respond|coil gets only/.test(m))).toEqual([]);
+    }, 20_000); // PWM into a logic-level driver (L298N) is heavy to simulate at 4× speed
   }
 
   it('the burnout example really burns its unprotected LED (and only that one)', async () => {

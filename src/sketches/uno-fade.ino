@@ -1,4 +1,4 @@
-// Fade: analogWrite() on pin 9 uses Timer1 hardware PWM (~490 Hz).
+// Fade: analogWrite() on pin 9 is PWM at ~490 Hz.
 // Probe pin 9 on the Scope tab to see the real duty cycle change.
 int brightness = 0;
 int step = 5;
