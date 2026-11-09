@@ -75,12 +75,13 @@ void setup() { Serial.begin(9600); WiFi.begin("lab", ""); while (WiFi.status() !
   mqtt.setServer("broker", 1883); mqtt.setCallback(onMsg); mqtt.connect("${id}"); mqtt.subscribe("lab/#"); }
 void loop() { mqtt.loop(); ${body} delay(50); }`;
     multi.start([
-      { id: 'esp', type: 'esp32', code: client('sender', 'static int n = 0; if (++n == 5) mqtt.publish("lab/hello", "hi from esp");') },
+      { id: 'esp', type: 'esp32', code: client('sender', 'static int n = 0; if (++n % 5 == 0) mqtt.publish("lab/hello", "hi from esp");') },
       { id: 'esp2', type: 'esp32', code: client('receiver', '') },
     ], 4);
+    // the sender republishes every 5th loop: under load the receiver may subscribe after the first one
     let esp2Serial = ''; // boardStates() hands out new serial output once
     await until(multi, () => { esp2Serial += String(multi.boardStates().esp2?.serial ?? ''); return /got hi from esp/.test(esp2Serial); }, 12_000)
       .catch(() => { throw new Error(`no delivery; logs: ${host.logs.join(' | ')}`); });
     expect(host.pubs.length).toBeGreaterThan(0);
-  }, 20_000); // the delivery wait above is 12 s; vitest's 5 s default cut it short under load
+  }, 20_000); // longer than the 12 s delivery wait above (vitest's default is 5 s)
 });

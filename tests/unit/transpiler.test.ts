@@ -44,7 +44,9 @@ describe('transpiler', () => {
   });
 
   it('reports unsupported C++ with a line number', () => {
-    expect(() => transpile('void setup() {}\nstruct P { int x; };\nvoid loop() {}')).toThrow(expect.objectContaining({ line: 2 }));
+    expect(() => transpile('void setup() {}\nclass P { int x; };\nvoid loop() {}')).toThrow(expect.objectContaining({ line: 2 }));
+    // plain-data structs work; structs with methods do not
+    expect(() => transpile('void setup() {}\nstruct P { int x; void go() {} };\nvoid loop() {}')).toThrow(expect.objectContaining({ line: 2 }));
   });
 
   it('keeps line numbers aligned with the source', () => {

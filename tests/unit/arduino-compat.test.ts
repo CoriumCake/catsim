@@ -97,6 +97,19 @@ const cases: Array<[string, string, string, string?]> = [
   ['char cast to int', "Serial.print((int)'A');", '65'],
   ['char arithmetic', "Serial.print('A' + 1);", '66'],
   ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
+  ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
+  ['struct with initialiser', 'Point p = {3, 4}; Serial.print(p.x * p.y);', '12', 'struct Point { int x; int y; };'],
+  ['struct fields default to zero', 'Point p; Serial.print(p.x); Serial.print(p.y);', '00', 'struct Point { int x; int y; };'],
+  ['struct array', 'Point ps[3]; ps[2].y = 9; Serial.print(ps[2].y); Serial.print(ps[0].y);', '90', 'struct Point { int x; int y; };'],
+  ['struct array initialiser', 'Point ps[2] = {{1, 2}, {3, 4}}; Serial.print(ps[1].x);', '3', 'struct Point { int x; int y; };'],
+  ['typedef struct', 'Pin p = {13, true}; Serial.print(p.num); Serial.print(p.on);', '131', 'typedef struct { int num; bool on; } Pin;'],
+  ['struct with String and array fields', 'Song s = {"intro"}; s.notes[1] = 5; Serial.print(s.name); Serial.print(s.notes[1]); Serial.print(s.notes[0]);', 'intro50', 'struct Song { String name; int notes[4]; };'],
+  ['const char* field', 'Item it = {"pen", 3}; Serial.print(it.label); Serial.print(it.qty);', 'pen3', 'struct Item { const char* label; int qty; };'],
+  ['nested struct', 'Line l = {{1, 2}, {3, 4}}; Serial.print(l.b.x);', '3', 'struct Point { int x; int y; };\nstruct Line { Point a; Point b; };'],
+  ['struct passed to and returned from functions', 'Point p = make(2); Serial.print(sum(p));', '6', 'struct Point { int x; int y; };\nPoint make(int v) { Point r = {v, v * 2}; return r; }\nint sum(Point q) { return q.x + q.y; }'],
+  ['struct copy on declaration', 'Point a = {1, 2}; Point b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
+  ['struct member through a pointer', 'Point p = {5, 6}; Point* q = &p; Serial.print(q->y);', '6', 'struct Point { int x; int y; };'],
+  ['two fields on one line', 'RGB c = {1, 2, 3}; Serial.print(c.b);', '3', 'struct RGB { byte r, g, b; };'],
   // chars
   ['digit from a char', "char c = '7'; Serial.print(c - '0');", '7'],
   ['digit from an int holding a char', "int c = '5'; Serial.print(c - '0');", '5'],
@@ -148,10 +161,11 @@ const cases: Array<[string, string, string, string?]> = [
 // expression types (chars as numbers, float printing of whole numbers), references or structs. Each of
 // these runs with it.fails, so fixing one turns it red: move it to `cases` above when that happens.
 const gaps: Array<[string, string, string, string?, string?]> = [
+  // JS objects are references: assigning or passing a struct by value shares it instead of copying
+  ['struct assignment copies', 'Point a = {1, 2}; Point b; b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
   // read() returns a 1-letter string so that c == 'a' keeps working; real Arduino returns the code (97)
   ['int from Serial.read() prints its code', 'int c = Serial.read(); Serial.print(c);', '97', '', 'a'],
   ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
-  ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
   ['unsigned subtraction wraps', 'unsigned int a = 1, b = 2; Serial.print(a - b);', '4294967295'],
 ];
 

@@ -111,7 +111,71 @@ function transpile(source) {
     });
     return items.length ? `const ${items.join(', ')};` + '\n'.repeat((m.match(/\n/g) || []).length) : '';
   });
-  const TYPES = typeRe([...BASE_TYPES, ...enumNames]);
+  // --- plain-data structs: struct Point { int x; int y; }; → a factory that builds { x, y } ---
+  // (methods, constructors and inheritance stay unsupported; struct copies alias, unlike C)
+  const structNames = [];
+  {
+    const parsed = []; // [name, fields]
+    code = code.replace(/\b(typedef\s+)?struct\s+(\w+)?\s*\{([^{}]*)\}\s*(\w+)?\s*;/g, (m, td, tag, body, alias) => {
+      const name = td ? alias : tag;
+      if (!name || (!td && alias) || /[()]/.test(body)) return m; // left for the "not supported" error below
+      const fields = [];
+      for (const decl of body.split(';').map((d) => d.trim()).filter(Boolean)) {
+        const parts = []; let d = 0, cur = '';
+        for (const ch of decl) { if ('([{'.includes(ch)) d++; else if (')]}'.includes(ch)) d--; if (ch === ',' && d === 0) { parts.push(cur); cur = ''; } else cur += ch; }
+        parts.push(cur);
+        const first = parts[0].trim().match(/^(.*?[\w*&])\s*\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)(?:=\s*([\s\S]+))?$/);
+        if (!first) return m;
+        const type = first[1].replace(/\b(?:const|volatile|static)\b/g, '').trim();
+        fields.push({ type, name: first[2], dims: first[3], init: first[4] });
+        for (const pt of parts.slice(1)) {
+          const fm = pt.trim().match(/^([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)(?:=\s*([\s\S]+))?$/);
+          if (!fm) return m;
+          fields.push({ type, name: fm[1], dims: fm[2], init: fm[3] });
+        }
+      }
+      structNames.push(name); parsed.push([name, fields]);
+      return `\u0004${parsed.length - 1}\u0004` + '\n'.repeat((m.match(/\n/g) || []).length);
+    });
+    const brace = (s) => s.replace(/\{/g, '[').replace(/\}/g, ']');
+    code = code.replace(/\u0004(\d+)\u0004/g, (mm, i) => {
+      const [name, fields] = parsed[+i];
+      const props = fields.map((f, k) => {
+        const sub = structNames.includes(f.type) ? f.type : null;
+        const dims = (f.dims.match(/\[([^\]]*)\]/g) || []).map((x) => x.slice(1, -1).trim());
+        let def = f.init !== undefined ? brace(f.init.trim())
+          : sub ? `__new_${sub}()`
+            : dims.length && !/^(?:const\s+)?char$/.test(f.type) ? `__arr(${dims.join(', ')})`
+              : /String|char/.test(f.type) ? '""' : '0';
+        if (dims.length && sub) def = `Array.from({ length: ${dims[0]} }, () => __new_${sub}())`;
+        return `${f.name}: v[${k}] !== undefined ? ${sub && !dims.length ? `__new_${sub}(v[${k}])` : `v[${k}]`} : ${def}`;
+      });
+      return `function __new_${name}(v) { v = v || []; return { ${props.join(', ')} }; }`;
+    });
+    // declarations: Point p;  Point p = {1, 2};  Point q = p;  Point ps[3];  Point ps[2] = {{1, 2}, {3, 4}};
+    if (structNames.length) {
+      const declRe = new RegExp(`(?:\\bstruct\\s+)?\\b(${structNames.join('|')})(\\s*\\*\\s*|\\s+)([A-Za-z_]\\w*)\\s*((?:\\[[^\\]]*\\]\\s*)*)(=\\s*)?`, 'g');
+      let out = ''; let last = 0; let dm;
+      while ((dm = declRe.exec(code))) {
+        const [whole, sname, sep, vname, dimsRaw, eq] = dm; const ptr = sep.includes('*'); let j = dm.index + whole.length; let init = null;
+        if (eq) {
+          if (code[j] === '{') { const e = matchClose(code, j, '{', '}'); if (e < 0) continue; init = { lit: brace(code.slice(j, e + 1)) }; j = e + 1; } else {
+            const e = code.indexOf(';', j); if (e < 0) continue; init = { expr: code.slice(j, e).trim() }; j = e;
+          }
+        }
+        let k = j; while (/[ \t]/.test(code[k])) k++;
+        if (code[k] !== ';') continue; // not a declaration (a parameter, a cast, …)
+        const dims = (dimsRaw.match(/\[([^\]]*)\]/g) || []).map((x) => x.slice(1, -1).trim());
+        let val;
+        if (ptr) val = init && init.expr ? init.expr.replace(/^&\s*/, '') : 'null'; // a pointer shares the struct
+        else if (dims.length) val = init && init.lit ? (dims[0] ? `Array.from({ length: ${dims[0]} }, (_, i) => __new_${sname}(${init.lit}[i]))` : `${init.lit}.map((x) => __new_${sname}(x))`) : `Array.from({ length: ${dims[0]} }, () => __new_${sname}())`;
+        else val = init ? (init.lit ? `__new_${sname}(${init.lit})` : `structuredClone(${init.expr})`) : `__new_${sname}()`;
+        out += code.slice(last, dm.index) + `let ${vname} = ${val}`; last = j; declRe.lastIndex = j;
+      }
+      code = out + code.slice(last);
+    }
+  }
+  const TYPES = typeRe([...BASE_TYPES, ...enumNames, ...structNames]);
   const INTS = typeRe([...INT_TYPES, ...enumNames]);
 
   if (/\b(class|struct|template|typedef|namespace)\b/.test(code)) {
