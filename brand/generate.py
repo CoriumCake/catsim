@@ -75,7 +75,7 @@ if __name__ == '__main__':
     out('catsim-horizontal.svg', symbol() + wordmark(dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
     out('catsim-horizontal-on-dark.svg', symbol() + wordmark(cat_fill=LIGHT, dx=228+gap, dy=-24)[0], f"0 0 {total} 256")
     # tab icon: the mark in white on a rounded orange tile, so it pops on light and dark tab bars
-    sc = 1.08; off = 128 - 128 * sc
+    sc = 1.19; off = 128 - 128 * sc
     out('web/favicon.svg', f'<rect width="256" height="256" rx="56" fill="{ORANGE}"/>'
         + symbol(bracket='#FFFFFF', accent='#FFFFFF').replace('<g>', f'<g transform="translate({off:.2f} {off:.2f}) scale({sc})">', 1), title='CatSim')
     print('wrote the CatSim logo SVGs')
