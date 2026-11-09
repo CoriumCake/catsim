@@ -79,8 +79,8 @@ void loop() { mqtt.loop(); ${body} delay(50); }`;
       { id: 'esp2', type: 'esp32', code: client('receiver', '') },
     ], 4);
     let esp2Serial = ''; // boardStates() hands out new serial output once
-    await until(multi, () => { esp2Serial += String(multi.boardStates().esp2?.serial ?? ''); return /got hi from esp/.test(esp2Serial); }, 8000)
+    await until(multi, () => { esp2Serial += String(multi.boardStates().esp2?.serial ?? ''); return /got hi from esp/.test(esp2Serial); }, 12_000)
       .catch(() => { throw new Error(`no delivery; logs: ${host.logs.join(' | ')}`); });
     expect(host.pubs.length).toBeGreaterThan(0);
-  });
+  }, 20_000); // the delivery wait above is 12 s; vitest's 5 s default cut it short under load
 });

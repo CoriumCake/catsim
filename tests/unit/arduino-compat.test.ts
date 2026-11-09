@@ -8,7 +8,7 @@ import { DEFS } from '../../src/components.js';
 let live: any = null;
 afterEach(() => { live?.stop(true); live = null; });
 
-async function run(body: string, globals = '') {
+async function run(body: string, globals = '', input = '') {
   const host = {
     project: { name: 't', code: '', components: [{ id: 'esp', type: 'esp32', x: 0, y: 0, props: { ...DEFS.esp32.props } }], wires: [] },
     logs: [] as Array<[string, string]>, errors: [] as unknown[],
@@ -18,8 +18,10 @@ async function run(body: string, globals = '') {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sim = new Simulator(host) as any; live = sim;
+  const started = sim.start(`${globals}\nvoid setup() {\n${body}\n}\nvoid loop() { delay(1000); }`);
+  sim.serialIn = input; // start() clears it synchronously; setup() runs after
   const ok = await Promise.race([
-    sim.start(`${globals}\nvoid setup() {\n${body}\n}\nvoid loop() { delay(1000); }`),
+    started,
     new Promise((r) => setTimeout(() => r('started'), 60)),
   ]);
   await new Promise((r) => setTimeout(r, 40));
@@ -92,6 +94,24 @@ const cases: Array<[string, string, string, string?]> = [
   ['int function return truncates', 'Serial.print(half(5));', '2', 'int half(int v) { return v / 2; }'],
   ['float = int/int', 'float f = 7 / 2; Serial.print(f);', '3.00'],
   ['sqrt prints as float', 'Serial.print(sqrt(16));', '4.00'],
+  ['char cast to int', "Serial.print((int)'A');", '65'],
+  ['char arithmetic', "Serial.print('A' + 1);", '66'],
+  ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
+  // chars
+  ['digit from a char', "char c = '7'; Serial.print(c - '0');", '7'],
+  ['digit from an int holding a char', "int c = '5'; Serial.print(c - '0');", '5'],
+  ['char offset', "char c = 'c'; Serial.print(c - 'a');", '2'],
+  ['char + int', "char c = 'A'; Serial.print(c + 2);", '67'],
+  ['char from a number', 'char c = 66; Serial.print(c);', 'B'],
+  ['(char) cast', 'Serial.print((char)65); Serial.print((char)(65 + 1));', 'AB'],
+  ['char += n', "char c = 'a'; c += 2; Serial.print(c);", 'c'],
+  ['String += char', "String s = \"ab\"; s += 'c'; Serial.print(s);", 'abc'],
+  ['String + char', "String s = \"x\"; s = s + 'y'; Serial.print(s);", 'xy'],
+  ['char comparison', "char c = 'b'; Serial.print(c >= 'a' && c <= 'z');", '1'],
+  ['switch on a char', "char c = 'q'; switch (c) { case 'q': Serial.print(\"Q\"); break; default: Serial.print(\"?\"); }", 'Q'],
+  ['char loop', "for (char c = 'a'; c <= 'c'; c++) Serial.print(c);", 'abc'],
+  ['escaped char literal', "Serial.print((int)'\\n');", '10'],
+  ['charAt minus a char', 'String s = "42"; Serial.print(s.charAt(0) - \'0\');', '4'],
   // float printing
   ['whole float prints 2 decimals', 'float t = 21; Serial.println(t);', '21.00\r\n'],
   ['float param prints 2 decimals', 'show(3);', '3.00', 'void show(float v) { Serial.print(v); }'],
@@ -127,10 +147,9 @@ const cases: Array<[string, string, string, string?]> = [
 // Known gaps: the ESP32 runner is a regex transpiler to JavaScript. It tracks integer variable types, but not
 // expression types (chars as numbers, float printing of whole numbers), references or structs. Each of
 // these runs with it.fails, so fixing one turns it red: move it to `cases` above when that happens.
-const gaps: Array<[string, string, string, string?]> = [
-  ['char cast to int', "Serial.print((int)'A');", '65'],
-  ['char arithmetic', "Serial.print('A' + 1);", '66'],
-  ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
+const gaps: Array<[string, string, string, string?, string?]> = [
+  // read() returns a 1-letter string so that c == 'a' keeps working; real Arduino returns the code (97)
+  ['int from Serial.read() prints its code', 'int c = Serial.read(); Serial.print(c);', '97', '', 'a'],
   ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
   ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
   ['unsigned subtraction wraps', 'unsigned int a = 1, b = 2; Serial.print(a - b);', '4294967295'],
@@ -143,7 +162,13 @@ describe('Arduino compatibility', () => {
 });
 
 describe('Arduino compatibility: known gaps', () => {
-  it.fails.each(gaps)('%s', async (_name, body, expected, globals) => {
-    expect(await run(body, globals)).toBe(expected);
+  it.fails.each(gaps)('%s', async (_name, body, expected, globals, input) => {
+    expect(await run(body, globals, input)).toBe(expected);
+  });
+});
+
+describe('serial input in the compat harness', () => {
+  it('reaches Serial.read()', async () => {
+    expect(await run('char c = Serial.read(); Serial.print(c == \'a\');', '', 'a')).toBe('1');
   });
 });

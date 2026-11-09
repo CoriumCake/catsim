@@ -497,7 +497,10 @@ class Simulator {
       __i8: (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.trunc(v) << 24) >> 24 : v),
       __u8: (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) & 0xff : typeof v === 'boolean' ? +v : v),
       __b: (v) => (typeof v === 'number' || typeof v === 'boolean' ? !!v : v),
-      __idiv: (a, b) => (typeof a === 'number' && typeof b === 'number' && b !== 0 ? Math.trunc(a / b) : a / b),
+      // chars are 1-letter strings: __ord gives the code for arithmetic, __ch turns a number back into a char
+      __ord: (x) => (typeof x === 'string' && x.length === 1 ? x.charCodeAt(0) : x),
+      __ch: (x) => (typeof x === 'number' && x >= 0 && Number.isFinite(x) ? String.fromCharCode(Math.trunc(x) & 0xff) : x),
+      __idiv: (a, b) => { a = typeof a === 'string' && a.length === 1 ? a.charCodeAt(0) : a; b = typeof b === 'string' && b.length === 1 ? b.charCodeAt(0) : b; return typeof a === 'number' && typeof b === 'number' && b !== 0 ? Math.trunc(a / b) : a / b; },
       __arr: zeros,
       // int a[5] = {1, 2}; → the missing elements are zero, as in C
       __pad: function pad(a, n, ...rest) {

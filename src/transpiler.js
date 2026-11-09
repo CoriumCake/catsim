@@ -20,11 +20,13 @@ const QUAL = '(?:(?:static|const|volatile|constexpr|unsigned|signed|inline)\\s+)
 
 // C integer type → the runtime helper that wraps a value to that type's width (ESP32: int and long are 32 bit).
 function wrapFor(type) {
+  if (/\bsigned\s+char\b/.test(type) && !/\bunsigned\b/.test(type)) return '__i8';
   const t = type.replace(/\b(?:static|const|volatile|constexpr|inline|signed)\b/g, ' ').replace(/\s+/g, ' ').trim();
   if (/^(?:bool|boolean)$/.test(t)) return '__b';
   if (/^(?:unsigned )?long long$|^u?int64_t$/.test(t)) return '__i';
   if (/^(?:unsigned char|byte|uint8_t)$/.test(t)) return '__u8';
-  if (/^(?:char|int8_t)$/.test(t)) return '__i8';
+  if (t === 'char') return '__ch'; // chars stay 1-letter strings; arithmetic converts them to codes
+  if (t === 'int8_t') return '__i8';
   if (/^(?:unsigned short|uint16_t|word)$/.test(t)) return '__u16';
   if (/^(?:short|int16_t)$/.test(t)) return '__i16';
   if (/^(?:unsigned(?: int| long)?|uint32_t|size_t)$/.test(t)) return '__u32';
@@ -32,6 +34,7 @@ function wrapFor(type) {
 }
 
 const FLOAT_CAST = '\u0001';
+const CHAR_CAST = '\u0003';
 // keep a rewrite's line count so runtime errors still point at the right line
 const keepNl = (mm, out) => out + '\n'.repeat(Math.max(0, (mm.match(/\n/g) || []).length - (out.match(/\n/g) || []).length));
 
@@ -148,7 +151,8 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   code = code.replace(/\(\s*(?:const\s+)?(?:unsigned\s+)?(?:char|byte|uint8_t|void)\s*\*\s*\)/g, '');
   // (float)/(double) leave a marker so integer division never takes the operand next to them; removed at the end
   code = code.replace(/\(\s*(?:float|double)\s*\)\s*/g, FLOAT_CAST);
-  code = code.replace(/\(\s*(?:String|char|bool|boolean)\s*\)/g, '');
+  code = code.replace(/\(\s*char\s*\)\s*/g, CHAR_CAST);
+  code = code.replace(/\(\s*(?:String|bool|boolean)\s*\)/g, '');
   code = code.replace(/\(\s*(?:int|short|byte|uint8_t|uint16_t|int8_t|int16_t|int32_t|unsigned\s+int|unsigned\s+char|word)\s*\)\s*/g, '~~');
   code = code.replace(/\(\s*(?:long\s+long|unsigned\s+long|long|uint32_t|uint64_t|int64_t|size_t|unsigned)\s*\)\s*/g, '+');
 
@@ -165,7 +169,7 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   const floatFns = new Set(['sqrt', 'pow', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'log', 'log10', 'fabs', 'floor', 'ceil', 'fmod']);
   const isFloatType = (t) => /^\s*(?:(?:static|const|volatile|constexpr)\s+)*(?:float|double|long double)\s*$/.test(t);
   const noteFloat = (name, f) => floatVar.set(name, floatVar.has(name) ? floatVar.get(name) && f : f);
-  const intTypeRe = new RegExp(`^\\s*${QUAL}(?:${INTS}|bool|boolean)\\s*$`); // types whose values wrap/convert on assignment
+  const intTypeRe = new RegExp(`^\\s*${QUAL}(?:${INTS}|bool|boolean|char)\\s*$`); // types whose values wrap/convert on assignment
   code = code.replace(new RegExp(`(^|[;}\\n])([ \\t]*)(${QUAL}(?:void|${TYPES}))((?:\\s*[\\*&]\\s*|\\s+))([A-Za-z_]\\w*)\\s*\\(([^()]*)\\)\\s*\\{`, 'g'),
     (m, a, ws, rtype, sep, name, params) => {
       fnNames.push(name);
@@ -232,14 +236,45 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
         const dm = pt.match(/^(\s*)([A-Za-z_]\w*)(\s*)(=\s*)?([\s\S]*)$/);
         if (!dm || (!dm[4] && dm[5].trim())) return null; // not a plain `name` / `name = value`
         noteVar(dm[2], w); noteFloat(dm[2], isFloatType(type));
-        const plainInt = /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+)$/.test(dm[5].trim()) && w !== '__b' && w !== '__u8' && w !== '__i8' && w !== '__u16' && w !== '__i16';
+        const plainInt = /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+)$/.test(dm[5].trim()) && w !== '__b' && w !== '__ch' && w !== '__u8' && w !== '__i8' && w !== '__u16' && w !== '__i16';
         return dm[4] && w && !plainInt ? `${dm[1]}${dm[2]}${dm[3]}${dm[4]}${w}(${dm[5].trim()})` : pt;
       });
       return out.includes(null) ? mm : keepNl(mm, `${pre}${ws}${type} ${out.join(',').trimStart()};`);
     });
     const ints = [...varWrap].filter(([, w]) => w).map(([n]) => n);
+    const W = (n) => varWrap.get(n);
+    const V = (n) => (W(n) === '__ch' ? `__ord(${n})` : n); // a char variable's value as a number
+    // chars in arithmetic are numbers: 'A' + 1 == 66, c - '0' == digit. Comparisons keep working on the
+    // 1-letter strings that Serial.read(), charAt() and char literals give.
+    {
+      const isCharLit = (t) => { const m = /^__STR(\d+)__$/.exec(t); return m && strs[+m[1]][0] === "'" ? strs[+m[1]] : null; };
+      const code1 = (lit) => { const body = lit.slice(1, -1); const esc = { n: 10, r: 13, t: 9, '0': 0, '\\': 92, "'": 39, '"': 34 }; return body[0] === '\\' ? (esc[body[1]] ?? body.charCodeAt(1)) : body.charCodeAt(0); };
+      const isNum = (t) => /^(?:0[xX][0-9a-fA-F]+|0o[0-7]+|\d+(?:\.\d*)?)$/.test(t);
+      const charish = (t) => isCharLit(t) || W(t) === '__ch';
+      const numeric = (t) => isNum(t) || charish(t) || (W(t) && W(t) !== '__ch');
+      const conv = (t) => { const lit = isCharLit(t); return lit ? String(code1(lit)) : isNum(t) ? t : `__ord(${t})`; };
+      const OPND = '(?<![\\w.\\]])([A-Za-z_]\\w*(?:\\s*\\[[^\\]]*\\])*|\\d+(?:\\.\\d*)?)(?![\\w(.\\[])';
+      const OP = '(<<|>>|(?<![-+&|])[-*/%^](?![-=])|(?<![&])&(?![&=])|(?<![|])\\|(?![|=])|(?<!\\+)\\+(?![+=]))';
+      const pair = new RegExp(`${OPND}(\\s*)${OP}(\\s*)${OPND}`, 'g');
+      let prev;
+      do {
+        prev = code;
+        code = code.replace(pair, (mm, l, s1, op, s2, r) => {
+          if (!charish(l) && !charish(r)) return mm;
+          if (op === '+' ? !(numeric(l) && numeric(r)) : false) return mm; // String + 'c' stays text
+          return `${conv(l)}${s1}${op}${s2}${conv(r)}`;
+        });
+      } while (code !== prev);
+    }
+    // c++ / c-- on a char anywhere (for headers too): the next/previous letter
+    const chars = [...varWrap].filter(([, w]) => w === '__ch').map(([n]) => n);
+    if (chars.length) {
+      const C = `(${chars.join('|')})`;
+      code = code.replace(new RegExp(`(?<![\\w.])(?:(\\+\\+|--)${C}|${C}(\\+\\+|--))(?![\\w(])(?!\\s*;)`, 'g'),
+        (mm, op1, n1, n2, op2) => { const n = n1 || n2; return `(${n} = __ch(__ord(${n}) ${(op1 || op2)[0]} 1))`; });
+    }
     if (ints.length) {
-      const N = `(${ints.join('|')})`; const W = (n) => varWrap.get(n);
+      const N = `(${ints.join('|')})`;
       const pre = '(^|[;{}\\n)])(\\s*)';
       // a right-hand side must be one whole expression: `for (…; i += 2) { f(i); }` is not a statement
       const whole = (rhs) => { if (/[{}]/.test(rhs) || hasTopLevelComma(rhs)) return false; let d = 0; for (const ch of rhs) { if ('(['.includes(ch)) d++; else if (')]'.includes(ch) && --d < 0) return false; } return d === 0; };
@@ -248,10 +283,10 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
         (mm, a, ws, n, rhs) => (whole(rhs) ? keepNl(mm, `${a}${ws}${n} = ${W(n)}(${rhs});`) : mm));
       // x += v;  x <<= v;  …
       code = code.replace(new RegExp(`${pre}${N}\\s*(\\+|-|\\*|\\/|%|<<|>>|&|\\||\\^)=\\s*([^;]*);`, 'g'),
-        (mm, a, ws, n, op, rhs) => (whole(rhs) ? keepNl(mm, `${a}${ws}${n} = ${W(n)}(${n} ${op} (${rhs}));`) : mm));
+        (mm, a, ws, n, op, rhs) => (whole(rhs) ? keepNl(mm, `${a}${ws}${n} = ${W(n)}(${V(n)} ${op} (${rhs}));`) : mm));
       // x++;  --x;
       code = code.replace(new RegExp(`${pre}(?:(\\+\\+|--)${N}|${N}(\\+\\+|--))\\s*;`, 'g'),
-        (mm, a, ws, op1, n1, n2, op2) => { const n = n1 || n2; return keepNl(mm, `${a}${ws}${n} = ${W(n)}(${n} ${(op1 || op2)[0]} 1);`); });
+        (mm, a, ws, op1, n1, n2, op2) => { const n = n1 || n2; return keepNl(mm, `${a}${ws}${n} = ${W(n)}(${V(n)} ${(op1 || op2)[0]} 1);`); });
       // integer division between integer variables/literals: avg = sum / count
       const opnd = `(${ints.join('|')}|\\d+)`;
       code = code.replace(new RegExp(`(?<![\\w.)\\]*\\/%\\u0001]\\s*)(?<![\\w.)\\]*\\/%\\u0001])\\b${opnd}\\s*\\/\\s*${opnd}\\b(?![\\w.(\\[])`, 'g'),
@@ -277,6 +312,10 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       }
       for (const c of closes.sort((a, b) => b - a)) code = code.slice(0, c) + ', 2' + code.slice(c);
     }
+
+    // (int)'A' → 65, (int)c → its code
+    code = code.replace(/~~\s*__STR(\d+)__/g, (mm, n) => (strs[+n][0] === "'" ? String(strs[+n].length > 3 ? ({ n: 10, r: 13, t: 9, '0': 0 }[strs[+n][2]] ?? strs[+n].charCodeAt(2)) : strs[+n].charCodeAt(1)) : mm));
+    code = code.replace(/~~\s*([A-Za-z_]\w*)(?![\w(.\[])/g, (mm, n) => (varWrap.get(n) === '__ch' ? `~~__ord(${n})` : mm));
 
     // int-returning functions return whole numbers of their type
     for (const [fname, w] of fnWrap) {
@@ -322,6 +361,8 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
   code = res + code.slice(last);
 
   // --- restore string literals ---
+  code = code.replace(new RegExp(`${CHAR_CAST}\\s*(\\([^()]*\\)|[A-Za-z_][\\w.]*(?:\\([^()]*\\)|\\[[^\\]]*\\])?|\\d+)`, 'g'), '__ch($1)');
+  code = code.split(CHAR_CAST).join('');
   code = code.split(FLOAT_CAST).join('');
   code = code.replace(/__STR(\d+)__/g, (mm, n) => strs[+n]);
   return { js: code, functions: fnNames };
