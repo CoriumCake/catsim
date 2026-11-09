@@ -204,40 +204,36 @@ test('555 timer blinks at the frequency its R and C set', async ({ page }) => {
   expect(Math.abs(avg - expected) / expected).toBeLessThan(0.05);
 });
 
-test('Arduino Uno runs real compiled firmware (Blink)', async ({ page }) => {
+test('Arduino Uno runs its Blink sketch', async ({ page }) => {
   await loadExample(page, 'uno-blink');
   expect(await page.evaluate(() => window.CatSim.App.boards().map((b: { type: string }) => b.type))).toEqual(['uno']);
   await expect(page.locator('#boardTabs')).toBeHidden(); // one board: no board tabs
-  await expect(page.locator('#btnFirmware')).toBeVisible();
   await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toMatch(/Uno blink started\s+tick\s+tock/);
   await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 3000 }).toBeGreaterThan(0.5);
 });
 
-test('add an Arduino Uno next to the ESP32, upload its .hex and run both', async ({ page }) => {
+test('add an Arduino Uno next to the ESP32 and run both', async ({ page }) => {
   await loadExample(page, 'blink');
   await page.click('#addPart'); // Parts tab
   await page.click('#paletteList .part[data-type="uno"]');
-  await expect(page.locator('#boardTabs .board-tab.active')).toHaveText('uno · firmware');
-  await expect(page.locator('#unoBanner')).toContainText('Upload .hex');
-  await expect(page.locator('#btnFirmware')).toBeVisible();
-  await page.click('#btnRun');
-  await expect(page.locator('#consoleOut')).toContainText('uno has none yet'); // no firmware yet
-  const hex = (await import('node:fs')).readFileSync(new URL('../../src/firmware/uno-blink.hex', import.meta.url), 'utf8');
-  await page.locator('#firmwareFile').setInputFiles({ name: 'blink.hex', mimeType: 'text/plain', buffer: Buffer.from(hex) });
-  await expect(page.locator('#unoBanner')).toContainText('blink.hex');
+  await expect(page.locator('#boardTabs .board-tab.active')).toHaveText('uno · sketch');
   await startSim(page);
-  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('Uno blink started'); // the Uno's terminal
+  await expect.poll(() => page.evaluate(() => window.CatSim.App.sim.boardState('uno')?.out?.[13] !== undefined), { timeout: 5000 }).toBe(true); // template blinks pin 13
   await page.click('#boardTabs [data-board="esp"]');
   await expect.poll(() => serial(page), { timeout: 5000 }).toContain('ESP32 blink started'); // the ESP32's terminal
-  // corrupted firmware is refused with a line number
-  await page.click('#btnRun');
-  await page.click('#boardTabs [data-board="uno"]');
-  await page.locator('#firmwareFile').setInputFiles({ name: 'bad.hex', mimeType: 'text/plain', buffer: Buffer.from(hex.replace(/^(:10.{36})../m, '$1FF')) });
-  await expect(page.locator('#consoleOut')).toContainText('bad checksum');
 });
 
-test('Uno Fade shows ~490 Hz hardware PWM on the scope', async ({ page }) => {
+test('an Arduino Uno runs the sketch typed in the editor', async ({ page }) => {
+  await loadExample(page, 'uno-button');
+  await startSim(page);
+  await expect.poll(() => partState(page, 'led').then((s) => s[0].b)).toBeLessThan(0.05);
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('btn1', true));
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('pressed');
+  await expect.poll(() => partState(page, 'led').then((s) => s[0].b)).toBeGreaterThan(0.5); // 5 V through 220 Ω
+});
+
+test('Uno Fade shows ~490 Hz PWM on the scope', async ({ page }) => {
   await loadExample(page, 'uno-fade');
   await page.click('.tab[data-tab="scopePane"]');
   const v = await page.locator('select[data-ch="0"] option').evaluateAll((os) => (os as HTMLOptionElement[]).find((o) => /^D9/.test(o.textContent || ''))?.value);
@@ -303,7 +299,7 @@ test('the bottom panel folds away and comes back; unread terminal output is flag
   await expect(page.locator('#bottom')).toHaveClass(/collapsed/);
 });
 
-test('the edit card opens next to the selected part (not for the board)', async ({ page }) => {
+test('the edit card opens next to the selected part (a lone board only offers its power setting)', async ({ page }) => {
   await loadExample(page, 'pot');
   await page.waitForTimeout(300); // let the view settle after fitting
   for (const id of ['r1', 'pot1']) {
@@ -316,7 +312,34 @@ test('the edit card opens next to the selected part (not for the board)', async 
     expect(Math.max(gapAbove, gapBelow)).toBeGreaterThanOrEqual(0); // touching, never covering it
   }
   await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
+  await expect(page.locator('#props')).toContainText('Powered by');
+  await expect(page.locator('#props [data-act="delete"]')).toHaveCount(0);
+});
+
+test('on a short canvas the edit card moves beside the part instead of covering it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await loadExample(page, 'button');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'btn1' }));
+  await page.waitForTimeout(100);
+  const part = (await page.locator('.cs-comp[data-id="btn1"] .cs-body').boundingBox())!;
+  const card = (await page.locator('#props').boundingBox())!;
+  const ox = Math.min(part.x + part.width, card.x + card.width) - Math.max(part.x, card.x);
+  const oy = Math.min(part.y + part.height, card.y + card.height) - Math.max(part.y, card.y);
+  expect(ox <= 0 || oy <= 0).toBe(true); // the button stays clickable
+});
+
+test('while running, the edit card shows only live inputs, and none for parts without them', async ({ page }) => {
+  await loadExample(page, 'pot'); await startSim(page);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'r1' }));
+  await expect(page.locator('#props')).toBeHidden(); // a resistor has nothing to change mid-run
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'pot1' }));
+  await expect(page.locator('#props input[data-key="value"]')).toBeVisible(); // the knob still turns
+  await expect(page.locator('#props [data-act="delete"]')).toHaveCount(0);
+  await page.click('#btnRun'); // stopping closes the card instead of reopening it in full
   await expect(page.locator('#props')).toBeHidden();
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'pot1' }));
+  await expect(page.locator('#props [data-act="delete"]')).toBeVisible(); // clicking it again shows the full card
 });
 
 test('Tidy wires routes every wire at right angles and is saved with the project', async ({ page }) => {
@@ -359,7 +382,7 @@ test('add a second board from Parts, give it its own sketch, and delete it again
   await expect(page.locator('#boardTabs')).toBeHidden();
   expect(await page.evaluate(() => window.CatSim.App.project.components.filter((c: { type: string }) => c.type === 'esp32').length)).toBe(1);
   await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'esp' }));
-  await expect(page.locator('#props')).toBeHidden();
+  await expect(page.locator('#props [data-act="delete"]')).toHaveCount(0); // the last board can't be deleted
 });
 
 test('a buzzer is muted from its own card; the toolbar has no global sound button', async ({ page }) => {
@@ -373,4 +396,159 @@ test('a buzzer is muted from its own card; the toolbar has no global sound butto
   expect(await muted()).toBe(true);
   await box.uncheck();
   expect(await muted()).toBe(false);
+});
+
+test('muting a buzzer stops its sound while the simulation keeps running', async ({ page }) => {
+  await loadExample(page, 'alarm'); await startSim(page);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.components.find((x: { type: string }) => x.type === 'pir').props.motion = true; A.sim.syncProject(); });
+  const playing = () => page.evaluate(() => window.CatSim.Audio.osc.has('bz1'));
+  // asserts on the oscillator, not audible output: headless Chrome may keep the AudioContext suspended
+  test.skip(!(await page.evaluate(() => !!window.CatSim.Audio.ctx)), 'no Web Audio in this browser');
+  await expect.poll(playing).toBe(true);
+  await page.evaluate(() => window.CatSim.App.canvas.select({ kind: 'comp', id: 'bz1' }));
+  await page.locator('#props input[data-key="muted"]').check();
+  await expect.poll(playing).toBe(false);
+  expect((await partState(page, 'buzzer')).some((st: { f: number }) => st.f > 0)).toBe(true); // still driven, just silent
+  await page.locator('#props input[data-key="muted"]').uncheck();
+  await expect.poll(playing).toBe(true);
+});
+
+// ---------- library parts ----------
+/** Page coordinates of a point inside a part (its own 2D coordinates). */
+const partPoint = (page: import('@playwright/test').Page, id: string, x: number, y: number) => page.evaluate(([i, px, py]) => {
+  const g = document.querySelector(`.cs-comp[data-id="${i}"]`) as SVGGraphicsElement;
+  const p = new DOMPoint(px as number, py as number).matrixTransform(g.getScreenCTM()!);
+  return { x: p.x, y: p.y };
+}, [id, x, y] as const);
+
+test('keypad lock: clicking the keypad keys in the 2D view unlocks it', async ({ page }) => {
+  await loadExample(page, 'keypad'); await startSim(page);
+  await expect.poll(() => serial(page)).toContain('Enter the code');
+  for (const [r, k] of [[0, 0], [0, 1], [0, 2], [1, 0], [3, 2]]) { // 1 2 3 4 #
+    const p = await partPoint(page, 'keypad1', 9 + k * 33 + 15, 9 + r * 33 + 15);
+    await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.waitForTimeout(40); await page.mouse.up();
+  }
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('1234# unlocked');
+  await expect.poll(async () => (await partState(page, 'servo'))[0].angle).toBe(90);
+});
+
+test('IR remote: clicking key 1 toggles the first LED and prints the NEC code', async ({ page }) => {
+  await loadExample(page, 'irremote'); await startSim(page);
+  const p = await partPoint(page, 'remote1', 8 + 10, 26 + 4 * 24 + 10); // key "1"
+  await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.waitForTimeout(40); await page.mouse.up();
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('Command=0xC');
+  await expect.poll(async () => (await partState(page, 'led'))[0].b).toBeGreaterThan(0.3);
+});
+
+test('library parts show live state: OLED pixels, LED ring colors, TM1637 digits, stepper angle', async ({ page }) => {
+  await loadExample(page, 'oled'); await startSim(page);
+  await expect.poll(() => page.evaluate(() => (document.querySelector('.cs-comp[data-id="oled1"] path[d^="M"]:not([stroke])')?.getAttribute('d') ?? '').length), { timeout: 5000 }).toBeGreaterThan(100);
+  await loadExample(page, 'neopixel'); await startSim(page);
+  await expect.poll(async () => ((await partState(page, 'ws2812_ring'))[0].rgb ?? []).filter((c: number) => c > 0).length, { timeout: 5000 }).toBe(16);
+  await loadExample(page, 'clock'); await startSim(page);
+  await expect.poll(async () => (await partState(page, 'tm1637'))[0].d?.segs.some((s: number) => s > 0), { timeout: 5000 }).toBe(true);
+  await loadExample(page, 'stepper'); await startSim(page);
+  await expect.poll(async () => (await partState(page, 'stepper'))[0].angle, { timeout: 5000 }).toBeGreaterThan(20);
+});
+
+test('Preferences survive Stop and Start (saved data is kept by the page)', async ({ page }) => {
+  await loadExample(page, 'prefs'); await startSim(page);
+  await expect.poll(() => serial(page)).toContain('Boot #1');
+  await page.click('#btnRun'); await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('Boot #2');
+});
+
+test('wiring problems pop up as alerts that point at the part', async ({ page }) => {
+  await loadExample(page, 'blink');
+  // turn the LED around
+  await page.evaluate(() => { const A = window.CatSim.App; for (const w of A.project.wires) { w.from = w.from.replace('led1:A', 'led1:X').replace('led1:C', 'led1:A').replace('led1:X', 'led1:C'); w.to = w.to.replace('led1:A', 'led1:X').replace('led1:C', 'led1:A').replace('led1:X', 'led1:C'); } A.changed(); });
+  await startSim(page);
+  const alert = page.locator('#alerts .alert', { hasText: 'led1 is the wrong way round' });
+  await expect(alert).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.cs-comp[data-id="led1"]')).toHaveClass(/cs-flag/);
+  await alert.click();
+  await expect(page.locator('#consolePane')).toHaveClass(/active/);
+  await expect(page.locator('#consoleOut')).toContainText('wrong way round');
+});
+
+test('pressure glove: battery-powered ESP32-C3, FSR press turns the RGB LED red and buzzes; the plotter graphs the fingers', async ({ page }) => {
+  await loadExample(page, 'glove'); await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', true)); // a firm 10 N press
+  await expect.poll(async () => (await partState(page, 'rgb_led'))[0].r, { timeout: 5000 }).toBeGreaterThan(0.3);
+  await expect.poll(async () => Math.abs((await partState(page, 'vibmotor'))[0].rpm), { timeout: 5000 }).toBeGreaterThan(3000);
+  await page.click('.tab[data-tab="plotPane"]');
+  await expect(page.locator('#plotLegend span')).toHaveCount(3);
+  await expect(page.locator('#plotLegend')).toContainText('f2');
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', false));
+});
+
+test('the ON/OFF slide switch cuts the battery: the board shows "no power" and restarts when switched on', async ({ page }) => {
+  await loadExample(page, 'glove'); await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');
+  const flip = async () => {
+    const p = await page.evaluate(() => { const g = document.querySelector('.cs-comp[data-id="sw1"]') as SVGGraphicsElement; const r = g.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await page.mouse.click(p.x, p.y);
+  };
+  await flip();
+  await expect.poll(async () => (await partState(page, 'esp32c3'))[0].off, { timeout: 5000 }).toBe(true);
+  await flip();
+  await expect.poll(async () => (await partState(page, 'esp32c3'))[0].off, { timeout: 5000 }).toBe(false);
+  await expect.poll(async () => (await serial(page)).match(/calibrated/g)?.length ?? 0, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
+});
+
+test('every part in the Parts palette can be added, simulated and shown in 3D', async ({ page }) => {
+  test.setTimeout(90_000);
+  await loadExample(page, 'blink');
+  await page.click('#addPart');
+  const types = await page.locator('#paletteList .part').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.type!));
+  const boards = await page.evaluate(() => Object.keys(window.CatSim.DEFS).filter((t) => window.CatSim.DEFS[t].board));
+  for (const t of types) if (!boards.includes(t)) await page.click(`#paletteList .part[data-type="${t}"]`);
+  const placed = await page.evaluate(() => window.CatSim.App.project.components.map((c: { type: string }) => c.type));
+  for (const t of types.filter((x) => !boards.includes(x))) expect(placed, t).toContain(t);
+  await startSim(page);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('ESP32 blink started');
+  await page.click('#view3d'); await page.locator('canvas.view3d').waitFor({ state: 'visible' });
+  await page.waitForTimeout(1500);
+  await page.click('#view2d');
+});
+
+test('a part dropped onto the breadboard snaps into the holes and works without wires to its legs', async ({ page }) => {
+  await loadExample(page, 'breadboard');
+  // drag the LED off the board: the circuit breaks
+  const moveBy = async (id: string, dx: number, dy: number) => {
+    const b = (await page.locator(`.cs-comp[data-id="${id}"] .cs-body`).boundingBox())!;
+    await page.mouse.move(b.x + b.width / 2, b.y + 6); await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2 + dx / 2, b.y + 6 + dy / 2, { steps: 4 }); await page.mouse.move(b.x + b.width / 2 + dx, b.y + 6 + dy, { steps: 4 }); await page.mouse.up();
+  };
+  const ledPos = () => page.evaluate(() => { const c = window.CatSim.App.project.components.find((x: { id: string }) => x.id === 'led1'); return [c.x, c.y]; });
+  const [x0, y0] = await ledPos();
+  const k = await page.evaluate(() => window.CatSim.App.canvas.view.k);
+  await moveBy('led1', 0, -160 * k);
+  await startSim(page);
+  await page.waitForTimeout(1200);
+  expect(Math.max(...(await Promise.all([0, 1, 2, 3].map(async () => { await page.waitForTimeout(150); return (await partState(page, 'led'))[0].b; }))))).toBeLessThan(0.05);
+  await page.click('#btnRun');
+  // put it back, slightly off: it snaps to the same holes and the LED blinks again
+  await moveBy('led1', 3 * k, 163 * k);
+  expect(await ledPos()).toEqual([x0, y0]);
+  await startSim(page);
+  await expect.poll(async () => (await partState(page, 'led'))[0].b, { timeout: 5000 }).toBeGreaterThan(0.3);
+});
+
+test('the sketch downloads as an .ino for the Arduino IDE, with the board and wiring noted', async ({ page }) => {
+  await loadExample(page, 'glove');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnIno')]);
+  expect(dl.suggestedFilename()).toMatch(/\.ino$/);
+  const text = (await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8'));
+  expect(text).toContain('Board: ESP32-C3 Super Mini');
+  expect(text).toContain('c3:IO0');
+  expect(text).toContain('void setup()');
+});
+
+test('the parallel 16×2 LCD shows the sketch text in the app', async ({ page }) => {
+  await loadExample(page, 'uno-lcd'); await startSim(page);
+  await expect(page.locator('.cs-comp[data-id="lcd1"] text.cs-lcd').first()).toHaveText(/hello, world!/, { timeout: 5000 });
+  const st = await partState(page, 'lcd_parallel');
+  expect(st[0].d).toMatchObject({ kind: 'lcd', backlight: true });
 });

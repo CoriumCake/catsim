@@ -4,6 +4,8 @@
 import { OUTPUT } from './pins.js';
 import { esc, clamp } from './util.ts';
 import { CHIPS } from './digital/chips.ts';
+import { LIB_PARTS } from './parts-libs.js';
+import { BASIC_PARTS } from './parts-basic.js';
 const LED_COLORS = {
   red: '#ff3b3b', green: '#22e06b', blue: '#3d8bff',
   yellow: '#ffd60a', white: '#f2f5ff', orange: '#ff8a1f',
@@ -58,7 +60,10 @@ const DEFS = {};
 
 DEFS.esp32 = {
   type: 'esp32', name: 'ESP32 DevKit V1', category: 'Boards', w: ESP_W, h: 274, fixed: true, board: true,
-  pins: espPins, props: {},
+  props: { power: 'usb' },
+  structural: ['power'],
+  controls: [{ key: 'power', label: 'Powered by', type: 'select', options: ['usb', 'pins'], fmt: (v) => (v === 'pins' ? 'Its VIN / 3V3 pins (battery)' : 'USB') }],
+  pins: espPins,
   internal: () => [['GND.L', 'GND.R']],
   state(c, sim) {
     const b = (sim.boardState && sim.boardState(c.id)) || sim; // several boards: this board's own pins
@@ -103,7 +108,7 @@ DEFS.led = {
   controls: [{ key: 'color', label: 'Color', type: 'select', options: Object.keys(LED_COLORS) }],
   state(c, sim) {
     // Real brightness from the analog engine (averaged diode current) when it is running.
-    if (sim.running && sim.analog && sim.analog.leds) return { b: sim.analog.leds[c.id] ?? 0, burnt: !!(sim.analog.burnt && sim.analog.burnt.includes(c.id)) };
+    if (sim.running && sim.analog && sim.analog.leds) return { b: sim.analog.leds[c.id] ?? 0, burnt: !!(sim.analog.burnt && (sim.analog.burnt.has ? sim.analog.burnt.has(c.id) : sim.analog.burnt.includes(c.id))) };
     const a = sim.pinLevel(c, 'A'); const k = sim.pinLevel(c, 'C');
     return { b: a != null && k != null ? clamp(a - k, 0, 1) : 0 };
   },
@@ -156,8 +161,15 @@ DEFS.resistor = {
 
 const BTN_COLORS = { red: '#e5484d', blue: '#3d8bff', green: '#2fbf71', yellow: '#f5c518', black: '#30343c' };
 DEFS.button = {
-  type: 'button', name: 'Push Button', category: 'Input', w: 44, h: 54, interactive: 'press',
-  pins: [{ id: '1', label: '1', x: 12, y: 54, dir: 'b' }, { id: '2', label: '2', x: 32, y: 54, dir: 'b' }],
+  // a 6 mm tactile switch: four legs in two pairs that are always joined (1–1b, 2–2b); pressing joins 1 to 2
+  type: 'button', name: 'Push Button', category: 'Input', w: 56, h: 44, interactive: 'press',
+  pins: [
+    { id: '1', label: '1', x: 0, y: 12, dir: 'l', title: 'Leg 1 (always joined to leg 1b)' },
+    { id: '2', label: '2', x: 0, y: 32, dir: 'l', title: 'Leg 2 (always joined to leg 2b); pressing joins 1 and 2' },
+    { id: '1b', label: '1b', x: 56, y: 12, dir: 'r', title: 'Leg 1b (always joined to leg 1)' },
+    { id: '2b', label: '2b', x: 56, y: 32, dir: 'r', title: 'Leg 2b (always joined to leg 2)' },
+  ],
+  bonded: [['1', '1b'], ['2', '2b']],
   props: { color: 'red' },
   controls: [{ key: 'color', label: 'Cap color', type: 'select', options: Object.keys(BTN_COLORS) }],
   hint: 'Press with the mouse while the simulation runs',
@@ -165,11 +177,11 @@ DEFS.button = {
   state: (c, sim) => ({ pressed: !!(sim.ui[c.id] && sim.ui[c.id].pressed) }),
   render(c, s) {
     const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
-    return `<path d="M12 40 V54 M32 40 V54" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="4" y="4" width="36" height="36" rx="3" fill="#2a2e36" stroke="#14161b"/>
-      <circle cx="8" cy="8" r="1.6" fill="#555"/><circle cx="36" cy="8" r="1.6" fill="#555"/><circle cx="8" cy="36" r="1.6" fill="#555"/><circle cx="36" cy="36" r="1.6" fill="#555"/>
-      <circle cx="22" cy="22" r="${s.pressed ? 10.5 : 12}" fill="${col}" stroke="rgba(0,0,0,.4)" stroke-width="${s.pressed ? 3 : 1}"/>
-      ${s.pressed ? '' : '<circle cx="18" cy="18" r="4" fill="#fff" opacity=".25"/>'}`;
+    return `<path d="M0 12 H10 M0 32 H10 M46 12 H56 M46 32 H56" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="10" y="4" width="36" height="36" rx="3" fill="#2a2e36" stroke="#14161b"/>
+      <circle cx="14" cy="8" r="1.6" fill="#555"/><circle cx="42" cy="8" r="1.6" fill="#555"/><circle cx="14" cy="36" r="1.6" fill="#555"/><circle cx="42" cy="36" r="1.6" fill="#555"/>
+      <circle cx="28" cy="22" r="${s.pressed ? 10.5 : 12}" fill="${col}" stroke="rgba(0,0,0,.4)" stroke-width="${s.pressed ? 3 : 1}"/>
+      ${s.pressed ? '' : '<circle cx="24" cy="18" r="4" fill="#fff" opacity=".25"/>'}`;
   },
 };
 
@@ -195,6 +207,7 @@ DEFS.pot = {
 };
 
 DEFS.dht22 = {
+  pulled: ['DATA'],
   type: 'dht22', name: 'DHT22 Temp & Humidity', category: 'Sensors', w: 40, h: 72,
   pins: [
     { id: 'VCC', label: 'VCC', x: 10, y: 72, dir: 'b' },
@@ -340,8 +353,11 @@ const unoPins = [
 ];
 DEFS.uno = {
   type: 'uno', name: 'Arduino Uno R3', category: 'Boards', w: 264, h: 180, fixed: true, board: true,
-  hint: 'Runs real compiled firmware on an emulated ATmega328P (16 MHz). Upload a .hex file (Arduino IDE: Sketch → Export Compiled Binary).',
-  pins: unoPins, props: {},
+  props: { power: 'usb' },
+  structural: ['power'],
+  controls: [{ key: 'power', label: 'Powered by', type: 'select', options: ['usb', 'pins'], fmt: (v) => (v === 'pins' ? 'Its VIN / 5V pins (battery)' : 'USB') }],
+  hint: 'Write its sketch in the editor and press Start: it runs with the Uno\'s rules (5 V pins, 10-bit analogRead, PWM on 3/5/6/9/10/11).',
+  pins: unoPins,
   internal: () => [['GND1', 'GND2'], ['GND2', 'GND3'], ['A4', 'SDA'], ['A5', 'SCL']],
   state: (c, sim) => {
     const b = (sim.boardState && sim.boardState(c.id)) || sim;
@@ -404,16 +420,17 @@ DEFS.pnp = {
 };
 
 DEFS.nmos = {
-  type: 'nmos', name: 'N-MOSFET (2N7000)', category: 'Semiconductors', w: 40, h: 62,
-  hint: 'Logic-level-ish N-channel MOSFET (threshold ≈ 2.1 V), up to ~200 mA. Has a body diode.',
+  type: 'nmos', name: 'N-MOSFET', category: 'Semiconductors', w: 40, h: 62,
+  hint: '2N7000: threshold ≈ 2.1 V, up to ~200 mA (only partly on at 3.3 V). AO3400: logic-level, ≈ 1 V threshold, fully on at 3.3 V (≈ 45 mΩ), up to 5 A. Both have a body diode.',
+  structural: ['model'],
   pins: [
     { id: 'S', label: 'S', x: 10, y: 62, dir: 'b', title: 'Source (to GND for a low-side switch)' },
     { id: 'G', label: 'G', x: 20, y: 62, dir: 'b', title: 'Gate' },
     { id: 'D', label: 'D', x: 30, y: 62, dir: 'b', title: 'Drain (to the load)' },
   ],
-  props: { spice: '' }, controls: [spiceCtl('.model NAME NMOS(LEVEL=1 VTO=… KP=…), or a .subckt with pins D G S')],
+  props: { model: '2N7000', spice: '' }, controls: [{ key: 'model', label: 'Part', type: 'select', options: ['2N7000', 'AO3400'] }, spiceCtl('.model NAME NMOS(LEVEL=1 VTO=… KP=…), or a .subckt with pins D G S')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'N-FET' }),
-  render: (c, s) => to92(c, s, '2N7000', ['S', 'G', 'D']),
+  render: (c, s) => to92(c, s, c.props.model === 'AO3400' ? 'AO3400' : '2N7000', ['S', 'G', 'D']),
 };
 
 const DIODE_TYPES = ['1N4148', '1N4007', '1N5819'];
@@ -466,7 +483,7 @@ function dipPart(def) {
   });
   const short = def.name.split(' ')[0];
   return {
-    type: def.type, name: def.name, category: 'Logic', w, h: 60, pins, props: {}, dip: n, hint: def.hint,
+    type: def.type, name: def.name, category: 'Logic', w, h: 60, pins, props: {}, dip: n, hint: def.hint, chip: { vcc: def.vcc, gnd: def.gnd },
     render() {
       let o = '';
       for (const p of pins) o += `<rect x="${p.x - 3}" y="${p.y === 0 ? 0 : 44}" width="6" height="16" fill="#b9bec7"/>`;
@@ -477,7 +494,7 @@ function dipPart(def) {
     },
   };
 }
-for (const def of Object.values(CHIPS)) DEFS[def.type] = dipPart(def);
+for (const def of Object.values(CHIPS)) if (!def.module) DEFS[def.type] = dipPart(def);
 
 DEFS.capacitor = {
   type: 'capacitor', name: 'Capacitor', category: 'Passive', w: 30, h: 56,
@@ -521,6 +538,7 @@ DEFS.motor = {
 };
 
 DEFS.relay = {
+  optional: ['COM', 'NO', 'NC'],
   type: 'relay', name: '5 V Relay', category: 'Electromechanical', w: 66, h: 60,
   hint: 'Coil C1–C2 (70 Ω, pulls in above ~35 mA). COM connects to NC at rest and to NO when energised. Drive the coil with a transistor and a flyback diode.',
   pins: [
@@ -583,15 +601,25 @@ DEFS.lcd = {
   },
 };
 
+Object.assign(DEFS, LIB_PARTS, BASIC_PARTS);
+
+// Boards running from a battery show when they have no power (the sketch is stopped).
+for (const d of [DEFS.esp32, DEFS.uno]) {
+  const st = d.state, r = d.render;
+  d.state = (c, sim) => ({ ...st(c, sim), off: !!(((sim.boardState && sim.boardState(c.id)) || sim).halted) });
+  d.render = (c, s) => r(c, s) + (s.off ? `<rect x="0" y="0" width="${d.w}" height="${d.h}" rx="6" fill="#000" opacity=".5"/><text x="${d.w / 2}" y="${d.h / 2}" class="cs-part-lbl" fill="#fca5a5">no power</text>` : '');
+}
+
 const PALETTE = [
-  { cat: 'Boards', types: ['esp32', 'uno'] }, // picking one switches the project's board
-  { cat: 'Output', types: ['led', 'buzzer', 'servo', 'lcd'] },
-  { cat: 'Input', types: ['button', 'pot'] },
-  { cat: 'Sensors', types: ['dht22', 'ldr', 'pir'] },
+  { cat: 'Boards', types: ['esp32', 'esp32c3', 'uno'] }, // picking one switches the project's board
+  { cat: 'Output', types: ['led', 'rgb_led', 'seg7', 'buzzer', 'servo', 'lcd', 'lcd_parallel', 'oled', 'tm1637', 'ws2812_strip', 'ws2812_ring'] },
+  { cat: 'Input', types: ['button', 'slide_switch', 'pot', 'joystick', 'encoder', 'keypad', 'ir_remote'] },
+  { cat: 'Sensors', types: ['dht22', 'ldr', 'pir', 'fsr', 'sound', 'soil', 'mq2', 'bme280', 'mpu6050', 'ds18b20', 'hcsr04', 'ds3231', 'ir_receiver'] },
+  { cat: 'Power', types: ['battery', 'tp4056', 'buckboost'] },
   { cat: 'Semiconductors', types: ['npn', 'pnp', 'nmos', 'diode', 'opamp'] },
-  { cat: 'Electromechanical', types: ['motor', 'relay'] },
-  { cat: 'Logic', types: Object.keys(CHIPS) },
-  { cat: 'Passive', types: ['resistor', 'capacitor'] },
+  { cat: 'Electromechanical', types: ['motor', 'vibmotor', 'relay', 'stepper', 'l298n'] },
+  { cat: 'Logic', types: Object.keys(CHIPS).filter((k) => !CHIPS[k].module) },
+  { cat: 'Passive', types: ['resistor', 'capacitor', 'breadboard'] },
 ];
 const ESP = { ADC1, ADC2, TOUCH };
 

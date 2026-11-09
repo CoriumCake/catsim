@@ -6,9 +6,9 @@
   --line-2: #d5d9e0;
   --text: #1c2230;
   --muted: #6b7385;
-  --accent: #f5b301;
-  --accent-2: #ffc933;
-  --accent-ink: #1c1600;
+  --accent: #ff9f5f; /* the logo's ember orange */
+  --accent-2: #ffb47f;
+  --accent-ink: #2b2b2b;
   --ok: #16a34a;
   --danger: #dc2626;
   --warn: #b45309;
@@ -34,12 +34,10 @@ code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 4px; bor
 /* ---------- top bar ---------- */
 .topbar { display: flex; align-items: center; gap: 12px; padding: 0 0 0 10px; height: 56px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
 .brand { display: flex; align-items: center; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); height: 100%; }
-.brand svg rect { fill: var(--accent); }
-.brand svg path { fill: #1c2230; }
-.brand svg circle { fill: var(--accent); }
+.brand-mark { flex: none; display: block; }
 .brand-name { font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
-.brand-name b { color: var(--accent); }
-.chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff4d1; color: #8a6400; border: 1px solid #f3dc94; }
+.brand-name b { color: #f08a3e; } /* the logo's orange, a shade deeper for text */
+.chip { font: 700 10px var(--mono); padding: 2px 7px; border-radius: 99px; background: #fff1e6; color: #a8501a; border: 1px solid #ffd2b3; }
 .proj-name { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; width: 200px; min-width: 90px; flex: 0 1 auto; color: var(--text); font-weight: 600; }
 .proj-name:hover, .proj-name:focus { border-color: var(--line-2); outline: none; background: var(--panel-2); }
 .tb-group { display: flex; align-items: center; gap: 6px; }
@@ -90,7 +88,7 @@ select.btn { padding-right: 6px; }
 .palette-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
 .palette-cat { grid-column: 1 / -1; font: 700 10.5px var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 10px 2px 0; }
 .part { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: grab; text-align: center; }
-.part:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(245, 179, 1, .18); }
+.part:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(255, 159, 95, .22); }
 .part svg { width: 64px; height: 48px; }
 .part span { font-size: 12px; font-weight: 500; line-height: 1.25; }
 .palette-hint { font-size: 11.5px; color: var(--muted); margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -122,7 +120,7 @@ select.btn { padding-right: 6px; }
 .iot-log .dir { width: 18px; text-align: center; font-weight: 700; }
 .iot-log .dev .dir { color: var(--info); }
 .iot-log .ui .dir { color: var(--ok); }
-.iot-log .tp { color: #8a6400; }
+.iot-log .tp { color: #a8501a; }
 .iot-log .pl { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .iot-empty { color: var(--muted); padding: 10px 2px; font-family: var(--sans); white-space: normal; }
 
@@ -205,6 +203,8 @@ select.btn { padding-right: 6px; }
 .cs-dark { fill: #374151; }
 .cs-part-lbl { font: 9px var(--mono); fill: #6b5a3a; text-anchor: middle; }
 .cs-lcd { font: 15px var(--mono); }
+.cs-key { font: 700 13px var(--mono); text-anchor: middle; pointer-events: none; }
+.cs-key-sm { font: 700 7px var(--mono); text-anchor: middle; pointer-events: none; }
 .cs-pulse { animation: pulse .35s infinite alternate; }
 @keyframes pulse { from { opacity: .3; } to { opacity: 1; } }
 .part .cs-part-lbl { display: none; }
@@ -216,10 +216,10 @@ select.btn { padding-right: 6px; }
 .props .row { margin: 8px 0; }
 .props label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .props label b { color: var(--text); font: 11.5px var(--mono); }
-.props input[type=range] { width: 100%; accent-color: #d99a00; }
+.props input[type=range] { width: 100%; accent-color: #f08a3e; }
 .props select { width: 100%; padding: 5px 6px; border-radius: 7px; background: #fff; border: 1px solid var(--line-2); }
 .props .toggle { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; justify-content: flex-start; }
-.props .toggle input { accent-color: #d99a00; width: 16px; height: 16px; }
+.props .toggle input { accent-color: #f08a3e; width: 16px; height: 16px; }
 .props .hint { font-size: 11.5px; color: var(--muted); margin: 6px 0 0; }
 .props .actions { display: flex; gap: 6px; margin-top: 10px; }
 .props .danger { color: var(--danger); border-color: #f3c4c4; }
@@ -230,6 +230,18 @@ select.btn { padding-right: 6px; }
 
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: #1c2230; color: #fff; padding: 8px 14px; border-radius: 8px; opacity: 0; transition: .2s; pointer-events: none; z-index: 10; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
+/* problem alerts (wiring, current, code errors): top-right, stacked, auto-dismissed */
+.alerts { position: fixed; top: 66px; right: 16px; z-index: 12; display: flex; flex-direction: column; gap: 8px; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
+.alert { pointer-events: auto; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; box-shadow: 0 6px 20px rgba(0,0,0,.14); font-size: 12.5px; line-height: 1.45; cursor: pointer; animation: alert-in .18s ease-out; }
+.alert.error { background: #fef2f2; border-color: #fca5a5; color: #7f1d1d; }
+.alert .ico { font-size: 15px; line-height: 1.2; flex: none; }
+.alert .msg { flex: 1; }
+.alert .x { flex: none; border: 0; background: none; color: inherit; opacity: .6; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.alert .x:hover { opacity: 1; }
+.alert.out { opacity: 0; transform: translateX(12px); transition: .2s; }
+@keyframes alert-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+.cs-comp.cs-flag .cs-sel { display: block; stroke: #ef4444; stroke-width: 2.5; fill: rgba(239,68,68,.06); animation: cs-flag 1s ease-in-out 3; }
+@keyframes cs-flag { 50% { stroke-opacity: .25; } }
 
 /* ---------- narrow screens ---------- */
 @media (max-width: 900px) {
@@ -252,6 +264,11 @@ select.btn { padding-right: 6px; }
 
 /* oscilloscope */
 .scope { overflow: hidden; background: var(--panel); }
+.plot { position: relative; padding: 4px 8px 6px; }
+.plot-canvas { flex: 1; min-height: 0; width: 100%; }
+.plot-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 11px var(--mono); min-height: 16px; }
+.plot-legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.plot-empty { position: absolute; inset: 40% 20px auto; text-align: center; color: var(--muted, #6b7280); font-size: 12px; }
 .scope-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .scope-ch, .scope-ctl { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
 .scope-ch span { font: 700 11px var(--mono); color: var(--ch); }
@@ -266,7 +283,6 @@ select.btn { padding-right: 6px; }
 .sim-load { margin-left: 6px; font: 600 10.5px var(--mono); color: #b45309; background: #fef3c7; border-radius: 5px; padding: 1px 5px; }
 .cs-dip-pin { font: 600 5.5px var(--mono); fill: #aeb5c1; text-anchor: middle; dominant-baseline: middle; }
 .cs-uno-title { font: 800 22px system-ui, sans-serif; fill: #e6f3f7; text-anchor: middle; letter-spacing: 2px; }
-.uno-banner { padding: 7px 12px; font-size: 12px; line-height: 1.45; background: #e8f4f8; color: #0b4f66; border-bottom: 1px solid #c4e2ec; flex: none; }
 .props details.spice summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 .props details.spice textarea { width: 100%; margin-top: 6px; font: 11px/1.4 var(--mono); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px; resize: vertical; background: var(--panel); color: var(--text); }
 .props .spice-actions { display: flex; gap: 6px; margin: 6px 0 4px; }

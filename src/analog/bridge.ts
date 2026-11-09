@@ -9,11 +9,14 @@
  *   so heavy circuits make the simulation run slower than real time rather than fall behind. */
 import { Circuit, Simulation, ConvergenceError, VSource, type Diode } from './circuit.ts';
 import { dc, square, type Waveform } from './waveform.ts';
-import { MODELS, R_OUT, R_PULL, R_FLOAT, V_LOGIC, LED_FULL, RELAY, modelLog, type PartModel } from './models.ts';
+import './models-extra.ts';
+import { boardPowerModel, resetEncoders, resetBatteries } from './models-extra.ts';
+import { MODELS, R_OUT, R_PULL, R_FLOAT, V_LOGIC, V_LOGIC as V_LOGIC_ESP, LED_FULL, RELAY, modelLog, type PartModel } from './models.ts';
 import type { Component, Project, PinDef } from '../types.ts';
 import { DEFS } from '../components.js';
 import { INPUT_PULLUP, INPUT_PULLDOWN, OUTPUT } from '../pins.js';
 import { wireNets } from './nets.ts';
+import { breadboardContacts } from '../contacts.js';
 import { CHIPS, type ChipDef, type ChipCtx, type Level, type Out } from '../digital/chips.ts';
 import { volt } from './circuit.ts';
 
@@ -47,8 +50,6 @@ export interface SimState {
   ledcCh: Record<number, { freq?: number } | undefined>;
   millis(): number;
   clock: { stall(realMs: number): void };
-  /** boards that run real firmware (Uno): pin drivers come from the emulated chip's port registers */
-  board?: BoardDriver;
   /** several boards in one circuit: a driver per board id (otherwise the single runtime drives the board) */
   drivers?: Record<string, BoardDriver>;
   }
@@ -66,37 +67,42 @@ const LED_TAU = 0.02; // brightness averaging time constant (s), roughly what th
 const MAX_PROBE_POINTS = 50_000;
 
 type Drive = { wave: Waveform; rs: number; key: string };
-export interface BoardDriver { name: string; drive(pin: number): Drive }
+export interface BoardDriver { name: string; drive(pin: number, vhigh?: number): Drive }
 /** One GPIO of one board in the circuit. */
-interface PinSrc { board: string; g: number; src: VSource; driver: BoardDriver; label: string }
+interface PinSrc { board: string; g: number; src: VSource; driver: BoardDriver; label: string; vcc: number }
 
 function topologyKey(p: Project): string {
   // pasted SPICE models change a part's internal structure, so they count as topology
-  return JSON.stringify([p.components.map((c) => [c.id, c.type, typeof c.props.spice === 'string' ? c.props.spice : '']), p.wires.map((w) => [w.from, w.to])]);
+  // so do props that change how a part is built (common anode vs cathode, a board's power source)
+  return JSON.stringify([p.components.map((c) => [c.id, c.type, typeof c.props.spice === 'string' ? c.props.spice : '', ...(DEFS[c.type]?.structural ?? []).map((k: string) => String(c.props[k]))]), p.wires.map((w) => [w.from, w.to]), breadboardContacts(p, DEFS)]);
 }
 
 
-/** How an ESP32 GPIO drives the circuit, from the sketch runtime's pin state (mode, level, PWM, tone…). */
-export function espDrive(s: SimState, g: number): Drive {
+/** How a sketch-driven pin drives the circuit, from the sketch runtime's pin state (mode, level, PWM,
+ * tone…). ESP32 GPIOs swing 3.3 V; an Uno running a sketch swings 5 V and has pull-ups on every pin. */
+export function espDrive(s: SimState, g: number, uno = false, vhigh?: number): Drive {
+  // a battery-powered board's outputs swing to its actual supply rail (lower when the battery sags)
+  const V_LOGIC = vhigh ?? (uno ? 5 : V_LOGIC_ESP);
+  const vk = vhigh == null ? '' : `@${vhigh}`;
   const mode = s.mode[g];
   if (mode === OUTPUT) {
     if (s.dac[g] != null) { const v = s.dac[g] * V_LOGIC; return { wave: dc(v), rs: 1000, key: `dac${v}` }; }
-    if (s.tone[g]) { const f = s.tone[g]; return { wave: square(V_LOGIC, f, 0.5), rs: R_OUT, key: `tone${f}` }; }
+    if (s.tone[g]) { const f = s.tone[g]; return { wave: square(V_LOGIC, f, 0.5), rs: R_OUT, key: `tone${f}${vk}` }; }
     if (s.servo[g] != null) {
       const us = 544 + (s.servo[g] / 180) * (2400 - 544);
-      return { wave: square(V_LOGIC, 50, us * 50e-6), rs: R_OUT, key: `servo${us}` };
+      return { wave: square(V_LOGIC, 50, us * 50e-6), rs: R_OUT, key: `servo${us}${vk}` };
     }
     if (s.pwm[g] != null) {
       const lp = s.ledcPin[g];
       const freq = lp?.freq || (lp?.ch != null ? s.ledcCh[lp.ch]?.freq : undefined) || 1000;
-      return { wave: square(V_LOGIC, freq, s.pwm[g]), rs: R_OUT, key: `pwm${freq}:${s.pwm[g]}` };
+      return { wave: square(V_LOGIC, freq, s.pwm[g]), rs: R_OUT, key: `pwm${freq}:${s.pwm[g]}${vk}` };
     }
     const v = s.out[g] ? V_LOGIC : 0;
     return { wave: dc(v), rs: R_OUT, key: `out${v}` };
   }
-  const canPull = g < 34;
-  if (mode === INPUT_PULLUP && canPull) return { wave: dc(V_LOGIC), rs: R_PULL, key: 'pu' };
-  if (mode === INPUT_PULLDOWN && canPull) return { wave: dc(0), rs: R_PULL, key: 'pd' };
+  const canPull = uno || g < 34;
+  if (mode === INPUT_PULLUP && canPull) return { wave: dc(V_LOGIC), rs: R_PULL, key: `pu${vk}` };
+  if (mode === INPUT_PULLDOWN && canPull && !uno) return { wave: dc(0), rs: R_PULL, key: 'pd' };
   return { wave: dc(0), rs: R_FLOAT, key: 'hiz' };
 }
 
@@ -113,7 +119,17 @@ export class AnalogBridge {
   private project: Project | null = null;
   private comps = new Map<string, Component>();
   private pinNode = new Map<string, number>();
-  private leds = new Map<string, { d: Diode; avg: number; heat: number }>();
+  private leds = new Map<string, { d: Diode; avg: number; heat: number; peak: number }>();
+  /** board supply pins: their source and the current the board's regulator / USB can really give */
+  private rails: Array<{ key: string; what: string; current: (x: Float64Array) => number; max: number; short: number; advice: string }> = [];
+  /** boards running from their pins (not USB): their rail voltage */
+  private boardRail = new Map<string, (x: Float64Array) => number>();
+  /** wiring / current problems already reported in this run */
+  private warned = new Set<string>();
+  private diagAt = 0;
+  private relayWeakSince = new Map<string, number>();
+  private atOp = false;
+  private steppers: Array<(x: Float64Array, dt: number) => void> = [];
   /** LEDs destroyed by overcurrent in this run (they stay open-circuit) */
   readonly burnt = new Set<string>();
   private pendingBurn: string[] = [];
@@ -143,6 +159,7 @@ export class AnalogBridge {
   reset(): void {
     this.sim = null; this.error = null; this.topo = '';
     this.leds.clear(); this.lastLevel.clear(); this.burnt.clear(); this.pendingBurn = []; this.warnedPins.clear();
+    this.warned.clear(); this.diagAt = 0; this.relayWeakSince.clear(); resetEncoders(); resetBatteries();
     this.chips = []; this.warnedOscillation = false; this.fresh = true;
     this.motors.clear(); this.relays.clear(); this.kick.clear(); this.warnedKick.clear();
     this.rec = { t: [], v: this.probes.map(() => []) };
@@ -175,21 +192,34 @@ export class AnalogBridge {
     const nodeOf = (c: Component) => (pinId: string) => this.pinNode.get(`${c.id}:${pinId}`) ?? 0;
 
     // Boards: supply rails and one Thevenin source per wired GPIO, driven by that board's runtime
-    this.gpioSrc.clear(); this.gpioDrive.clear();
+    this.gpioSrc.clear(); this.gpioDrive.clear(); this.rails = []; this.boardRail.clear();
+    this.models = [];
     for (const b of boards) {
       const pin = nodeOf(b), driver = this.driverFor(b);
-      const rails: Array<[string, number, number]> = b.type === 'uno' ? [['5V', 5, 0.1], ['3V3', 3.3, 0.5]] : [['3V3', V_LOGIC, 0.1], ['VIN', 5, 0.1]];
-      for (const [id, v, rs] of rails) if (wired(`${b.id}:${id}`)) ckt.vsource(pin(id), 0, dc(v), rs, `${b.id}_${id}`);
+      // [pin, volts, source resistance, current it can supply]: USB gives ~500 mA; the ESP32's 3.3 V regulator ~600 mA, the Uno's 150 mA
+      const rails: Array<[string, number, number, number]> = b.type === 'uno' ? [['5V', 5, 0.1, 0.5], ['3V3', 3.3, 0.5, 0.15]] : b.type === 'esp32c3' ? [['3V3', V_LOGIC, 0.1, 0.5], ['5V', 5, 0.1, 0.5]] : [['3V3', V_LOGIC, 0.1, 0.6], ['VIN', 5, 0.1, 0.5]];
+      const who = boards.length > 1 ? `${b.id}'s ` : 'the ';
+      if (b.props && b.props.power === 'pins') { // battery / external supply: the board is a load, and runs only when its rail is up
+        const pm = boardPowerModel(ckt, b, pin);
+        this.models.push({ c: b, m: pm }); this.boardRail.set(b.id, pm.power!);
+        for (const s of pm.supply ?? []) this.rails.push(s);
+      } else {
+        for (const [id, v, rs, max] of rails) {
+          if (!wired(`${b.id}:${id}`)) continue;
+          const src = ckt.vsource(pin(id), 0, dc(v), rs, `${b.id}_${id}`);
+          this.rails.push({ key: `${b.id}:${id}`, what: `${who}${id} pin`, current: (x) => Math.abs(src.current(x)), max, short: 2, advice: `Check for a wire from ${id} straight to GND.` });
+        }
+      }
       for (const pd of DEFS[b.type].pins as PinDef[]) {
         if (pd.kind !== 'gpio' || pd.gpio == null || !wired(`${b.id}:${pd.id}`)) continue;
         const d = driver.drive(pd.gpio), key = `${b.id}:${pd.gpio}`;
         const label = b.type === 'uno' ? `Pin ${pd.id}` : `GPIO${pd.gpio}`;
-        this.gpioSrc.set(key, { board: b.id, g: pd.gpio, src: ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `${b.id}_${pd.id}`), driver, label });
+        this.gpioSrc.set(key, { board: b.id, g: pd.gpio, src: ckt.vsource(pin(pd.id), 0, d.wave, d.rs, `${b.id}_${pd.id}`), driver, label, vcc: b.type === 'uno' ? 5 : V_LOGIC });
         this.gpioDrive.set(key, d.key);
       }
     }
-    this.models = [];
     const prevMotors = this.motors, prevRelays = this.relays;
+    this.steppers = [];
     this.motors = new Map(); this.relays = new Map();
     const prevChips = new Map(this.chips.map((ch) => [ch.id, ch]));
     this.chips = [];
@@ -198,7 +228,7 @@ export class AnalogBridge {
     modelLog.fn = (msg) => { if (!reported.has(msg)) { reported.add(msg); this.s.app.log(msg, 'error'); } };
     for (const c of p.components) {
       const fn = MODELS[c.type]; if (!fn) continue;
-      const m = fn(ckt, c, nodeOf(c), () => this.s.ui[c.id], () => this.comps.get(c.id) ?? c);
+      const m = fn(ckt, c, nodeOf(c), () => this.s.ui[c.id], () => this.comps.get(c.id) ?? c, () => this.s.millis());
       this.models.push({ c, m });
       if (m.motor) this.motors.set(c.id, { node: m.motor.speedNode, angle: prevMotors.get(c.id)?.angle ?? 0, kickNodes: [nodeOf(c)('+'), nodeOf(c)('-')] });
       if (m.relay) {
@@ -211,25 +241,30 @@ export class AnalogBridge {
         this.chips.push({ id: c.id, def: CHIPS[c.type], st: old?.st ?? CHIPS[c.type].init(), outs: m.chip.outs, node: m.chip.node,
           levels: new Map(old?.levels ?? []), thr: new Map(), outKey: new Map() });
       }
-      if (m.led) {
-        this.leds.set(c.id, { d: m.led, avg: prevLeds.get(c.id)?.avg ?? 0, heat: prevLeds.get(c.id)?.heat ?? 0 });
-        if (this.burnt.has(c.id)) m.led.setModel(OPEN_JUNCTION);
+      const leds: Array<[string, Diode]> = m.led ? [[c.id, m.led]] : [];
+      for (const [k, d] of Object.entries(m.leds ?? {})) leds.push([`${c.id}:${k}`, d]);
+      for (const [id, d] of leds) {
+        this.leds.set(id, { d, avg: prevLeds.get(id)?.avg ?? 0, heat: prevLeds.get(id)?.heat ?? 0, peak: 0 });
+        if (this.burnt.has(id)) d.setModel(OPEN_JUNCTION);
       }
+      for (const s of m.supply ?? []) this.rails.push(s);
+      if (m.step) this.steppers.push(m.step);
     }
     const t = this.fresh ? 0 : this.now(); // a new run starts at 0 even if the first sync comes later
     this.fresh = false;
     this.sim = new Simulation(ckt, { dtMax: this.dtMax });
     try { this.sim.dcOp(t); } catch (e) { this.fail(e); return; }
+    this.atOp = true; // still at the DC operating point: settling parts re-solve it rather than wait for a step
     if (this.chips.length) { this.logicEvents = 0; this.evaluateLogic(); }
     this.resolveProbes();
     this.record();
   }
 
-  /** Who drives a board's pins: an explicit per-board driver, the single Uno, or the single ESP32 runtime. */
+  /** Who drives a board's pins: an explicit per-board driver, or the single runtime (Uno or ESP32 rules). */
   private driverFor(c: Component): BoardDriver {
     const d = this.s.drivers?.[c.id]; if (d) return d;
-    if (c.type === 'uno' && this.s.board) return this.s.board;
-    return { name: 'ESP32', drive: (g) => this.drive(g) };
+    if (c.type === 'uno') return { name: 'Arduino Uno', drive: (g, vh) => espDrive(this.s, g, true, vh) };
+    return { name: c.type === 'esp32c3' ? 'ESP32-C3' : 'ESP32', drive: (g, vh) => espDrive(this.s, g, false, vh) };
   }
 
   private drive(g: number): Drive { return espDrive(this.s, g); }
@@ -244,12 +279,14 @@ export class AnalogBridge {
   }
 
   private onStep = (_t: number, _x: Float64Array, dt: number) => {
+    if (this.steppers.length && this.sim) for (const f of this.steppers) f(this.sim.x, dt);
     if (this.leds.size && this.sim) {
       const a = 1 - Math.exp(-dt / LED_TAU), h = 1 - Math.exp(-dt / LED_THERMAL_TAU);
       for (const [id, l] of this.leds) {
         const i = Math.max(0, l.d.current(this.sim.x));
         l.avg += (i - l.avg) * a;
         l.heat += (i - l.heat) * h;
+        if (i > l.peak) l.peak = i;
         if (l.heat > LED_BURN_A && !this.burnt.has(id) && !this.pendingBurn.includes(id)) this.pendingBurn.push(id);
       }
     }
@@ -288,7 +325,7 @@ export class AnalogBridge {
       // Advance; whenever a chip input crosses its threshold the solver stops there so the logic can react.
       while (t > sim.t + 1e-12) {
         const useCross = (this.chips.length > 0 || this.relays.size > 0) && this.logicEvents < MAX_LOGIC_EVENTS;
-        sim.advanceTo(t, this.onStep, useCross ? this.crossing : undefined);
+        sim.advanceTo(t, this.onStep, useCross ? this.crossing : undefined); this.atOp = false;
         if (!sim.stoppedOnCrossing) break;
         if (this.updateRelays()) { sim.refresh(); this.record(); }
         this.evaluateLogic();
@@ -299,10 +336,22 @@ export class AnalogBridge {
       }
       let changed = false;
       for (const [key, ps] of this.gpioSrc) {
-        const d = ps.driver.drive(ps.g);
+        const rail = this.boardRail.get(ps.board);
+        // battery-powered: HIGH is the rail voltage (20 mV steps, so tiny ripple doesn't re-solve every frame)
+        const vh = rail ? Math.max(0, Math.min(ps.vcc, Math.round(rail(sim.x) * 50) / 50)) : undefined;
+        const d = ps.driver.drive(ps.g, vh);
         if (d.key !== this.gpioDrive.get(key)) { ps.src.wave = d.wave; ps.src.rs = d.rs; this.gpioDrive.set(key, d.key); changed = true; }
       }
       for (const { m } of this.models) if (m.update?.()) changed = true;
+      // regulators, battery protection, board power: re-solve until they agree with the voltages
+      for (let k = 0; k < 4; k++) {
+        let moved = false;
+        for (const { m } of this.models) if (m.settle?.(sim.x)) moved = true;
+        if (!moved) break;
+        changed = true;
+        // (with capacitors or coils a refresh only takes effect on the next step: take a 1 µs one now)
+        if (this.atOp) sim.dcOp(sim.t); else { sim.refresh(); sim.advanceTo(sim.t + 1e-6, this.onStep); }
+      }
       // overcurrent damage (applied between solver runs, not inside a step)
       for (const id of this.pendingBurn) {
         const l = this.leds.get(id); if (!l) continue;
@@ -328,6 +377,7 @@ export class AnalogBridge {
         }
       }
       if (changed) { sim.refresh(); this.record(); if (this.chips.length) this.evaluateLogic(); }
+      this.diagnose();
     } catch (e) {
       if (e instanceof ConvergenceError) { this.fail(e); return; }
       throw e;
@@ -381,6 +431,39 @@ export class AnalogBridge {
       sim.markDiscontinuity();
       sim.refresh();
       sim.advanceTo(sim.t + GATE_DELAY, this.onStep); // let the new outputs propagate
+    }
+  }
+
+  private warn(key: string, msg: string, level = 'warn'): void {
+    if (this.warned.has(key)) return;
+    this.warned.add(key); this.s.app.log(msg, level);
+  }
+
+  /** Problems a multimeter would find: shorted or overloaded supplies, LEDs the wrong way round or starved of
+   * current, relay coils that can't pull in. Checked a few times per simulated second; each is reported once. */
+  private diagnose(): void {
+    const sim = this.sim; if (!sim) return;
+    const t = this.now(); if (t - this.diagAt < 0.25) return;
+    const dt = t - this.diagAt; this.diagAt = t;
+    const x = sim.x, v = (n: number) => volt(x, n);
+    for (const r of this.rails) {
+      const i = r.current(x);
+      if (i > r.short) this.warn(`short:${r.key}`, `Short circuit: ${r.what} is wired straight to GND (${i > 100 ? 'many amps' : `${i.toFixed(1)} A`} would flow; it would shut down, overheat or burn). ${r.advice}`, 'error');
+      else if (i > r.max) this.warn(`load:${r.key}`, `Not enough current: the parts on ${r.what} draw ${Math.round(i * 1000)} mA, more than it can supply (about ${Math.round(r.max * 1000)} mA). The voltage would sag and the board may reset; power the heavy load (motor, LED strip) from its own supply.`);
+    }
+    for (const [id, l] of this.leds) {
+      if (this.burnt.has(id)) continue;
+      const rev = v(l.d.k) - v(l.d.a);
+      if (rev > 1) this.warn(`rev:${id}`, `${id} is the wrong way round: its cathode (−, short leg) is ${rev.toFixed(1)} V above its anode, so no current flows and it stays dark. Swap its legs.`);
+      if (dt > 0 && t > 0.5 && l.peak > 2e-6 && l.peak < 1e-3) this.warn(`dim:${id}`, `${id} barely lights: only ${(l.peak * 1000).toFixed(2)} mA flows (an LED needs about 5–20 mA). Use a smaller series resistor, e.g. 220 Ω.`);
+      l.peak = 0;
+    }
+    for (const [id, r] of this.relays) {
+      const i = Math.abs(r.coilCurrent(x));
+      if (!r.closed && i > 0.002 && i < RELAY.pullIn) {
+        const since = this.relayWeakSince.get(id) ?? t; this.relayWeakSince.set(id, since);
+        if (t - since >= 0.2) this.warn(`relay:${id}`, `${id}'s coil gets only ${Math.round(i * 1000)} mA but needs ${Math.round(RELAY.pullIn * 1000)} mA to switch, so it stays off. A GPIO pin can't power a relay coil: drive it with a transistor (2N2222) from 5 V, with a flyback diode.`);
+      } else this.relayWeakSince.delete(id);
     }
   }
 
@@ -443,8 +526,11 @@ export class AnalogBridge {
     const v = this.gpioVoltage(g, board);
     if (v == null) return null;
     const key = `${board || this.primary}:${g}`;
-    const last = this.lastLevel.get(key) ?? (v > V_LOGIC / 2 ? 1 : 0);
-    const lvl = v >= VIH ? 1 : v <= VIL ? 0 : last;
+    const vcc = this.gpioSrc.get(key)?.vcc ?? V_LOGIC;
+    // ESP32: 0.25/0.75 of 3.3 V; ATmega328P: 0.3/0.6 of 5 V
+    const [lo, hi] = vcc === V_LOGIC ? [VIL, VIH] : [0.3 * vcc, 0.6 * vcc];
+    const last = this.lastLevel.get(key) ?? (v > vcc / 2 ? 1 : 0);
+    const lvl = v >= hi ? 1 : v <= lo ? 0 : last;
     this.lastLevel.set(key, lvl);
     return lvl;
   }
@@ -453,6 +539,12 @@ export class AnalogBridge {
     const out: Record<string, number> = {};
     for (const [id, l] of this.leds) out[id] = this.burnt.has(id) ? 0 : Math.min(1, Math.sqrt(Math.max(0, l.avg) / LED_FULL));
     return out;
+  }
+
+  /** Voltage of a battery-powered board's supply rail, or null when it runs from USB (always on). */
+  boardSupply(id = this.primary): number | null {
+    const f = this.boardRail.get(id || this.primary);
+    return f && this.sim ? f(this.sim.x) : null;
   }
 
   /** Motors: [rpm, shaft angle]; relays: armature closed. */

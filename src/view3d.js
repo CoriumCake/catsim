@@ -2,6 +2,9 @@
  * Read-only mirror of the 2D diagram: 2D (x, y) maps to 3D (x, z) with Y up, 1 unit = 1 px.
  * Live state (LEDs, servo, LCD, buzzer…) comes from the same def.state() the 2D canvas uses. */
 import { DEFS, LED_COLORS } from './components.js';
+import { LIB_PARTS } from './parts-libs.js';
+import { BASIC_PARTS } from './parts-basic.js';
+import { breadboardContacts } from './contacts.js';
 const DIRS = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
 const BTN_COLORS = { red: '#e5484d', blue: '#3d8bff', green: '#2fbf71', yellow: '#f5c518', black: '#30343c' };
 const PIN_TOP = 10, ESP_PIN_TOP = 15, DEG = Math.PI / 180;
@@ -194,7 +197,7 @@ class View3D {
   pinTop(c, p) {
     if (c.type === 'esp32') return { x: c.x + (p.x === 0 ? 5 : 145), y: ESP_PIN_TOP, z: c.y + p.y };
     if (c.type === 'uno') return { x: c.x + p.x, y: 17, z: c.y + (p.y === 0 ? 4 : 176) }; // into the header sockets
-    return { x: c.x + p.x, y: PIN_TOP, z: c.y + p.y };
+    return { x: c.x + p.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: c.y + p.y };
   }
 
   // ---------- scene ----------
@@ -237,13 +240,15 @@ class View3D {
     Object.assign(this.sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 1, far: r * 4 });
     this.sun.shadow.camera.updateProjectionMatrix();
 
+    // parts plugged into a breadboard stand on top of it
+    this.lift = new Map(breadboardContacts(P, DEFS).map(([a]) => [a.split(':')[0], FLAT_H.breadboard]));
     for (const c of P.components) {
       const d = DEFS[c.type]; if (!d) continue;
-      const g = new T.Group(); g.position.set(c.x, 0, c.y); g.userData.compId = c.id;
+      const g = new T.Group(); g.position.set(c.x, this.lift.get(c.id) || 0, c.y); g.userData.compId = c.id;
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
       if (build) build.call(this, g, c, d);
-      if (!d.board) for (const p of d.pins) {
+      if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
         this.box(g, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
         this.cyl(g, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
       }
@@ -392,12 +397,12 @@ class View3D {
   }
 
   build_button(g, c) {
-    this.box(g, 4, 4, 36, 36, 0, 10, this.mat('#2a2e36'));
-    for (const [x, z] of [[8, 8], [36, 8], [8, 36], [36, 36]]) this.cyl(g, x, z, 1.6, 10, 10.6, this.mat('#555'));
-    this.cyl(g, 22, 22, 9, 10, 12, this.mat('#1a1c21'));
+    this.box(g, 10, 4, 36, 36, 0, 10, this.mat('#2a2e36'));
+    for (const [x, z] of [[14, 8], [42, 8], [14, 36], [42, 36]]) this.cyl(g, x, z, 1.6, 10, 10.6, this.mat('#555'));
+    this.cyl(g, 28, 22, 9, 10, 12, this.mat('#1a1c21'));
     const capM = this.mat('#e5484d', { roughness: 0.4 });
-    const cap = this.cyl(g, 22, 22, 11, 0, 7, capM, 28);
-    for (const x of [12, 32]) this.leg(g, x, 40, x, 54);
+    const cap = this.cyl(g, 28, 22, 11, 0, 7, capM, 28);
+    for (const z of [12, 32]) { this.leg(g, 10, z, 0, z); this.leg(g, 46, z, 56, z); }
     let last = '';
     this.live(c, (s) => {
       const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
@@ -709,7 +714,8 @@ class View3D {
     for (const h of this.ray.intersectObjects(this.picks, true)) {
       let o = h.object;
       while (o && !o.userData.compId && !o.userData.wireId) o = o.parent;
-      if (o) return o.userData.compId ? { kind: 'comp', id: o.userData.compId } : { kind: 'wire', id: o.userData.wireId };
+      if (o && o.userData.compId) { const p = o.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z }; }
+      if (o) return { kind: 'wire', id: o.userData.wireId };
     }
     return null;
   }
@@ -717,7 +723,11 @@ class View3D {
   pressable(h) {
     if (!h || h.kind !== 'comp') return false;
     const c = this.app.project.components.find((x) => x.id === h.id);
-    return !!(c && DEFS[c.type].interactive === 'press');
+    if (!c) return false;
+    const d = DEFS[c.type];
+    if (d.interactive === 'keys') { h.key = d.keyAt(c, h.lx, h.ly); return !!h.key; }
+    if (d.interactive === 'toggle') return true;
+    return d.interactive === 'press';
   }
 
   onDown(e) {
@@ -726,8 +736,10 @@ class View3D {
     this.down = { x: e.clientX, y: e.clientY, h };
     if (this.app.sim.running && this.pressable(h)) {
       this.controls.enabled = false;
-      this.pressing = h.id; this.app.sim.setPressed(h.id, true); this.app.canvas.renderDynamic();
-      this.app.canvas.select(h);
+      const tc = this.app.project.components.find((x) => x.id === h.id);
+      if (tc && DEFS[tc.type].interactive === 'toggle') { tc.props.on = !tc.props.on; this.app.sim.syncProject(); this.app.save(); this.app.canvas.renderDynamic(); this.controls.enabled = true; return; }
+      this.pressing = h.id; this.pressKey = h.key; this.app.sim.setPressed(h.id, true, h.key); this.app.canvas.renderDynamic();
+      this.app.canvas.select({ kind: 'comp', id: h.id });
     }
   }
 
@@ -739,7 +751,7 @@ class View3D {
   }
 
   release() {
-    if (this.pressing) { this.app.sim.setPressed(this.pressing, false); this.pressing = null; this.app.canvas.renderDynamic(); }
+    if (this.pressing) { this.app.sim.setPressed(this.pressing, false, this.pressKey); this.pressing = null; this.pressKey = undefined; this.app.canvas.renderDynamic(); }
     if (this.controls) this.controls.enabled = true;
   }
 
@@ -750,5 +762,33 @@ class View3D {
     this.el.style.cursor = this.app.sim.running && this.pressable(h) ? 'pointer' : h ? 'default' : '';
   }
 }
+
+// Library-driven parts (OLED, LED strips, keypad…): a slab whose top face shows the part's own 2D
+// drawing, redrawn whenever its state changes (so the OLED, LEDs and digits update live in 3D too).
+const FLAT_H = { bme280: 3, mpu6050: 3, lcd_parallel: 9, esp32c3: 5, rgb_led: 14, seg7: 8, slide_switch: 7, battery: 18, fsr: 1.5, vibmotor: 4, tp4056: 3, buckboost: 3, joystick: 12, encoder: 10, l298n: 14, sound: 6, soil: 3, mq2: 10, breadboard: 8, oled: 4, ws2812_strip: 3, ws2812_ring: 3, tm1637: 8, ds18b20: 12, hcsr04: 7, ds3231: 4, keypad: 2, ir_receiver: 10, ir_remote: 8, stepper: 10 };
+const SVG_STYLE = `<style>.cs-tiny{font:600 6.5px monospace;fill:#9aa6b8;text-anchor:middle}.cs-light{fill:#e7f0ff}.cs-dark{fill:#374151}
+.cs-key{font:700 13px monospace;text-anchor:middle}.cs-key-sm{font:700 7px monospace;text-anchor:middle}.cs-part-lbl{font:9px monospace;fill:#6b5a3a;text-anchor:middle}</style>
+<defs><filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter></defs>`;
+View3D.prototype.build_flat = function (g, c, d) {
+  const T = THREE, K = 4, H = FLAT_H[c.type] || 4;
+  const tex = this.tex(d.w * K, d.h * K, () => {});
+  const side = this.mat('#20242b');
+  const top = new T.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.6 }); this.disp.push(top);
+  this.mesh(new T.BoxGeometry(d.w, H, d.h), [side, side, top, side, side, side], g, d.w / 2, H / 2, d.h / 2);
+  let last = null, busy = false, queued = null;
+  const draw = (svg) => {
+    if (busy) { queued = svg; return; }
+    busy = true;
+    const img = new Image();
+    img.onload = img.onerror = () => {
+      const x = tex.image.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, d.w * K, d.h * K);
+      if (img.width) { x.drawImage(img, 0, 0, d.w * K, d.h * K); tex.needsUpdate = true; }
+      busy = false; if (queued) { const q = queued; queued = null; draw(q); }
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${d.w * K}" height="${d.h * K}" viewBox="0 0 ${d.w} ${d.h}">${SVG_STYLE}${svg}</svg>`);
+  };
+  this.live(c, (s) => { let svg; try { svg = d.render(c, s); } catch (_) { return; } if (svg !== last) { last = svg; draw(svg); } });
+};
+for (const t of [...Object.keys(LIB_PARTS), ...Object.keys(BASIC_PARTS)]) View3D.prototype['build_' + t] = View3D.prototype.build_flat;
 
 export { View3D };

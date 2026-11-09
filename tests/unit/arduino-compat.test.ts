@@ -8,7 +8,7 @@ import { DEFS } from '../../src/components.js';
 let live: any = null;
 afterEach(() => { live?.stop(true); live = null; });
 
-async function run(body: string, globals = '') {
+async function run(body: string, globals = '', input = '') {
   const host = {
     project: { name: 't', code: '', components: [{ id: 'esp', type: 'esp32', x: 0, y: 0, props: { ...DEFS.esp32.props } }], wires: [] },
     logs: [] as Array<[string, string]>, errors: [] as unknown[],
@@ -18,8 +18,10 @@ async function run(body: string, globals = '') {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sim = new Simulator(host) as any; live = sim;
+  const started = sim.start(`${globals}\nvoid setup() {\n${body}\n}\nvoid loop() { delay(1000); }`);
+  sim.serialIn = input; // start() clears it synchronously; setup() runs after
   const ok = await Promise.race([
-    sim.start(`${globals}\nvoid setup() {\n${body}\n}\nvoid loop() { delay(1000); }`),
+    started,
     new Promise((r) => setTimeout(() => r('started'), 60)),
   ]);
   await new Promise((r) => setTimeout(r, 40));
@@ -34,6 +36,7 @@ const cases: Array<[string, string, string, string?]> = [
   ['print float with digits', 'Serial.print(2.5, 3);', '2.500'],
   ['print negative float', 'Serial.print(-1.5);', '-1.50'],
   ['print HEX/BIN/OCT', 'Serial.print(255, HEX); Serial.print(" "); Serial.print(5, BIN); Serial.print(" "); Serial.print(8, OCT);', 'FF 101 10'],
+  ['println ends with CRLF', 'Serial.println(1);', '1\r\n'],
   ['print bool prints 1/0', 'Serial.print(true); Serial.print(false);', '10'],
   ['print char', "Serial.print('A');", 'A'],
   ['printf', 'Serial.printf("%d %05.2f %s %x\\n", 42, 3.14159, "hi", 255);', '42 03.14 hi ff\n'],
@@ -89,6 +92,72 @@ const cases: Array<[string, string, string, string?]> = [
   ['int overflow wraps', 'int x = 2147483647; x++; Serial.print(x);', '-2147483648'],
   ['int from float truncates', 'int a = 3.9; Serial.print(a);', '3'],
   ['int function return truncates', 'Serial.print(half(5));', '2', 'int half(int v) { return v / 2; }'],
+  ['float = int/int', 'float f = 7 / 2; Serial.print(f);', '3.00'],
+  ['sqrt prints as float', 'Serial.print(sqrt(16));', '4.00'],
+  ['char cast to int', "Serial.print((int)'A');", '65'],
+  ['char arithmetic', "Serial.print('A' + 1);", '66'],
+  ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
+  ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
+  ['struct with initialiser', 'Point p = {3, 4}; Serial.print(p.x * p.y);', '12', 'struct Point { int x; int y; };'],
+  ['struct fields default to zero', 'Point p; Serial.print(p.x); Serial.print(p.y);', '00', 'struct Point { int x; int y; };'],
+  ['struct array', 'Point ps[3]; ps[2].y = 9; Serial.print(ps[2].y); Serial.print(ps[0].y);', '90', 'struct Point { int x; int y; };'],
+  ['struct array initialiser', 'Point ps[2] = {{1, 2}, {3, 4}}; Serial.print(ps[1].x);', '3', 'struct Point { int x; int y; };'],
+  ['typedef struct', 'Pin p = {13, true}; Serial.print(p.num); Serial.print(p.on);', '131', 'typedef struct { int num; bool on; } Pin;'],
+  ['struct with String and array fields', 'Song s = {"intro"}; s.notes[1] = 5; Serial.print(s.name); Serial.print(s.notes[1]); Serial.print(s.notes[0]);', 'intro50', 'struct Song { String name; int notes[4]; };'],
+  ['const char* field', 'Item it = {"pen", 3}; Serial.print(it.label); Serial.print(it.qty);', 'pen3', 'struct Item { const char* label; int qty; };'],
+  ['nested struct', 'Line l = {{1, 2}, {3, 4}}; Serial.print(l.b.x);', '3', 'struct Point { int x; int y; };\nstruct Line { Point a; Point b; };'],
+  ['struct passed to and returned from functions', 'Point p = make(2); Serial.print(sum(p));', '6', 'struct Point { int x; int y; };\nPoint make(int v) { Point r = {v, v * 2}; return r; }\nint sum(Point q) { return q.x + q.y; }'],
+  ['struct copy on declaration', 'Point a = {1, 2}; Point b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
+  ['struct member through a pointer', 'Point p = {5, 6}; Point* q = &p; Serial.print(q->y);', '6', 'struct Point { int x; int y; };'],
+  ['two fields on one line', 'RGB c = {1, 2, 3}; Serial.print(c.b);', '3', 'struct RGB { byte r, g, b; };'],
+  ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
+  ['swap by reference', 'int a = 1, b = 2; swap2(a, b); Serial.print(a); Serial.print(b);', '21', 'void swap2(int &x, int &y) { int t = x; x = y; y = t; }'],
+  ['reference to an array element', 'int v[2] = {1, 1}; inc(v[1]); Serial.print(v[1]);', '2', 'void inc(int &n) { n++; }'],
+  ['reference to a struct field', 'Point p = {1, 2}; inc(p.y); Serial.print(p.y);', '3', 'struct Point { int x; int y; };\nvoid inc(int &n) { n += 1; }'],
+  ['struct by reference', 'Point p = {1, 2}; moveRight(p); Serial.print(p.x);', '6', 'struct Point { int x; int y; };\nvoid moveRight(Point &q) { q.x += 5; }'],
+  ['const reference stays plain', 'String s = "hi"; Serial.print(twice(s));', 'hihi', 'String twice(const String &t) { return t + t; }'],
+  ['reference out-parameter', 'int q, r; divmod(17, 5, q, r); Serial.print(q); Serial.print(r);', '32', 'void divmod(int a, int b, int &quo, int &rem) { quo = a / b; rem = a % b; }'],
+  ['reference call inside an expression', 'int n = 1; Serial.print(bump(n) + bump(n)); Serial.print(n);', '53', 'int bump(int &x) { x++; return x; }'],
+  // chars
+  ['digit from a char', "char c = '7'; Serial.print(c - '0');", '7'],
+  ['digit from an int holding a char', "int c = '5'; Serial.print(c - '0');", '5'],
+  ['char offset', "char c = 'c'; Serial.print(c - 'a');", '2'],
+  ['char + int', "char c = 'A'; Serial.print(c + 2);", '67'],
+  ['char from a number', 'char c = 66; Serial.print(c);', 'B'],
+  ['(char) cast', 'Serial.print((char)65); Serial.print((char)(65 + 1));', 'AB'],
+  ['char += n', "char c = 'a'; c += 2; Serial.print(c);", 'c'],
+  ['String += char', "String s = \"ab\"; s += 'c'; Serial.print(s);", 'abc'],
+  ['String + char', "String s = \"x\"; s = s + 'y'; Serial.print(s);", 'xy'],
+  ['char comparison', "char c = 'b'; Serial.print(c >= 'a' && c <= 'z');", '1'],
+  ['switch on a char', "char c = 'q'; switch (c) { case 'q': Serial.print(\"Q\"); break; default: Serial.print(\"?\"); }", 'Q'],
+  ['char loop', "for (char c = 'a'; c <= 'c'; c++) Serial.print(c);", 'abc'],
+  ['escaped char literal', "Serial.print((int)'\\n');", '10'],
+  ['charAt minus a char', 'String s = "42"; Serial.print(s.charAt(0) - \'0\');', '4'],
+  ['char in a sum chain', "int sum = 0; char c = '7'; sum = sum + c - '0'; Serial.print(sum);", '7'],
+  ['int + char - char', "int n = 2; char c = '3'; Serial.print(n + c - '0');", '5'],
+  ['zero char is falsy and equals 0', 'char c = 0; Serial.print(c == 0); Serial.print(c ? 1 : 0);', '10'],
+  ['char compared with a number', "char c = 'A'; Serial.print(c == 65); Serial.print(c >= 32 && c < 127);", '11'],
+  // declarations without a value start at zero, as C globals do
+  ['uninitialised int', 'count++; Serial.print(count);', '1', 'int count;'],
+  ['uninitialised unsigned long', 'Serial.print(millis() - last < 100000);', '1', 'unsigned long last;'],
+  ['uninitialised float', 'Serial.print(t);', '0.00', 'float t;'],
+  ['uninitialised String', 's += "a"; Serial.print(s);', 'a', 'String s;'],
+  ['uninitialised bool', 'Serial.print(on);', '0', 'bool on;'],
+  ['several uninitialised ints', 'a++; b += 2; Serial.print(a + b);', '3', 'int a, b;'],
+  ['two structs in one declaration', 'Point a, b; a.x = 1; b.x = 2; Serial.print(a.x + b.x);', '3', 'struct Point { int x; int y; };'],
+  // float printing
+  ['whole float prints 2 decimals', 'float t = 21; Serial.println(t);', '21.00\r\n'],
+  ['float param prints 2 decimals', 'show(3);', '3.00', 'void show(float v) { Serial.print(v); }'],
+  ['float function result', 'Serial.print(half(4));', '2.00', 'float half(int v) { return v / 2.0; }'],
+  ['float in String()', 'float t = 20; Serial.print("T=" + String(t));', 'T=20.00'],
+  ['float arithmetic', 'float c = 20; Serial.print(c * 9 / 5 + 32);', '68.00'],
+  ['explicit digits kept', 'float t = 21.456; Serial.print(t, 1);', '21.5'],
+  ['int cast of float prints int', 'float t = 21.7; Serial.print((int)t);', '21'],
+  ['comparison prints 0/1', 'float t = 21; Serial.print(t > 20);', '1'],
+  ['NaN with digits prints nan', 'Serial.print(sqrt(-1), 2);', 'nan'],
+  ['int var prints no decimals', 'int n = 4; Serial.print(n);', '4'],
+  ['float var name reused as int elsewhere', 'Serial.print(fa());', '5', 'int fa() { int v = 5; return v; }\nfloat fb() { float v = 1; return v; }'],
+  ['lcd.print of a float', 'float t = 3; Serial.print(String(t));', '3.00'],
   // guards for integer type tracking
   ['ADC to volts with a (float) cast', 'int raw = 2048; Serial.print((float)raw / 4095 * 3.3);', '1.65'],
   ['(float) cast on the left operand', 'int a = 1, b = 4; Serial.print((float)a / b);', '0.25'],
@@ -111,15 +180,11 @@ const cases: Array<[string, string, string, string?]> = [
 // Known gaps: the ESP32 runner is a regex transpiler to JavaScript. It tracks integer variable types, but not
 // expression types (chars as numbers, float printing of whole numbers), references or structs. Each of
 // these runs with it.fails, so fixing one turns it red: move it to `cases` above when that happens.
-const gaps: Array<[string, string, string, string?]> = [
-  ['println ends with CRLF', 'Serial.println(1);', '1\r\n'],
-  ['char cast to int', "Serial.print((int)'A');", '65'],
-  ['char arithmetic', "Serial.print('A' + 1);", '66'],
-  ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],
-  ['float = int/int', 'float f = 7 / 2; Serial.print(f);', '3.00'],
-  ['sqrt prints as float', 'Serial.print(sqrt(16));', '4.00'],
-  ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
-  ['struct', 'Point p; p.x = 3; p.y = 4; Serial.print(p.x + p.y);', '7', 'struct Point { int x; int y; };'],
+const gaps: Array<[string, string, string, string?, string?]> = [
+  // JS objects are references: assigning or passing a struct by value shares it instead of copying
+  ['struct assignment copies', 'Point a = {1, 2}; Point b; b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
+  // read() returns a 1-letter string so that c == 'a' keeps working; real Arduino returns the code (97)
+  ['int from Serial.read() prints its code', 'int c = Serial.read(); Serial.print(c);', '97', '', 'a'],
   ['unsigned subtraction wraps', 'unsigned int a = 1, b = 2; Serial.print(a - b);', '4294967295'],
 ];
 
@@ -130,7 +195,13 @@ describe('Arduino compatibility', () => {
 });
 
 describe('Arduino compatibility: known gaps', () => {
-  it.fails.each(gaps)('%s', async (_name, body, expected, globals) => {
-    expect(await run(body, globals)).toBe(expected);
+  it.fails.each(gaps)('%s', async (_name, body, expected, globals, input) => {
+    expect(await run(body, globals, input)).toBe(expected);
+  });
+});
+
+describe('serial input in the compat harness', () => {
+  it('reaches Serial.read()', async () => {
+    expect(await run('char c = Serial.read(); Serial.print(c == \'a\');', '', 'a')).toBe('1');
   });
 });

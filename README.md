@@ -25,9 +25,25 @@ Everything is bundled, so the built site works offline (no CDN scripts).
 
 ## Features
 
-- **Arduino Uno running real firmware:** pick *Arduino Uno* as the board and upload a compiled `.hex` (Arduino IDE: Sketch → Export Compiled Binary). An ATmega328P is emulated instruction by instruction at 16 MHz ([avr8js](https://github.com/wokwi/avr8js)), so timers, PWM, `millis()`, interrupts, Serial and the 10-bit ADC are the real Arduino core running on the real chip model, wired into the analog circuit.
+- **Arduino Uno sketches in the browser:** write the sketch in the editor and press Start, just like the ESP32. It runs with the Uno's rules: pins 0–13 and A0–A5, 5 V logic, 16-bit `int`, a 10-bit ADC, PWM only on pins 3, 5, 6, 9, 10 and 11, and interrupts on pins 2 and 3. ESP32-only features (WiFi, `ledc…`) stop the sketch with an explanation. Direct register access (`PORTB`, timer registers) is not simulated.
+- **ESP32-C3 Super Mini** (16 pins: GPIO 0–10, 20, 21; ADC on 0–4; the blue LED on GPIO8 is active LOW; I2C on 8/9) next to the ESP32 DevKit and the Uno.
+- **Battery power:** any board can be set to run *from its pins* instead of USB (click it → *Powered by*). It then runs only while its supply is up: build a real chain like 18650 → TP4056 (charger + protection) → ON/OFF switch → 3.3 V buck-boost → 3V3, and flipping the switch turns the board off and restarts the sketch when it comes back.
+- **Alerts for wiring and power mistakes:** pop-ups (also in the Console) that point at the part: a supply or battery shorted to GND, more current than a pin, regulator or battery can give, an LED backwards / starved of current / burnt, a part with a required pin unconnected, a relay coil a GPIO can't pull in, a servo or sensor without power, I2C SDA/SCL swapped, a sketch driving a pin with nothing on it, a missing flyback diode.
+- **Breadboard:** drop a part on it and its legs plug into the holes (they snap into place); columns a–e / f–j and the power rails are joined as on a real one, and the centre channel separates the halves.
+- **Batteries that drain and charge:** the charge follows the current your circuit really draws, and rises while a TP4056 charges it (choose a small capacity to watch it move). A battery-powered board's HIGH outputs follow its sagging supply.
+- **To a real board:** the *</>* button downloads the open board's sketch as an `.ino` (with the board to pick in the IDE and the wiring as comments) to upload with the Arduino IDE.
+- **Serial Plotter:** the *Plotter* tab graphs the numbers the sketch prints (`12 34`, `12,34` or `temp:21.5 hum:40`).
+- **Arduino libraries:** `#include` the popular ones and use them as on real hardware, each wired to a simulated part:
+  Adafruit SSD1306 + GFX (OLED), Adafruit NeoPixel and FastLED (WS2812B strip and ring), TM1637Display (4-digit display),
+  OneWire + DallasTemperature (DS18B20), NewPing and `pulseIn()` (HC-SR04), RTClib (DS3231), Keypad (4×4 keypad),
+  Bounce2, IRremote (VS1838B receiver + a clickable NEC remote), Encoder and ESP32Encoder (KY-040), Adafruit BME280 / BMP280, Adafruit MPU6050, MPU6050 / MPU6050_light, LiquidCrystal (parallel 16×2), ArduinoJson, EEPROM, Preferences, Ticker, Stepper and
+  AccelStepper (28BYJ-48 + ULN2003). Wiring mistakes behave as they would on the bench: a stepper wired in the wrong
+  order only jitters, a NeoPixel sketch with the wrong color order swaps red and green, a DS18B20 bus without a pull-up
+  gets a warning. EEPROM, Preferences and the RTC's time survive Stop/Start for the browser session. Other libraries
+  are not available: CatSim converts sketches to JavaScript rather than compiling C++, so each library is a JS
+  reimplementation of the real one's API (see `src/libs/`).
 - **ESP32 DevKit V1 (30-pin)** with real GPIO numbering. Hover a pin to see its functions (ADC1/ADC2, touch, DAC, strapping, I2C). The on-board LED is on GPIO2.
-- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, 16×2 I2C LCD, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819), an LM358 op-amp, capacitors, a DC motor, a 5 V relay, and logic chips with real DIP pinouts: 74HC00/02/04/08/14/32/86 gates, 74HC74 flip-flops, 74HC595 shift register, CD4017 counter and the NE555 timer.
+- **Parts:** LED, resistor, push button, potentiometer, DHT22, LDR, PIR motion sensor, piezo buzzer (plays sound), servo, RGB LED (common anode/cathode), 7-segment digit, slide switch, joystick, KY-040 rotary encoder, FSR 402 force sensor, sound / soil-moisture / MQ-2 gas modules, batteries (18650, 2×AA, 9 V, CR2032), TP4056 charger, 3.3 V buck-boost regulator, coin vibration motor, L298N motor driver, a half-size breadboard, BME280 / BMP280, MPU6050 (GY-521), a parallel 16×2 LCD, AO3400 and 2N7000 MOSFETs, 16×2 I2C LCD, 128×64 OLED, TM1637 display, NeoPixel strip and ring, DS18B20, HC-SR04, DS3231 RTC, 4×4 keypad, IR receiver and remote, 28BYJ-48 stepper, NPN (2N2222) and PNP (2N2907) transistors, N-MOSFET (2N7000), diodes (1N4148, 1N4007, 1N5819), an LM358 op-amp, capacitors, a DC motor, a 5 V relay, and logic chips with real DIP pinouts: 74HC00/02/04/08/14/32/86 gates, 74HC74 flip-flops, 74HC595 shift register, CD4017 counter and the NE555 timer.
 - **Wiring:** click a pin, then another pin. Circuits are resolved into nets, so an LED only lights if it has a path to GND, and a button only works if it's wired to the input.
 - **Arduino-ESP32 API:** GPIO, 12-bit ADC, LEDC PWM (core 2.x and 3.x APIs), `dacWrite`, `tone`, interrupts, `Serial` in both directions (Terminal tab), `printf`.
 - **IoT:** `WiFi.h`, `PubSubClient` talking to a built-in MQTT broker (publish to the device from the *IoT · MQTT* tab), and `HTTPClient` making real HTTPS requests to CORS-enabled servers.
@@ -62,17 +78,22 @@ src/canvas.js         2D diagram editor (drag, wire, pan/zoom)
 src/view3d.js         3D view (Three.js, code-split)
 src/transpiler.js     sketch → JS
 src/runtime.js        simulator, Arduino/ESP32 API, WiFi/MQTT/HTTP
+src/libs/             Arduino libraries (OLED, NeoPixel/FastLED, sensors, keypad, IR, JSON, storage, steppers)
+src/parts-libs.js     the parts those libraries drive
+src/parts-basic.js    basic, power and module parts (RGB LED, battery, TP4056, regulator, ESP32-C3…)
+src/analog/models-extra.ts  their electrical models (regulators, protection, board power)
+src/plotter.js        Serial Plotter
+src/contacts.js       legs plugged into a breadboard
 src/clock.ts          virtual simulation clock
 src/analog/           analog engine: circuit.ts (MNA solver), devices.ts (BJT, MOSFET, op-amp,
                       controlled sources), parser.ts (SPICE netlists), models.ts (part models), bridge.ts
                       (couples it to the sketch), waveform.ts, spice.ts (netlist export), nets.ts
 src/scope.ts          oscilloscope panel
 src/digital/chips.ts  logic chips: pinouts and behaviour
-src/avr/              Arduino Uno: uno.ts (ATmega328P emulation + circuit coupling), hex.ts (Intel HEX)
-src/firmware/         compiled firmware for the Uno examples (+ the .ino sources)
+src/sketches/         Arduino Uno example sketches (.ino)
 src/sim-worker.js     runs the sketch in a Web Worker
 src/sim-host.js       page side: mirrors worker state, validates its messages
-src/examples.js       example projects
+src/examples.js       example projects (src/examples-libs.js: one per library)
 tests/unit/           Vitest
 tests/e2e/            Playwright
 ```

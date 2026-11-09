@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CatSim — ESP32 IoT Simulator</title>
   <meta name="description" content="Simulate ESP32 circuits and IoT sketches in your browser: wire parts, write Arduino code, watch the serial monitor and MQTT traffic.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2322c55e'/%3E%3Cpath d='M8 24V11l4 4h8l4-4v13z' fill='%230b1220'/%3E%3Ccircle cx='13' cy='18' r='1.6' fill='%2322c55e'/%3E%3Ccircle cx='19' cy='18' r='1.6' fill='%2322c55e'/%3E%3C/svg%3E">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
 </head>
 <body>
   <header class="topbar">
@@ -13,13 +16,11 @@
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
     <div class="brand">
-      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M8 24V11l4 4h8l4-4v13z" fill="#0b1220"/><circle cx="13" cy="18" r="1.6" fill="var(--accent)"/><circle cx="19" cy="18" r="1.6" fill="var(--accent)"/></svg>
+      <svg class="brand-mark" viewBox="22 56 212 140" width="39" height="26" aria-hidden="true"><path fill="#FF9F5F" d="M78 90 L28 140 L78 190 L95 190 L45 140 L95 90Z"/><path fill="#FF9F5F" d="M78 90 L102 90 L90 62Z"/><path fill="#FF9F5F" fill-rule="evenodd" d="M71 140a13 13 0 1 0 26 0a13 13 0 1 0 -26 0Z M79 140a5 5 0 1 0 10 0a5 5 0 1 0 -10 0Z"/><path fill="#FF9F5F" fill-rule="evenodd" d="M104 190 L168 62 L178 90 L228 140 L178 190Z M148 124a10 10 0 1 0 20 0a10 10 0 1 0 -20 0Z M154 124a4 4 0 1 0 8 0a4 4 0 1 0 -8 0Z M148 156a10 10 0 1 0 20 0a10 10 0 1 0 -20 0Z M154 156a4 4 0 1 0 8 0a4 4 0 1 0 -8 0Z M167.17 128 L185.66 128 L196.83 116.83 L191.17 111.17 L182.34 120 L167.17 120Z M167.17 160 L182.34 160 L191.17 168.83 L196.83 163.17 L185.66 152 L167.17 152Z"/></svg>
       <span class="brand-name">Cat<b>Sim</b></span>
       <span class="chip">ESP32</span>
     </div>
     <input id="projectName" class="proj-name" value="Untitled project" spellcheck="false" aria-label="Project name">
-<button id="btnFirmware" class="btn" hidden title="Load compiled firmware for the Uno (.hex)">Upload .hex</button>
-    <input type="file" id="firmwareFile" accept=".hex,.ihx,text/plain" hidden>
     <div class="tb-spacer"></div>
     <div class="tb-sim" role="toolbar" aria-label="Simulation">
       <button id="btnRun" class="run-btn" title="Start simulation (Ctrl+Enter)"><span class="ico">▶</span><span class="lbl">Start</span></button>
@@ -38,6 +39,7 @@
       <select id="exampleSelect" class="btn" aria-label="Load example"><option value="">Examples…</option></select>
       <button id="btnNew" class="btn btn-ilabel" title="New project"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 3h7l3 3v11H5z M12 3v3h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">New</span></button>
       <button id="btnImport" class="btn btn-ilabel" title="Import a project file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3 M6 7l4-4 4 4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Import</span></button>
+      <button id="btnIno" class="btn btn-ilabel" title="Download the sketch (.ino) to upload to a real board with the Arduino IDE" aria-label="Download sketch for the Arduino IDE"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M7 6l-4 4 4 4 M13 6l4 4-4 4 M11 4l-2 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button id="btnExport" class="btn btn-ilabel" title="Export the project as a file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 3v10 M6 9l4 4 4-4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Export</span></button>
       <button id="btnShare" class="btn btn-dark">Share</button>
     </div>
@@ -51,7 +53,7 @@
         <button class="tab" data-tab="partsPane">Parts</button>
       </div>
       <div class="editor-wrap">
-        <div id="editorPane" class="tabpane active"><div id="boardTabs" class="board-tabs" role="tablist" aria-label="Board programs" hidden></div><div id="unoBanner" class="uno-banner" hidden></div><div id="code" class="code-host"></div></div>
+        <div id="editorPane" class="tabpane active"><div id="boardTabs" class="board-tabs" role="tablist" aria-label="Board programs" hidden></div><div id="code" class="code-host"></div></div>
   <div id="partsPane" class="tabpane palette">
         <input id="paletteSearch" class="search" placeholder="Search parts…" aria-label="Search parts">
         <div id="paletteList" class="palette-list"></div>
@@ -90,6 +92,7 @@
       <div class="bottom" id="bottom">
         <div class="tabs" data-group="bottom">
           <button class="tab active" data-tab="serialPane">Terminal</button>
+          <button class="tab" data-tab="plotPane" title="Serial Plotter: graphs the numbers the sketch prints">Plotter</button>
           <button class="tab" data-tab="iotPane" title="IoT: WiFi and the built-in MQTT broker">MQTT <span id="iotDot" class="mini-dot"></span></button>
           <button class="tab" data-tab="scopePane">Scope</button>
           <button class="tab" data-tab="consolePane">Console <span id="consoleBadge" class="badge" hidden>0</span></button>
@@ -106,6 +109,11 @@
             <select id="lineEnding" aria-label="Line ending"><option value="\n">Newline</option><option value="">No line ending</option><option value="\r\n">CR + LF</option></select>
             <button class="btn btn-sm">Send</button>
           </form>
+        </div>
+        <div id="plotPane" class="tabpane plot">
+          <div id="plotLegend" class="plot-legend"></div>
+          <canvas id="plotCanvas" class="plot-canvas"></canvas>
+          <p id="plotEmpty" class="plot-empty">Print numbers with <code>Serial.println()</code> to graph them: one line per sample, several values separated by spaces or commas, or named like <code>temp:21.5 hum:40</code>.</p>
         </div>
         <div id="iotPane" class="tabpane iot">
           <div class="iot-status">
@@ -128,6 +136,7 @@
     </div>
   </main>
   <div id="toast" class="toast" role="status"></div>
+  <div id="alerts" class="alerts" role="alert" aria-live="assertive"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

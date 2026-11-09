@@ -56,6 +56,17 @@ describe('analog bridge', () => {
     expect(sim.analog.gpioVoltage(15)).toBeLessThan(0.01);
   });
 
+  it('a button wired by its opposite legs (1b, 2b) works like legs 1 and 2', async () => {
+    const { sim } = run([esp, comp('b1', 'button')], [['esp:D15', 'b1:1b'], ['b1:2b', 'esp:GND.R']],
+      'void setup() { pinMode(15, INPUT_PULLUP); }\nvoid loop() { delay(5); }');
+    await wait(60);
+    expect(sim.readPin(15)).toBe(1);
+    expect(sim.analog.gpioVoltage(15)).toBeCloseTo(3.3, 2);
+    sim.setPressed('b1', true);
+    expect(sim.readPin(15)).toBe(0);
+    expect(sim.analog.gpioVoltage(15)).toBeLessThan(0.01);
+  });
+
   it('reads a potentiometer as a real voltage divider', async () => {
     const pot = comp('p1', 'pot', { value: 0.25 });
     const { sim } = run([esp, pot], [['esp:3V3', 'p1:VCC'], ['p1:GND', 'esp:GND.L'], ['p1:SIG', 'esp:D34']],
