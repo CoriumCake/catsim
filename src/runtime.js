@@ -322,7 +322,7 @@ class Simulator {
       begin(baud) { sim.baud = baud; },
       end() {}, flush() {}, setTimeout() {}, setDebugOutput() {},
       print(v, f) { const s = fmtValue(v, f); sim.serialOut += s; return s.length; },
-      println(v, f) { const s = (v === undefined ? '' : fmtValue(v, f)) + '\n'; sim.serialOut += s; return s.length; },
+      println(v, f) { const s = (v === undefined ? '' : fmtValue(v, f)) + '\r\n'; /* Arduino ends lines with CR LF */ sim.serialOut += s; return s.length; },
       printf(fmt, ...a) { const s = sprintf(fmt, ...a); sim.serialOut += s; return s.length; },
       write(b) { const s = typeof b === 'number' ? String.fromCharCode(b) : String(b); sim.serialOut += s; return s.length; },
       available() { return sim.serialIn.length; },

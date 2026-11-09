@@ -34,6 +34,7 @@ const cases: Array<[string, string, string, string?]> = [
   ['print float with digits', 'Serial.print(2.5, 3);', '2.500'],
   ['print negative float', 'Serial.print(-1.5);', '-1.50'],
   ['print HEX/BIN/OCT', 'Serial.print(255, HEX); Serial.print(" "); Serial.print(5, BIN); Serial.print(" "); Serial.print(8, OCT);', 'FF 101 10'],
+  ['println ends with CRLF', 'Serial.println(1);', '1\r\n'],
   ['print bool prints 1/0', 'Serial.print(true); Serial.print(false);', '10'],
   ['print char', "Serial.print('A');", 'A'],
   ['printf', 'Serial.printf("%d %05.2f %s %x\\n", 42, 3.14159, "hi", 255);', '42 03.14 hi ff\n'],
@@ -112,7 +113,6 @@ const cases: Array<[string, string, string, string?]> = [
 // expression types (chars as numbers, float printing of whole numbers), references or structs. Each of
 // these runs with it.fails, so fixing one turns it red: move it to `cases` above when that happens.
 const gaps: Array<[string, string, string, string?]> = [
-  ['println ends with CRLF', 'Serial.println(1);', '1\r\n'],
   ['char cast to int', "Serial.print((int)'A');", '65'],
   ['char arithmetic', "Serial.print('A' + 1);", '66'],
   ['char increment', "char c = 'A'; c++; Serial.print(c);", 'B'],

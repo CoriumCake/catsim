@@ -426,7 +426,7 @@ const App = {
   },
   renderTerminal() {
     const el = $('#serialOut');
-    el.textContent = (this.term && this.term[this.activeBoard]) || '';
+    el.textContent = ((this.term && this.term[this.activeBoard]) || '').replace(/\r\n?/g, '\n'); // println sends CR LF
     if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
     const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(this.activeBoard || '')}"]`); if (tab) tab.classList.remove('unseen');
   },
