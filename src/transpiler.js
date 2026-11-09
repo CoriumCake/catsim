@@ -226,6 +226,7 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
 
   // --- function definitions ---
   const fnNames = []; const fnWrap = new Map(); // int-returning function → wrap helper
+  const refParams = new Map(); // function → [index, name] of its non-const reference parameters
   const varWrap = new Map(); // integer variable → wrap helper (null when a name has conflicting types)
   const noteVar = (name, w) => varWrap.set(name, varWrap.has(name) && varWrap.get(name) !== w ? null : w);
   // float/double variables and functions, so print(x) shows 2 decimals even for whole numbers
@@ -239,6 +240,10 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       fnNames.push(name);
       if (intTypeRe.test(rtype) && !/[*&]/.test(sep)) fnWrap.set(name, wrapFor(rtype));
       if (isFloatType(rtype) && !/[*&]/.test(sep)) floatFns.add(name); else floatFns.delete(name);
+      params.split(',').forEach((prm, idx) => {
+        const rm = prm.match(/^\s*(?!.*\bconst\b)[^&]*\S\s*&\s*([A-Za-z_]\w*)\s*$/); // int &v, Point &p — not const String &s
+        if (rm) { if (!refParams.has(name)) refParams.set(name, []); refParams.get(name).push([idx, rm[1]]); }
+      });
       for (const prm of params.split(',')) {
         const pm = prm.trim().match(/^(.*?)\s*([*&]?)\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*(?:=.*)?$/);
         if (pm && pm[1] && !/[\[]/.test(prm)) { noteVar(pm[3], intTypeRe.test(pm[1]) && !pm[2] ? wrapFor(pm[1]) : null); noteFloat(pm[3], isFloatType(pm[1])); }
@@ -246,6 +251,34 @@ code = code.replace(/(?<![\w.])yield\s*\(/g, '__y(');
       const nl = '\n'.repeat((m.slice(a.length).match(/\n/g) || []).length);
       return `${a}${ws}async function ${name}(${convParams(params)}) {${nl}`;
     });
+
+  // --- reference parameters: void inc(int &v) changes the caller's variable ---
+  // The caller passes a box whose .v reads and writes its variable; the body uses v.v.
+  for (const [fname, refs] of refParams) {
+    const fm = new RegExp(`async function ${fname}\\([^)]*\\) \\{`).exec(code); if (!fm) continue;
+    const open = fm.index + fm[0].length - 1; const close = matchClose(code, open, '{', '}'); if (close < 0) continue;
+    let body = code.slice(open, close + 1);
+    for (const [, pn] of refs) body = body.replace(new RegExp(`(?<![\\w.])${pn}\\b`, 'g'), `${pn}.v`);
+    code = code.slice(0, open) + body + code.slice(close + 1);
+  }
+  if (refParams.size) {
+    const callRe = new RegExp(`(?<![\\w.])(?<!function\\s+)(${[...refParams.keys()].join('|')})\\s*\\(`, 'g');
+    const starts = []; let cm;
+    while ((cm = callRe.exec(code))) starts.push([cm.index + cm[0].length - 1, cm[1]]);
+    for (const [open, fname] of starts.reverse()) { // innermost/last first, so earlier positions stay valid
+      const close = matchClose(code, open, '(', ')'); if (close < 0) continue;
+      const args = []; let d = 0, cur = '';
+      for (const ch of code.slice(open + 1, close)) { if ('([{'.includes(ch)) d++; else if (')]}'.includes(ch)) d--; if (ch === ',' && d === 0) { args.push(cur); cur = ''; } else cur += ch; }
+      args.push(cur);
+      for (const [idx] of refParams.get(fname)) {
+        if (args[idx] === undefined) continue;
+        const a = args[idx].trim();
+        args[idx] = /^[A-Za-z_][\w.]*(?:\s*\[[^\]]*\])*$/.test(a)
+          ? ` { get v() { return ${a}; }, set v(__z) { ${a} = __z; } }` : ` { v: ${a} }`;
+      }
+      code = code.slice(0, open + 1) + args.join(',').replace(/^ /, '') + code.slice(close);
+    }
+  }
 
   // --- `static` locals keep their value between calls: hoist them to module scope ---
   {

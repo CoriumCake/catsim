@@ -110,6 +110,14 @@ const cases: Array<[string, string, string, string?]> = [
   ['struct copy on declaration', 'Point a = {1, 2}; Point b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
   ['struct member through a pointer', 'Point p = {5, 6}; Point* q = &p; Serial.print(q->y);', '6', 'struct Point { int x; int y; };'],
   ['two fields on one line', 'RGB c = {1, 2, 3}; Serial.print(c.b);', '3', 'struct RGB { byte r, g, b; };'],
+  ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
+  ['swap by reference', 'int a = 1, b = 2; swap2(a, b); Serial.print(a); Serial.print(b);', '21', 'void swap2(int &x, int &y) { int t = x; x = y; y = t; }'],
+  ['reference to an array element', 'int v[2] = {1, 1}; inc(v[1]); Serial.print(v[1]);', '2', 'void inc(int &n) { n++; }'],
+  ['reference to a struct field', 'Point p = {1, 2}; inc(p.y); Serial.print(p.y);', '3', 'struct Point { int x; int y; };\nvoid inc(int &n) { n += 1; }'],
+  ['struct by reference', 'Point p = {1, 2}; moveRight(p); Serial.print(p.x);', '6', 'struct Point { int x; int y; };\nvoid moveRight(Point &q) { q.x += 5; }'],
+  ['const reference stays plain', 'String s = "hi"; Serial.print(twice(s));', 'hihi', 'String twice(const String &t) { return t + t; }'],
+  ['reference out-parameter', 'int q, r; divmod(17, 5, q, r); Serial.print(q); Serial.print(r);', '32', 'void divmod(int a, int b, int &quo, int &rem) { quo = a / b; rem = a % b; }'],
+  ['reference call inside an expression', 'int n = 1; Serial.print(bump(n) + bump(n)); Serial.print(n);', '53', 'int bump(int &x) { x++; return x; }'],
   // chars
   ['digit from a char', "char c = '7'; Serial.print(c - '0');", '7'],
   ['digit from an int holding a char', "int c = '5'; Serial.print(c - '0');", '5'],
@@ -165,7 +173,6 @@ const gaps: Array<[string, string, string, string?, string?]> = [
   ['struct assignment copies', 'Point a = {1, 2}; Point b; b = a; b.x = 9; Serial.print(a.x);', '1', 'struct Point { int x; int y; };'],
   // read() returns a 1-letter string so that c == 'a' keeps working; real Arduino returns the code (97)
   ['int from Serial.read() prints its code', 'int c = Serial.read(); Serial.print(c);', '97', '', 'a'],
-  ['pass by reference', 'int x = 1; inc(x); Serial.print(x);', '2', 'void inc(int &v) { v++; }'],
   ['unsigned subtraction wraps', 'unsigned int a = 1, b = 2; Serial.print(a - b);', '4294967295'],
 ];
 
