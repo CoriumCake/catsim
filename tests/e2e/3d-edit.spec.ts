@@ -93,3 +93,21 @@ test('3D: wires follow a part while it is dragged, not only after it is dropped'
   expect(gap.moved).toBe(true);
   expect(gap.d).toBeLessThan(0.5);
 });
+
+test('3D: a turned part keeps its wires attached to its drawn pins', async ({ page }) => {
+  await setupBoard(page);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.components.find((x: { id: string }) => x.id === 'led1').rot = 90; A.project.wires = [{ id: 'w1', from: 'led1:A', to: 'r1:1' }]; A.changed(); });
+  await page.waitForFunction(() => window.CatSim.App.view3d.active && !window.CatSim.App.view3d.dirty);
+  const gaps = await page.evaluate(() => {
+    const V = window.CatSim.App.view3d, A = window.CatSim.App;
+    const g = V.root.children.find((o: { userData: { compId?: string } }) => o.userData.compId === 'led1');
+    const pivot = g.userData.pivot, d = window.CatSim.DEFS.led, out: number[] = [];
+    for (const p of d.pins) {
+      const drawn = new pivot.position.constructor(p.x, 0, p.y); pivot.localToWorld(drawn); // where the drawn leg is
+      const q = V.pinTop(A.canvas.pinPos(`led1:${p.id}`));                                  // where the wire ends
+      out.push(Math.hypot(drawn.x - q.x, drawn.z - q.z));
+    }
+    return out;
+  });
+  for (const gap of gaps) expect(gap).toBeLessThan(0.5);
+});

@@ -255,7 +255,7 @@ void loop() { delay(10); }`);
     expect(sim.readPin(4)).toBe(0);
   });
   it('breadboard: a resistor and an LED plugged into it (no wires to their legs) light up', async () => {
-    // breadboard at (0, 0): column k is at x = 16 + 10·(k−1); rows a–e at y = 40…80, f–j at y = 100…140
+    // breadboard at (0, 0): column k is at x = 16 + 10·(k−1); rows a–e at y = 40…80, f–j at y = 110…150
     const bb = comp('bb1', 'breadboard');
     const r1 = { ...comp('r1', 'resistor'), x: 41, y: 60 - 8 };                  // legs (15, 8) and (55, 8): holes 5c and 9c (40 units apart)
     const l1 = { ...comp('l1', 'led'), x: 86, y: 80 - 56 };                      // legs (10, 56) and (20, 56): holes 9e and 10e

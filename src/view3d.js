@@ -250,8 +250,8 @@ class View3D {
     for (const c of P.components) {
       const d = DEFS[c.type]; if (!d) continue;
       // the part turns about the middle of its footprint; its drawing is built in a pivot group that is offset to match
-      const f = footprint(d, c.rot);
-      const g = new T.Group(); g.position.set(c.x + f.w / 2, this.lift.get(c.id) || 0, c.y + f.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
+      // the group is centred on the unturned part: its pivot holds the drawing, which turns about that centre
+      const g = new T.Group(); g.position.set(c.x + d.w / 2, this.lift.get(c.id) || 0, c.y + d.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
       const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot); g.userData.pivot = pivot;
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
@@ -1106,8 +1106,8 @@ class View3D {
     dr.moved = true;
     const c = this.app.project.components.find((x) => x.id === dr.id); if (!c) return;
     c.x = Math.round((p.x - dr.dx) / 5) * 5; c.y = Math.round((p.z - dr.dz) / 5) * 5;
-    const g = this.partGroup(c.id), f = footprint(DEFS[c.type], c.rot);
-    if (g) { g.position.x = c.x + f.w / 2; g.position.z = c.y + f.h / 2; }
+    const g = this.partGroup(c.id), d = DEFS[c.type];
+    if (g) { g.position.x = c.x + d.w / 2; g.position.z = c.y + d.h / 2; }
     this.linksDirty = true; // the wires and pin targets follow the part
     this.app.canvas.updateComp(c); this.app.canvas.scheduleWires();
   }
