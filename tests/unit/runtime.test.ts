@@ -99,20 +99,6 @@ describe('sketch execution', () => {
     expect(b - a).toBeGreaterThanOrEqual(100); expect(b - a).toBeLessThan(150);
   });
 
-  it('pause() freezes the sketch and its clock', async () => {
-    const { sim } = makeSim([comp('esp', 'esp32')], []);
-    live = sim;
-    sim.start('int n = 0;\nvoid setup() {}\nvoid loop() { n++; Serial.print("x"); delay(10); }');
-    await wait(60);
-    sim.pause();
-    const t = sim.millis(), out = sim.serialOut.length;
-    await wait(80);
-    expect(sim.millis()).toBe(t);
-    expect(sim.serialOut.length).toBeLessThanOrEqual(out + 1);
-    sim.resume();
-    await wait(60);
-    expect(sim.serialOut.length).toBeGreaterThan(out + 1);
-  });
 
   it('stop() ends a long delay', async () => {
     const { sim } = makeSim([comp('esp', 'esp32')], []);

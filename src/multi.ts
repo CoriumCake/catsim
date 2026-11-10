@@ -99,8 +99,6 @@ export class MultiRun {
     for (const { rt } of this.runtimes.values()) { rt.updateWifi(); rt.checkPower(); rt.pollInterrupts(); }
   }
 
-  pause() { this.clock.pause(); }
-  resume() { this.clock.resume(); }
   setSpeed(s: number) { this.clock.setSpeed(s); }
   setPressed(id: string, on: boolean, key?: string) { this.ui[id] = pressEvent(this.ui[id], on, key, this.clock.millis()); this.touch(); }
   invalidate() { for (const { rt } of this.runtimes.values()) rt.invalidate(); }

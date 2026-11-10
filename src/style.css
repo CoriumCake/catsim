@@ -96,6 +96,8 @@ select.btn { padding-right: 6px; }
 /* bottom dock */
 .bottom { height: var(--bottom-h); min-height: 120px; display: flex; flex-direction: column; flex: none; background: var(--panel); }
 .serial-out { flex: 1; margin: 0; overflow: auto; padding: 8px 12px; font: 12.5px/1.55 var(--mono); background: var(--term-bg); color: #1c2230; white-space: pre-wrap; word-break: break-word; }
+/* each line's simulated time (set in data-t by the app) sits before it; it is drawn, not text, so copying the output copies only what the sketch printed */
+.serial-out .ln::before { content: attr(data-t); color: #9aa1ae; margin-right: 10px; }
 .serial-form, .mqtt-form { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--line); background: var(--panel); }
 .serial-form input, .mqtt-form input { flex: 1; min-width: 0; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel); font-family: var(--mono); font-size: 12px; }
 .serial-form input:focus, .mqtt-form input:focus { outline: none; border-color: var(--accent); }
@@ -153,10 +155,6 @@ select.btn { padding-right: 6px; }
 .tb-sim .btn { border-color: transparent; background: var(--panel-2); height: 34px; }
 .tb-sim .btn:hover { background: #eceef2; }
 .bar-sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
-.sim-clock { display: flex; align-items: center; gap: 6px; font: 12px var(--mono); color: var(--muted); padding: 0 10px; height: 34px; border-radius: 8px; background: var(--panel-2); min-width: 110px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #c8ccd4; }
-.dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: blink 1.2s infinite; }
-.dot.on.paused { background: var(--accent); box-shadow: none; animation: none; }
 .speed-select { height: 34px; border: 0; border-radius: 8px; background: var(--panel-2); color: var(--text); font: 12px var(--mono); padding: 0 6px; cursor: pointer; }
 .tb-sim .btn:disabled { opacity: .45; cursor: default; }
 @keyframes blink { 50% { opacity: .45; } }
@@ -269,7 +267,12 @@ select.btn { padding-right: 6px; }
   .bottom .tabs-actions { flex: none; }
   .brand { flex: none; white-space: nowrap; height: auto; }
   .proj-name { flex: 1 1 0; width: auto; min-width: 0; max-width: none; }
-  .tb-sim { flex: 1 1 100%; }
+  /* the run controls fit one row: Start, speed, Part, 2D/3D (the separator is hidden) */
+  .tb-sim { flex: 1 1 100%; flex-wrap: nowrap; justify-content: space-between; gap: 4px; }
+  .tb-sim .bar-sep { display: none; }
+  .tb-sim .run-btn { padding: 0 12px; }
+  .tb-sim .btn-icon { width: 32px; }
+  .tb-sim .speed-select { max-width: 72px; }
   /* the sidebar (Parts, code) is a sheet over the bottom of the screen; the hamburger opens and closes it */
   .side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 50vh; z-index: 30; border-radius: 16px 16px 0 0; box-shadow: 0 -12px 32px rgba(0, 0, 0, .22); background: var(--panel); display: flex; flex-direction: column; }
   .side > .sheet-handle { display: flex; }
@@ -297,7 +300,6 @@ select.btn { padding-right: 6px; }
 .scope-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, .55); font-size: 12.5px; pointer-events: none; text-align: center; padding: 0 16px; }
 .scope-empty[hidden] { display: none; }
 .scope-meas { padding: 4px 10px; font: 11px/1.5 var(--mono); color: var(--muted); border-top: 1px solid var(--line); min-height: 18px; }
-.sim-load { margin-left: 6px; font: 600 10.5px var(--mono); color: #b45309; background: #fef3c7; border-radius: 5px; padding: 1px 5px; }
 .cs-dip-pin { font: 600 5.5px var(--mono); fill: #aeb5c1; text-anchor: middle; dominant-baseline: middle; }
 .cs-uno-title { font: 800 22px system-ui, sans-serif; fill: #e6f3f7; text-anchor: middle; letter-spacing: 2px; }
 .props details.spice summary { cursor: pointer; font-size: 12px; color: var(--muted); }
@@ -318,7 +320,6 @@ select.btn { padding-right: 6px; }
   .btn-ilabel .lbl, .brand-name, .brand .chip { display: none; }
   .brand { padding-right: 10px; }
   .topbar, .tb-sim { gap: 6px; }
-  .sim-clock { min-width: 0; padding: 0 8px; }
   #exampleSelect { width: 128px; }
 }
 /* too narrow for one row: the simulation controls move to a second row of the top bar */
@@ -327,6 +328,10 @@ select.btn { padding-right: 6px; }
   .tb-spacer { display: none; }
   .tb-files { margin-left: auto; }
   .tb-sim { order: 10; flex-basis: 100%; justify-content: center; }
+}
+/* very narrow phones (320–420 px): the file actions wrap onto a second line instead of scrolling out of sight */
+@media (max-width: 420px) {
+  .tb-files { flex-wrap: wrap; overflow: visible; }
 }
 /* bottom dock: labels never wrap; contextual actions stay compact */
 .tab { white-space: nowrap; }

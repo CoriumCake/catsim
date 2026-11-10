@@ -44,7 +44,7 @@ function snapshotMulti() {
   const a = multi.bridge, t = multi.clock.millis();
   const samples = a.takeSamples();
   const analog = { mech: a.mechanics(), parts: a.partActivity(), burnt: [...a.burnt], leds: a.ledBrightness(), rtf: multi.running ? a.realTimeFactor() : 1, error: a.error };
-  post({ type: 'snap', t, running: multi.running, speed: multi.clock.speed, paused: multi.clock.paused, boards: multi.boardStates(), analog, samples },
+  post({ type: 'snap', t, running: multi.running, speed: multi.clock.speed, boards: multi.boardStates(), analog, samples },
     samples ? [samples.t.buffer, ...samples.v.map((v) => v.buffer)] : []);
 }
 
@@ -56,7 +56,7 @@ function snapshot() {
   const analog = { mech: a.mechanics(), parts: a.partActivity(), burnt: [...a.burnt], leds: a.ledBrightness(), rtf: sim.running ? a.realTimeFactor() : 1, error: a.error, work: a.workMs, steps: a.sim ? a.sim.stats.steps : 0, newton: a.sim ? a.sim.stats.newton : 0 };
   if (serial.length > 100000) serial = serial.slice(-100000);
   post({
-    type: 'snap', t: sim.millis(), running: sim.running, serial, speed: sim.clock.speed, paused: sim.clock.paused,
+    type: 'snap', t: sim.millis(), running: sim.running, serial, speed: sim.clock.speed,
     mode: sim.mode, out: sim.out, pwm: sim.pwm, servo: sim.servo, tone: sim.tone,
     lcd: sim.lcd, dev: sim.dev, halted: !!sim.halted, i2c: sim.i2c, wifi: { status: sim.wifi.status, ssid: sim.wifi.ssid },
     mqtt: { connected: sim.mqtt.connected, clientId: sim.mqtt.clientId, host: sim.mqtt.host, subs: sim.mqtt.subs },
@@ -94,9 +94,7 @@ self.onmessage = (e) => {
       break;
     case 'project': project = m.project; if (multi) { multi.invalidate(); multi.touch(); } else { sim.invalidate(); sim.pollInterrupts(); } break;
     case 'ui': (multi || sim).setPressed(String(m.id), !!m.pressed, (typeof m.key === 'string' && /^[\w*#+,-]{1,8}$/.test(m.key) ? m.key : undefined)); break;
-    case 'pause': (multi || sim).pause(); snapshot(); break;
     case 'probes': (multi ? multi.bridge : sim.analog).setProbes(Array.isArray(m.refs) ? m.refs.map((r) => (typeof r === 'string' ? r : null)) : [], +m.dtMax); break;
-    case 'resume': (multi || sim).resume(); snapshot(); break;
     case 'speed': (multi || sim).setSpeed(m.speed); snapshot(); break;
     case 'serial':
       if (multi) multi.sendSerial(String(m.board || ''), String(m.text));

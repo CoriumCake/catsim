@@ -156,8 +156,6 @@ class Simulator {
   }
 
   millis() { return this.running ? this.clock.millis() : this.stoppedAt; }
-  pause() { if (this.running) this.clock.pause(); }
-  resume() { this.clock.resume(); }
   setSpeed(s) { this.clock.setSpeed(+s); }
   invalidate() { this._nets = null; }
   comp(id) { return this.app.project.components.find((c) => c.id === id); }
@@ -446,7 +444,7 @@ class Simulator {
     if (!this.running) return;
     this.stoppedAt = this.clock.millis(); this.running = false; this.runId++;
     // a shared clock keeps running for the other boards; this run's timers just turn into no-ops
-    if (this.ownsClock) { this.clock.cancelAll(); this.clock.resume(); }
+    if (this.ownsClock) this.clock.cancelAll();
     for (const s of this.sleeps) s.reject(STOP);
     this.sleeps.clear();
     this.mqtt.connected = false;
@@ -658,8 +656,6 @@ class Simulator {
     const api = {
       __y() {
         check();
-        const paused = sim.clock.whenRunning();
-        if (paused) return paused.then(check);
         if (performance.now() - sim.lastYield > 12) { sim.lastYield = performance.now(); return macrotask().then(check); }
         return undefined;
       },
