@@ -429,27 +429,25 @@ class View3D {
   }
 
   build_button(g, c) {
-    this.box(g, 10, 4, 36, 36, 0, 10, this.mat('#2a2e36'));
-    for (const [x, z] of [[14, 8], [42, 8], [14, 36], [42, 36]]) this.cyl(g, x, z, 1.6, 10, 10.6, this.mat('#555'));
-    this.cyl(g, 28, 22, 9, 10, 12, this.mat('#1a1c21'));
+    // a 6 mm × 6 mm switch body, 4.3 mm tall, with a 3.5 mm cap
+    this.box(g, 1, 7, 24, 24, 0, 17, this.mat('#2a2e36'));
+    this.cyl(g, 13, 19, 4, 17, 17.6, this.mat('#1a1c21'), 20);
     const capM = this.mat('#e5484d', { roughness: 0.4 });
-    const cap = this.cyl(g, 28, 22, 11, 0, 7, capM, 28);
-    for (const z of [12, 32]) { this.leg(g, 10, z, 0, z); this.leg(g, 46, z, 56, z); }
+    const cap = this.cyl(g, 13, 19, 7, 17.6, 20, capM, 24);
     let last = '';
     this.live(c, (s) => {
       const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
       if (col !== last) { capM.color.set(col); last = col; }
-      cap.position.y = (s.pressed ? 8.5 : 12) + 3.5;
+      cap.position.y = s.pressed ? -1.2 : 0;
     });
   }
 
   build_pot(g, c) {
-    this.box(g, 2, 2, 52, 44, 0, 3, this.mat('#1e5bb8'));
-    this.cyl(g, 28, 23, 16, 3, 9, this.mat('#d7dbe2', { metalness: 0.4, roughness: 0.4 }), 32);
-    const knob = new THREE.Group(); knob.position.set(28, 9, 23); g.add(knob);
-    this.cyl(knob, 0, 0, 10, 0, 10, this.mat('#eef0f3'), 24);
-    this.box(knob, -1.5, -14, 3, 9, 10, 10.8, this.mat('#2a2e36'));
-    for (const x of [12, 28, 44]) this.leg(g, x, 46, x, 60);
+    // a 9 mm × 9 mm body, 6 mm tall; the Ø6 mm shaft rises 13 mm above the board
+    this.box(g, 10.5, 4, 35, 35, 0, 24, this.mat('#1e5bb8'));
+    this.cyl(g, 28, 21.5, 11.8, 24, 75, this.mat('#d7dbe2', { metalness: 0.4, roughness: 0.4 }), 32);
+    const knob = new THREE.Group(); knob.position.set(28, 75, 21.5); g.add(knob);
+    this.box(knob, -1.2, -11.8, 2.4, 8, 0, 1.5, this.mat('#2a2e36'));
     this.live(c, () => { knob.rotation.y = -(-135 + 270 * (+c.props.value)) * DEG; });
   }
 
@@ -537,19 +535,19 @@ class View3D {
   // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
   build_to92(g, c, mark) {
     const T = THREE;
-    const body = this.mesh(new T.CylinderGeometry(14, 14, 22, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#23262d', { roughness: 0.55 }), g, 20, 21, 22);
+    const body = this.mesh(new T.CylinderGeometry(9.25, 9.25, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#23262d', { roughness: 0.55 }), g, 15, 20, 22);
     body.castShadow = true;
     const face = this.tex(112, 88, (x) => {
       x.fillStyle = '#2b2f37'; x.fillRect(0, 0, 112, 88);
       x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 20px system-ui, sans-serif'; x.fillText(mark, 56, 40);
       x.font = '16px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 56, 66);
     });
-    const plate = this.mesh(new T.PlaneGeometry(28, 22), this.mat('#ffffff', { map: face }), g, 20, 21, 22.05, false);
+    const plate = this.mesh(new T.PlaneGeometry(14, 10), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
     plate.rotation.y = 0; // faces +z (toward the default camera)
-    for (const x of [10, 20, 30]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.8, this.M.lead); this.leg(g, x, 22, x, 62); }
+    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
     const dotM = this.mat('#0f3d1d', { emissive: '#22c55e', emissiveIntensity: 0 });
-    this.cyl(g, 31, 26, 1.6, 32, 32.6, dotM, 10);
-    const glow = this.glow(g, 31, 34, 26, 18, '#22c55e');
+    this.cyl(g, 21, 26, 1.2, 30, 30.6, dotM, 10);
+    const glow = this.glow(g, 21, 32, 26, 12, '#22c55e');
     this.live(c, (s) => { const on = s.on || 0; dotM.emissiveIntensity = on * 2; glow.material.opacity = on * 0.8; });
   }
   build_npn(g, c) { this.build_to92(g, c, '2N2222'); }
@@ -618,11 +616,12 @@ class View3D {
     const T = THREE;
     const elec = this.mat('#2457b8', { roughness: 0.4 }), stripe = this.mat('#9db7e6');
     const can = new T.Group(); g.add(can);
-    this.cyl(can, 15, 18, 11, 6, 34, elec, 28);
-    const st = this.mesh(new T.CylinderGeometry(11.1, 11.1, 28, 28, 1, true, -0.35, 0.7), stripe, can, 15, 20, 18); st.rotation.y = Math.PI / 2;
-    this.cyl(can, 15, 18, 10, 34, 34.6, this.M.metal, 28);
+    this.cyl(can, 15, 18, 9.85, 8, 51, elec, 28); // Ø5 mm, 11 mm long
+    const st = this.mesh(new T.CylinderGeometry(9.95, 9.95, 43, 28, 1, true, -0.35, 0.7), stripe, can, 15, 29.5, 18); st.rotation.y = Math.PI / 2;
+    this.cyl(can, 15, 18, 9.5, 51, 51.6, this.M.metal, 28);
     const disc = new T.Group(); g.add(disc);
-    const dm = this.mesh(new T.SphereGeometry(11, 20, 12), this.mat('#e1a93b', { roughness: 0.6 }), disc, 15, 22, 18); dm.scale.set(1, 1, 0.45);
+    // a 100 nF ceramic disc: Ø5 mm, 2.5 mm thick
+    const dm = this.mesh(new T.SphereGeometry(10, 20, 12), this.mat('#e1a93b', { roughness: 0.6 }), disc, 15, 18, 18); dm.scale.set(1, 1, 0.5);
     for (const x of [10, 20]) { this.rod(g, [x, 1, 18], [x, 8, 18], 0.8, this.M.lead); this.leg(g, x, 18, x, 56); }
     let last = '';
     this.live(c, () => { const v = String(c.props.value); if (v === last) return; last = v; const ceramic = v === '100nF'; can.visible = !ceramic; disc.visible = ceramic; });
