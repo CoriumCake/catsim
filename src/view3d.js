@@ -451,6 +451,57 @@ class View3D {
     this.live(c, () => { knob.rotation.y = -(-135 + 270 * (+c.props.value)) * DEG; });
   }
 
+  build_breadboard(g, c, d) {
+    // a half-size breadboard: an 8.5 mm block, holes on the top, a centre trench, red and blue rails
+    const T = THREE, w = d.w, h = d.h;
+    this.box(g, 0, 0, w, h, 0, 33.5, this.mat('#f4f1e8', { roughness: 0.8 }));
+    this.box(g, 8, 84, w - 16, 12, 33.5, 33.9, this.mat('#d6cfb8'));
+    const red = this.mat('#e5484d'), blue = this.mat('#3d8bff');
+    for (const [y, m] of [[10, red], [20, blue], [160, red], [170, blue]]) this.box(g, 8, y - 2.5, w - 16, 5, 33.5, 33.9, m);
+    const geo = new T.CylinderGeometry(1.9, 1.9, 0.8, 10); this.disp.push(geo);
+    const holes = new T.InstancedMesh(geo, this.mat('#2b2f37'), d.pins.length), m4 = new T.Matrix4();
+    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, 33.4, p.y); holes.setMatrixAt(i, m4); });
+    holes.instanceMatrix.needsUpdate = true; g.add(holes);
+  }
+
+  build_hcsr04(g, c, d) {
+    // a blue 45 × 20 mm board, 1.6 mm thick, and two 16 mm × 12 mm metal transducers with mesh tops
+    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d5fb5', { roughness: 0.5 }));
+    const mesh = this.mat('#2c2f35');
+    for (const x of [48.5, 128.5]) { this.cyl(g, x, 39.5, 31.5, 6, 53, this.M.metal, 40); this.cyl(g, x, 39.5, 26, 53, 53.8, mesh, 40); }
+  }
+
+  build_ds18b20(g, c) {
+    // a TO-92 package: 4.95 mm wide, the leads 1.27 mm apart, with the 18B20 mark on the flat face
+    const T = THREE;
+    this.mesh(new T.CylinderGeometry(9.75, 9.75, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#222', { roughness: 0.55 }), g, 15, 20, 22);
+    const face = this.tex(112, 56, (x) => { x.fillStyle = '#222'; x.fillRect(0, 0, 112, 56); x.fillStyle = '#ddd'; x.textAlign = 'center'; x.font = '600 18px system-ui, sans-serif'; x.fillText('18B20', 56, 34); });
+    this.mesh(new T.PlaneGeometry(14, 8), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
+    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
+  }
+
+  build_oled(g, c, d) {
+    // a 27.3 × 27.8 mm blue board, a glass panel, and the lit pixels on a 21.74 × 10.86 mm active area
+    const T = THREE, aw = 85.6, ah = 42.8, ax = 11.2, ay = 28.6;
+    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d3f8f', { roughness: 0.5 }));
+    this.box(g, 4, 22, 100, 56, 6, 8, this.mat('#05070b', { roughness: 0.3 }));
+    const tex = this.tex(128, 64, (x) => { x.fillStyle = '#05070b'; x.fillRect(0, 0, 128, 64); });
+    const screen = this.mesh(new T.PlaneGeometry(aw, ah), this.mat('#ffffff', { map: tex, emissive: '#9fd8ff', emissiveIntensity: 0.25 }), g, ax + aw / 2, 8.1, ay + ah / 2, false);
+    screen.rotation.x = -Math.PI / 2;
+    let last = '';
+    this.live(c, (s) => {
+      const dd = s.d; if (!dd) return;
+      const sig = dd.on ? dd.buf.join(',') + dd.invert : 'off'; if (sig === last) return; last = sig;
+      const x = tex.image.getContext('2d');
+      x.fillStyle = '#05070b'; x.fillRect(0, 0, 128, 64);
+      if (!dd.on) return;
+      const lit = (px, py) => !!(dd.buf[px + (py >> 3) * dd.w] & (1 << (py & 7))) !== dd.invert;
+      x.fillStyle = '#e6f2ff';
+      for (let py = 0; py < 64; py++) for (let px = 0; px < 128; px++) if (lit(px, py)) x.fillRect(px, py, 1, 1);
+      tex.needsUpdate = true;
+    });
+  }
+
   build_dht22(g, c) {
     const T = THREE;
     const draw = (x) => {
@@ -857,7 +908,7 @@ class View3D {
 
 // Library-driven parts (OLED, LED strips, keypad…): a slab whose top face shows the part's own 2D
 // drawing, redrawn whenever its state changes (so the OLED, LEDs and digits update live in 3D too).
-const FLAT_H = { bme280: 3, mpu6050: 3, lcd_parallel: 9, esp32c3: 5, rgb_led: 14, seg7: 8, slide_switch: 7, battery: 18, fsr: 1.5, vibmotor: 4, tp4056: 3, buckboost: 3, joystick: 12, encoder: 10, l298n: 14, sound: 6, soil: 3, mq2: 10, breadboard: 8, oled: 4, ws2812_strip: 3, ws2812_ring: 3, tm1637: 8, ds18b20: 12, hcsr04: 7, ds3231: 4, keypad: 2, ir_receiver: 10, ir_remote: 8, stepper: 10 };
+const FLAT_H = { bme280: 3, mpu6050: 3, lcd_parallel: 9, esp32c3: 5, rgb_led: 14, seg7: 8, slide_switch: 7, battery: 18, fsr: 1.5, vibmotor: 4, tp4056: 3, buckboost: 3, joystick: 12, encoder: 10, l298n: 14, sound: 6, soil: 3, mq2: 10, breadboard: 33.5, oled: 4, ws2812_strip: 3, ws2812_ring: 3, tm1637: 8, ds18b20: 12, hcsr04: 7, ds3231: 4, keypad: 2, ir_receiver: 10, ir_remote: 8, stepper: 10 };
 const SVG_STYLE = `<style>.cs-tiny{font:600 6.5px monospace;fill:#9aa6b8;text-anchor:middle}.cs-light{fill:#e7f0ff}.cs-dark{fill:#374151}
 .cs-key{font:700 13px monospace;text-anchor:middle}.cs-key-sm{font:700 7px monospace;text-anchor:middle}.cs-part-lbl{font:9px monospace;fill:#6b5a3a;text-anchor:middle}</style>
 <defs><filter id="cs-blur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter></defs>`;
@@ -881,6 +932,6 @@ View3D.prototype.build_flat = function (g, c, d) {
   };
   this.live(c, (s) => { let svg; try { svg = d.render(c, s); } catch (_) { return; } if (svg !== last) { last = svg; draw(svg); } });
 };
-for (const t of [...Object.keys(LIB_PARTS), ...Object.keys(BASIC_PARTS)]) View3D.prototype['build_' + t] = View3D.prototype.build_flat;
+for (const t of [...Object.keys(LIB_PARTS), ...Object.keys(BASIC_PARTS)]) if (!View3D.prototype['build_' + t]) View3D.prototype['build_' + t] = View3D.prototype.build_flat;
 
 export { View3D };

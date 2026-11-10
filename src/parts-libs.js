@@ -24,12 +24,13 @@ export function oledPath(d, y0 = 0, y1 = d.h, ox = 0, oy = 0) {
   return p;
 }
 const oled = {
-  type: 'oled', name: 'OLED 128×64 (SSD1306, I2C)', category: 'Output', w: 140, h: 100,
+  // a 0.96" module: 27.3 × 27.8 mm board; the active area is 21.74 × 10.86 mm
+  type: 'oled', name: 'OLED 128×64 (SSD1306, I2C)', category: 'Output', w: 108, h: 109,
   pins: [
-    { id: 'GND', label: 'GND', x: 52, y: 0, dir: 't' },
-    { id: 'VCC', label: 'VCC', x: 64, y: 0, dir: 't', title: 'VCC — 3.3 V or 5 V' },
-    { id: 'SCL', label: 'SCL', x: 76, y: 0, dir: 't', title: 'SCL — I2C clock (GPIO22 on the ESP32, A5 on the Uno)' },
-    { id: 'SDA', label: 'SDA', x: 88, y: 0, dir: 't', title: 'SDA — I2C data (GPIO21 on the ESP32, A4 on the Uno)' },
+    { id: 'GND', label: 'GND', x: 39, y: 0, dir: 't' },
+    { id: 'VCC', label: 'VCC', x: 49, y: 0, dir: 't', title: 'VCC — 3.3 V or 5 V' },
+    { id: 'SCL', label: 'SCL', x: 59, y: 0, dir: 't', title: 'SCL — I2C clock (GPIO22 on the ESP32, A5 on the Uno)' },
+    { id: 'SDA', label: 'SDA', x: 69, y: 0, dir: 't', title: 'SDA — I2C data (GPIO21 on the ESP32, A4 on the Uno)' },
   ],
   props: { addr: '0x3C', color: 'white' },
   controls: [
@@ -43,13 +44,15 @@ const oled = {
     let px = '';
     if (d && d.on) {
       const op = d.dim ? 0.55 : 1;
-      if (top === bottom) px = `<path d="${oledPath(d, 0, d.h, 6, 26)}" fill="${top}" opacity="${op}"/>`;
-      else px = `<path d="${oledPath(d, 0, Math.min(16, d.h), 6, 26)}" fill="${top}" opacity="${op}"/><path d="${oledPath(d, 16, d.h, 6, 26)}" fill="${bottom}" opacity="${op}"/>`;
+      if (top === bottom) px = `<path d="${oledPath(d, 0, d.h, 0, 0)}" fill="${top}" opacity="${op}"/>`;
+      else px = `<path d="${oledPath(d, 0, Math.min(16, d.h), 0, 0)}" fill="${top}" opacity="${op}"/><path d="${oledPath(d, 16, d.h, 0, 0)}" fill="${bottom}" opacity="${op}"/>`;
     }
-    return `<rect x="1" y="1" width="138" height="98" rx="5" fill="#1d3f8f" stroke="#10275c"/>
-      <circle cx="9" cy="9" r="3.5" fill="#0d1f4a"/><circle cx="131" cy="9" r="3.5" fill="#0d1f4a"/><circle cx="9" cy="91" r="3.5" fill="#0d1f4a"/><circle cx="131" cy="91" r="3.5" fill="#0d1f4a"/>
-      <text x="52" y="13" class="cs-tiny cs-light">G</text><text x="64" y="13" class="cs-tiny cs-light">V</text><text x="76" y="13" class="cs-tiny cs-light">SC</text><text x="88" y="13" class="cs-tiny cs-light">SD</text>
-      <rect x="3" y="22" width="134" height="72" rx="2" fill="#05070b"/>${px}`;
+    // the 128 × 64 pixels are drawn into the 21.74 × 10.86 mm active area (85.6 × 42.8 diagram units)
+    return `<rect x="0" y="0" width="108" height="109" rx="3" fill="#1d3f8f" stroke="#10275c"/>
+      <circle cx="4" cy="4" r="2.5" fill="#0d1f4a"/><circle cx="104" cy="4" r="2.5" fill="#0d1f4a"/><circle cx="4" cy="105" r="2.5" fill="#0d1f4a"/><circle cx="104" cy="105" r="2.5" fill="#0d1f4a"/>
+      <text x="39" y="9" class="cs-tiny cs-light">G</text><text x="49" y="9" class="cs-tiny cs-light">V</text><text x="59" y="9" class="cs-tiny cs-light">SC</text><text x="69" y="9" class="cs-tiny cs-light">SD</text>
+      <rect x="4" y="22" width="100" height="56" rx="2" fill="#05070b"/>
+      <g transform="translate(11.2 28.6) scale(${(85.6 / 128).toFixed(4)} ${(42.8 / 64).toFixed(4)})">${px}</g>`;
   },
 };
 
@@ -130,39 +133,41 @@ const tm1637 = {
 
 // ---------- DS18B20 (TO-92) ----------
 const ds18b20 = {
+  // TO-92 package: 4.95 mm wide, leads 1.27 mm apart
   type: 'ds18b20', name: 'DS18B20 Temperature (1-Wire)', category: 'Sensors', w: 40, h: 62,
   pins: [
     { id: 'GND', label: 'GND', x: 10, y: 62, dir: 'b', title: 'GND (left leg, flat side facing you)' },
-    { id: 'DQ', label: 'DQ', x: 20, y: 62, dir: 'b', title: 'DQ — 1-Wire data; needs a 4.7 kΩ pull-up to VDD' },
-    { id: 'VDD', label: 'VDD', x: 30, y: 62, dir: 'b', title: 'VDD — 3.0 to 5.5 V' },
+    { id: 'DQ', label: 'DQ', x: 15, y: 62, dir: 'b', title: 'DQ — 1-Wire data; needs a 4.7 kΩ pull-up to VDD' },
+    { id: 'VDD', label: 'VDD', x: 20, y: 62, dir: 'b', title: 'VDD — 3.0 to 5.5 V' },
   ],
   props: { temp: 22 },
   controls: [{ key: 'temp', label: 'Temperature', type: 'range', min: -55, max: 125, step: 0.5, fmt: (v) => `${(+v).toFixed(1)} °C` }],
   hint: 'OneWire + DallasTemperature. Put a 4.7 kΩ resistor between DQ and VDD. Several sensors can share one pin.',
   state: () => ({}),
   render(c) {
-    return `${lead('M10 34 V62 M20 34 V62 M30 34 V62')}<path d="M6 34 V14 A14 14 0 0 1 34 14 V34 Z" fill="#222" stroke="#000"/>
-      <text x="20" y="22" class="cs-tiny cs-light">18B20</text><text x="20" y="31" class="cs-tiny cs-light">${(+c.props.temp).toFixed(1)}°</text>`;
+    return `${lead('M10 34 V62 M15 34 V62 M20 34 V62')}<path d="M5.25 34 V24 A9.75 9.75 0 0 1 24.75 24 V34 Z" fill="#222" stroke="#000"/>
+      <text x="15" y="26" class="cs-tiny cs-light">18B20</text><text x="15" y="31" class="cs-tiny cs-light">${(+c.props.temp).toFixed(1)}°</text>`;
   },
 };
 
 // ---------- HC-SR04 ultrasonic ----------
 const hcsr04 = {
-  type: 'hcsr04', name: 'Ultrasonic Distance (HC-SR04)', category: 'Sensors', w: 110, h: 64,
+  // a 45 × 20 mm board with two 16 mm transducers
+  type: 'hcsr04', name: 'Ultrasonic Distance (HC-SR04)', category: 'Sensors', w: 177, h: 79,
   pins: [
-    { id: 'VCC', label: 'VCC', x: 40, y: 64, dir: 'b', title: 'VCC — 5 V' },
-    { id: 'TRIG', label: 'TRIG', x: 50, y: 64, dir: 'b', title: 'TRIG — a 10 µs HIGH pulse starts a measurement' },
-    { id: 'ECHO', label: 'ECHO', x: 60, y: 64, dir: 'b', title: 'ECHO — HIGH for the sound\'s round trip (5 V: use a divider on an ESP32)' },
-    { id: 'GND', label: 'GND', x: 70, y: 64, dir: 'b' },
+    { id: 'VCC', label: 'VCC', x: 74, y: 79, dir: 'b', title: 'VCC — 5 V' },
+    { id: 'TRIG', label: 'TRIG', x: 84, y: 79, dir: 'b', title: 'TRIG — a 10 µs HIGH pulse starts a measurement' },
+    { id: 'ECHO', label: 'ECHO', x: 94, y: 79, dir: 'b', title: 'ECHO — HIGH for the sound\'s round trip (5 V: use a divider on an ESP32)' },
+    { id: 'GND', label: 'GND', x: 104, y: 79, dir: 'b' },
   ],
   props: { distance: 100 },
   controls: [{ key: 'distance', label: 'Distance to object', type: 'range', min: 1, max: 450, step: 1, fmt: (v) => (+v > 400 ? `${v} cm (out of range)` : `${v} cm`) }],
   hint: 'NewPing, or pulseIn(ECHO, HIGH) after a 10 µs TRIG pulse: distance (cm) ≈ µs / 58. Range 2–400 cm.',
   state: () => ({}),
   render(c) {
-    const eye = (x) => `<circle cx="${x}" cy="28" r="20" fill="#c8ccd2" stroke="#8a9099"/><circle cx="${x}" cy="28" r="15" fill="#2c2f35"/><circle cx="${x}" cy="28" r="12" fill="#55595f" stroke="#444"/>`;
-    return `${lead('M40 52 V64 M50 52 V64 M60 52 V64 M70 52 V64')}<rect x="1" y="2" width="108" height="52" rx="3" fill="#1d5fb5" stroke="#123c78"/>${eye(25)}${eye(85)}
-      <rect x="47" y="8" width="16" height="9" rx="1" fill="#d8d8d8"/><text x="55" y="48" class="cs-tiny cs-light">${Math.round(c.props.distance)} cm</text>`;
+    const eye = (x) => `<circle cx="${x}" cy="39.5" r="31.5" fill="#c8ccd2" stroke="#8a9099"/><circle cx="${x}" cy="39.5" r="26" fill="#2c2f35"/><circle cx="${x}" cy="39.5" r="22" fill="#55595f" stroke="#444"/>`;
+    return `${lead('M74 79 V86 M84 79 V86 M94 79 V86 M104 79 V86')}<rect x="0" y="0" width="177" height="79" rx="3" fill="#1d5fb5" stroke="#123c78"/>${eye(48.5)}${eye(128.5)}
+      <text x="88.5" y="-3" class="cs-part-lbl">${Math.round(c.props.distance)} cm</text>`;
   },
 };
 
