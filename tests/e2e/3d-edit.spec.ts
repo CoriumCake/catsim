@@ -74,3 +74,22 @@ test('3D: a part added from the palette lands where the camera looks', async ({ 
   });
   expect(id.dx).toBeLessThan(120); expect(id.dy).toBeLessThan(120);
 });
+
+test('3D: wires follow a part while it is dragged, not only after it is dropped', async ({ page }) => {
+  await setupBoard(page);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.wires = [{ id: 'w1', from: 'led1:A', to: 'r1:1' }]; A.changed(); });
+  await page.waitForFunction(() => window.CatSim.App.view3d.active && !window.CatSim.App.view3d.dirty);
+  const grab = await screenAt(page, 535, 12, 228);
+  await page.mouse.move(grab.x, grab.y); await page.mouse.down();
+  await page.mouse.move(grab.x + 60, grab.y + 40, { steps: 8 });
+  await page.waitForTimeout(150); // a few frames, mouse still down
+  const gap = await page.evaluate(() => {
+    const V = window.CatSim.App.view3d;
+    const target = V.root.children.find((o: { userData: { pinRef?: string } }) => o.userData.pinRef === 'led1:A');
+    const q = V.pinTop(window.CatSim.App.canvas.pinPos('led1:A'));
+    return { moved: V.drag?.moved === true, d: Math.hypot(target.position.x - q.x, target.position.z - q.z) };
+  });
+  await page.mouse.up();
+  expect(gap.moved).toBe(true);
+  expect(gap.d).toBeLessThan(0.5);
+});

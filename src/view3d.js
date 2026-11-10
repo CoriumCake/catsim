@@ -31,7 +31,7 @@ class View3D {
     this.app = app; this.stage = stage;
     this.active = false; this.dirty = true; this.ready = false;
     this.updaters = []; this.disp = []; this.picks = [];
-    this.drag = null; this.overlayKey = ''; this.selBox = null; this.pendRing = null;
+    this.drag = null; this.linksDirty = false; this.overlayKey = ''; this.selBox = null; this.pendRing = null;
     this.camFitted = false;
   }
 
@@ -113,6 +113,7 @@ class View3D {
       this._raf = 0;
       if (!this.active) return;
       if (this.dirty && !this.drag) this.rebuild();
+      if (this.linksDirty) { this.linksDirty = false; this.linkRefresh(); }
       this.syncOverlay();
       this.update();
       this.controls.update();
@@ -263,6 +264,14 @@ class View3D {
       }
     }
 
+    this.linkRefresh();
+  }
+
+  /** Pin targets and wires. Rebuilt on their own while a part is dragged, so the wires follow the pointer. */
+  linkRefresh() {
+    for (const o of this.root.children.slice()) if (o.userData.link) { this.root.remove(o); this.picks = this.picks.filter((x) => x !== o); }
+    for (const o of this.linkDisp || []) o.dispose(); // what the previous links were made of
+    const T = THREE, P = this.app.project, n0 = this.root.children.length, d0 = this.disp.length;
     // pins: an invisible target on each pin's top, so a click there starts or finishes a wire, as in 2D
     const hitMat = new T.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
     const hitGeo = new T.SphereGeometry(4.5, 10, 8); this.disp.push(hitMat, hitGeo);
@@ -291,6 +300,8 @@ class View3D {
       m.userData.wireId = w.id; this.picks.push(m);
       for (const e of [A, B]) this.mesh(new T.SphereGeometry(1.9, 10, 8), m.material, this.root, e.x, e.y, e.z, false);
     });
+    for (const o of this.root.children.slice(n0)) o.userData.link = true;
+    this.linkDisp = this.disp.splice(d0); // kept apart from the scene's own resources, so a drag doesn't pile them up
   }
 
   update() {
@@ -810,7 +821,8 @@ class View3D {
     c.x = Math.round((p.x - dr.dx) / 5) * 5; c.y = Math.round((p.z - dr.dz) / 5) * 5;
     const g = this.partGroup(c.id), f = footprint(DEFS[c.type], c.rot);
     if (g) { g.position.x = c.x + f.w / 2; g.position.z = c.y + f.h / 2; }
-    this.app.canvas.updateComp(c); this.app.canvas.scheduleWires(); // wires are rebuilt when the part is let go
+    this.linksDirty = true; // the wires and pin targets follow the part
+    this.app.canvas.updateComp(c); this.app.canvas.scheduleWires();
   }
 
   /** Selection outline and the pin a wire starts from, drawn to match the 2D diagram. */
