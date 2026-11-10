@@ -325,6 +325,8 @@ select.btn { padding-right: 6px; }
 /* too narrow for one row: the simulation controls move to a second row of the top bar */
 @media (max-width: 1180px) {
   .topbar { height: auto; flex-wrap: wrap; row-gap: 6px; padding: 6px 10px; }
+  /* percentage heights inside a wrapping bar make the bar too short to hold its second row (the sim controls) */
+  .brand, .tb-files, .btn-dark { height: auto; }
   .tb-spacer { display: none; }
   .tb-files { margin-left: auto; }
   .tb-sim { order: 10; flex-basis: 100%; justify-content: center; }
