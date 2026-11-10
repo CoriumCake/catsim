@@ -25,6 +25,8 @@ export const REAL_SIZES = {
   keypad: { w: 272, h: 300, pins: row(['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], 101, 300, 'b') },
   // 28BYJ-48 motor (Ø28 mm, 19 mm tall) beside a ULN2003 driver board (35 × 25 mm)
   stepper: { w: 270, h: 110, pins: row(['IN1', 'IN2', 'IN3', 'IN4', 'GND', 'VCC'], 124, 110, 'b') },
+  // a 0.56" 10-pin seven-segment digit: five pins on each side, 2.54 mm apart
+  seg7: { w: 60, h: 96, pins: { ...row(['g', 'f', 'COM', 'a', 'b'], 10, 0, 't'), ...row(['e', 'd', 'COM2', 'c', 'dp'], 10, 96, 'b') } },
   // a 5 mm RGB LED: four legs on 2.54 mm
   rgb_led: { w: 44, h: 70, pins: row(['R', 'COM', 'G', 'B'], 7, 70, 'b') },
   // 1-cell slide switch: three pins on 2.54 mm
