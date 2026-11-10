@@ -41,6 +41,22 @@ void loop() {
 const SIDE_STORE = 'catsim.sideHidden';
 const DOCK_STORE = 'catsim.dockCollapsed';
 const clone = (o) => JSON.parse(JSON.stringify(o));
+/** Simulated time since boot as mm:ss.mmm (the clock on the run bar, and the Terminal's line stamps). */
+const simStamp = (ms) => {
+  const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
+};
+/** Terminal text as lines, each stamped with the simulated time (ms) its first byte arrived. println's CR LF becomes LF. */
+function addSerial(lines, text, ms) {
+  for (const piece of text.replace(/\r\n?/g, '\n').split(/(?<=\n)/)) {
+    const last = lines[lines.length - 1];
+    if (last && !last.s.endsWith('\n')) last.s += piece; else lines.push({ t: ms, s: piece });
+  }
+  let size = 0; for (const l of lines) size += l.s.length;
+  while (size > 60000 && lines.length > 1) size -= lines.shift().s.length; // keep the newest output
+  return lines;
+}
+const serialText = (lines) => lines.map((l) => l.s).join('');
 
 // ---------- audio for buzzers ----------
 const Audio = {
@@ -234,30 +250,15 @@ const App = {
     b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on);
     b.title = on ? 'Wires are tidy (click for curves)' : 'Tidy wires: route them at right angles around parts';
   },
-  togglePause() {
-    if (!this.sim.running) return;
-    if (this.sim.paused) this.sim.resume(); else this.sim.pause();
-    this.updatePause();
-  },
-  updatePause() {
-    const b = $('#btnPause'), p = this.sim.running && this.sim.paused;
-    b.disabled = !this.sim.running;
-    b.textContent = p ? '▶' : '⏸';
-    b.title = p ? 'Resume simulation' : 'Pause simulation';
-    b.setAttribute('aria-label', p ? 'Resume' : 'Pause');
-    $('#simDot').classList.toggle('paused', p);
-  },
   onSimState(on) {
     const b = $('#btnRun');
     b.classList.toggle('running', on);
     b.querySelector('.ico').textContent = on ? '■' : '▶';
     b.querySelector('.lbl').textContent = on ? 'Stop' : 'Start';
-    $('#simDot').classList.toggle('on', on);
-    this.updatePause();
     // starting: the card shrinks to its live-only form; stopping: drop the selection, so a part clicked
     // during the run (e.g. a pressed button) doesn't pop up its card
     if (on) this.onSelection(this.canvas.sel); else this.canvas.select(null);
-    if (!on) { Audio.stopAll(); this.flushSerial(); this.canvas.renderDynamic(); this.updateClock(); this.renderIot(); }
+    if (!on) { Audio.stopAll(); this.flushSerial(); this.canvas.renderDynamic(); this.renderIot(); }
     else this.log('Simulation started', 'info');
   },
 
@@ -265,9 +266,9 @@ const App = {
     if (this.sim.running) {
       this.canvas.renderDynamic();
       for (const c of this.project.components) {
-        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, this.sim.paused || c.props.muted ? 0 : s.f); }
+        if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, c.props.muted ? 0 : s.f); }
       }
-      this.flushSerial(); this.updateClock();
+      this.flushSerial();
       if (this._iotDirty) this.renderIot();
       if ($('#scopePane').classList.contains('active')) this.scope.render();
     }
@@ -343,7 +344,7 @@ const App = {
     this._loadingEditor = true; this.editor.set(this.program(id).code || ''); this._loadingEditor = false;
     this.editor.clear();
     this.refreshBoardUi(); this.renderTerminal();
-    this.plotter.clear(); this.plotter.feed((this.term && this.term[id]) || '');
+    this.plotter.clear(); this.plotter.feed(serialText((this.term && this.term[id]) || []));
   },
   /** Add another microcontroller; it gets its own program tab. */
   addBoard(type) {
@@ -410,23 +411,16 @@ const App = {
     opts.sort((a, b) => (b.wired - a.wired) || a.label.localeCompare(b.label, undefined, { numeric: true }));
     this.scope.setNets(opts);
   },
-  updateClock() {
-    const rtf = this.sim.running && this.sim.analog ? this.sim.analog.rtf / (this.sim.speed || 1) : 1;
-    const load = $('#simLoad'); load.hidden = !(rtf < 0.9); if (!load.hidden) load.textContent = `${Math.max(1, Math.round(rtf * 100))}% speed`;
-    const ms = Math.floor(this.sim.millis());
-    const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60;
-    $('#simTime').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
-  },
 
   /** Serial output per board; the Terminal shows the board whose program is open. */
   flushSerial() {
     const chunks = this.sim.takeSerial ? this.sim.takeSerial() : {};
+    const ms = Math.floor(this.sim.millis());
     let mine = false;
     for (const [id0, text] of Object.entries(chunks)) {
       if (!text) continue;
       const id = id0 || this.primaryId();
-      let t = (this.term[id] || '') + text; if (t.length > 60000) t = t.slice(-50000);
-      this.term[id] = t;
+      this.term[id] = addSerial(this.term[id] || [], text, ms);
       if (id === this.activeBoard) this.plotter.feed(text);
       if (id === this.activeBoard) mine = true;
       else { const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(id)}"]`); if (tab) tab.classList.add('unseen'); }
@@ -438,7 +432,9 @@ const App = {
   },
   renderTerminal() {
     const el = $('#serialOut');
-    el.textContent = ((this.term && this.term[this.activeBoard]) || '').replace(/\r\n?/g, '\n'); // println sends CR LF
+    el.replaceChildren(...((this.term && this.term[this.activeBoard]) || []).map((l) => {
+      const s = document.createElement('span'); s.className = 'ln'; s.dataset.t = simStamp(l.t); s.textContent = l.s; return s;
+    }));
     if ($('#autoScroll').checked) el.scrollTop = el.scrollHeight;
     const tab = document.querySelector(`#boardTabs [data-board="${CSS.escape(this.activeBoard || '')}"]`); if (tab) tab.classList.remove('unseen');
   },
@@ -649,8 +645,6 @@ const App = {
 
   bindUi() {
     $('#btnRun').onclick = () => this.toggleRun();
-    $('#btnRestart').onclick = () => this.restartSim();
-    $('#btnPause').onclick = () => this.togglePause();
     $('#btnSide').onclick = () => this.toggleSidebar();
     $('#btnDock').onclick = () => this.toggleDock();
     $('#btnTidy').onclick = () => this.toggleTidy();
@@ -710,7 +704,7 @@ $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     }));
     $('#btnClear').onclick = () => {
       const active = document.querySelector('.tabs[data-group="bottom"] .tab.active').dataset.tab;
-      if (active === 'serialPane') { this.term[this.activeBoard] = ''; this.renderTerminal(); }
+      if (active === 'serialPane') { this.term[this.activeBoard] = []; this.renderTerminal(); }
       else if (active === 'plotPane') { this.plotter.clear(); this.plotter.render(true); }
       else if (active === 'consolePane') this.clearConsole();
       else { this.sim.broker.log = []; this.sim.broker.topics.clear(); this.renderIot(); }

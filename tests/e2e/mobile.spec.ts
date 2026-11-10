@@ -125,10 +125,10 @@ test('the sheet opens at half the screen; drag its handle up to fill the screen 
 
 test('the run controls fit on one row at the top of a phone screen', async ({ page }) => {
   await loadExample(page, 'blink');
-  const ids = ['#btnRun', '#btnRestart', '#btnPause', '#simSpeed', '#addPart', '#view3d'];
+  const ids = ['#btnRun', '#simSpeed', '#addPart', '#view3d'];
   const boxes = await Promise.all(ids.map((id) => page.locator(id).boundingBox()));
   const mid = boxes.map((b) => b!.y + b!.height / 2);
   expect(Math.max(...mid) - Math.min(...mid)).toBeLessThanOrEqual(4); // one row (the 2D/3D pair is a few px taller)
   for (const b of boxes) { expect(b!.x).toBeGreaterThanOrEqual(0); expect(b!.x + b!.width).toBeLessThanOrEqual(390); }
-  await expect(page.locator('#simTime')).toBeHidden();
+  await expect(page.locator('#simTime')).toHaveCount(0);
 });

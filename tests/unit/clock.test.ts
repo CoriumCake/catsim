@@ -32,18 +32,6 @@ describe('SimClock', () => {
     expect(c.millis() - at).toBe(50);
   });
 
-  it('freezes time and timers while paused', async () => {
-    const c = make(); let fired = false;
-    c.schedule(100, () => { fired = true; });
-    vi.advanceTimersByTime(40); c.pause();
-    vi.advanceTimersByTime(1000);
-    expect(c.millis()).toBe(40); expect(fired).toBe(false);
-    const waiting = c.whenRunning(); expect(waiting).toBeInstanceOf(Promise);
-    c.resume(); await waiting;
-    vi.advanceTimersByTime(59); expect(fired).toBe(false);
-    vi.advanceTimersByTime(1); expect(fired).toBe(true);
-    expect(c.whenRunning()).toBeUndefined();
-  });
 
   it('drops lateness instead of skipping time when it fires late', () => {
     const c = make(); let at = -1;

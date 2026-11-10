@@ -1,6 +1,6 @@
 /* CatSim — virtual simulation clock.
  *
- * Simulated time is decoupled from wall-clock time: it can be paused and run slower or faster.
+ * Simulated time is decoupled from wall-clock time: it can run slower or faster than real time.
  * Timers fire in order of their virtual due time. When a timer fires very late (the page was blocked
  * for more than MAX_LATE), the clock is rebased to the timer's due time, so the simulation runs slower
  * than real time under load instead of skipping. Ordinary timer jitter (browsers clamp nested timers
@@ -18,9 +18,7 @@ export class SimClock {
   private timers: Timer[] = [];
   private seq = 0;
   private handle: ReturnType<typeof setTimeout> | null = null;
-  private resumeWaiters: Array<() => void> = [];
   speed = 1;
-  paused = false;
 
   constructor(private readonly now: () => number = () => performance.now()) {
     this.realAt = this.now();
@@ -28,13 +26,12 @@ export class SimClock {
 
   /** Current simulated time in ms. */
   millis(): number {
-    return this.paused ? this.base : this.base + (this.now() - this.realAt) * this.speed;
+    return this.base + (this.now() - this.realAt) * this.speed;
   }
 
   reset(): void {
     this.cancelAll();
-    this.base = 0; this.realAt = this.now(); this.paused = false;
-    this.resumeWaiters.splice(0).forEach((f) => f());
+    this.base = 0; this.realAt = this.now();
   }
 
   private rebase(at = this.millis()): void { this.base = at; this.realAt = this.now(); }
@@ -44,32 +41,15 @@ export class SimClock {
     this.rebase(); this.speed = s; this.arm();
   }
 
-  pause(): void {
-    if (this.paused) return;
-    this.rebase(); this.paused = true; this.disarm();
-  }
-
-  resume(): void {
-    if (!this.paused) return;
-    this.realAt = this.now(); this.paused = false; this.arm();
-    this.resumeWaiters.splice(0).forEach((f) => f());
-  }
-
   /**
    * Take `realMs` of wall-clock time out of simulated time. Used after synchronous work (the analog
    * solver) during which no sketch code ran, so nobody observed the skipped interval and millis()
    * stays monotonic as long as `realMs` does not exceed the time the work took.
    */
   stall(realMs: number): void {
-    if (this.paused || !(realMs > 0)) return;
+    if (!(realMs > 0)) return;
     this.realAt += realMs;
     this.arm();
-  }
-
-  /** Resolves immediately when running, or when the clock is resumed. */
-  whenRunning(): Promise<void> | undefined {
-    if (!this.paused) return undefined;
-    return new Promise((r) => this.resumeWaiters.push(r));
   }
 
   /** Run `fn` after `ms` of simulated time. Returns a cancel function. */
@@ -91,17 +71,16 @@ export class SimClock {
 
   private arm(): void {
     this.disarm();
-    if (this.paused || !this.timers.length) return;
+    if (!this.timers.length) return;
     const wait = (this.timers[0].at - this.millis()) / this.speed;
     this.handle = setTimeout(() => this.fire(), Math.max(0, wait));
   }
 
   private fire(): void {
     this.handle = null;
-    if (this.paused) return;
     const now = this.millis();
     // Fire everything that is due, each at its exact virtual time.
-    while (this.timers.length && this.timers[0].at <= now && !this.paused) {
+    while (this.timers.length && this.timers[0].at <= now) {
       const t = this.timers.shift()!;
       if (this.millis() - t.at > MAX_LATE) this.rebase(t.at);
       t.fn();

@@ -70,21 +70,6 @@ test('runtime errors link to the right line', async ({ page }) => {
   await expect(page.locator('#consoleOut')).toContainText('line 3');
 });
 
-test('pause freezes the simulation clock and resume continues it', async ({ page }) => {
-  await runSketch(page, 'void setup() {}\nvoid loop() { Serial.print("x"); delay(20); }');
-  await page.waitForFunction(() => window.CatSim.App.sim.running);
-  await page.waitForTimeout(200);
-  await page.click('#btnPause');
-  await page.waitForTimeout(150);
-  const t1 = await page.locator('#simTime').textContent();
-  const n1 = (await serial(page)).length;
-  await page.waitForTimeout(400);
-  expect(await page.locator('#simTime').textContent()).toBe(t1);
-  expect((await serial(page)).length).toBeLessThanOrEqual(n1 + 1);
-  await page.click('#btnPause');
-  await expect.poll(async () => (await serial(page)).length).toBeGreaterThan(n1 + 2);
-});
-
 test('speed 10× runs simulated time faster than real time', async ({ page }) => {
   await page.selectOption('#simSpeed', '10');
   await runSketch(page, 'void setup() {}\nvoid loop() { delay(100); }');

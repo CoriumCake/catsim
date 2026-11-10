@@ -65,7 +65,7 @@ class SimHost extends Simulator {
   constructor(app) {
     super(app);
     this.worker = null; this.snapT = 0; this.snapAt = 0; this.resolveRun = null;
-    this.speed = 1; this.paused = false;
+    this.speed = 1;
     this.analog = null; // { leds: {id: 0..1}, rtf, error } from the worker's analog engine
     this.boards = null; // several boards: per-board pin state, by board id
     this.nvStore = {}; // saved data of each board (by board id), kept for this page session like real flash
@@ -75,11 +75,8 @@ class SimHost extends Simulator {
 
   millis() {
     if (!this.running) return this.stoppedAt;
-    if (this.paused) return this.snapT;
     return this.snapT + Math.min(100, performance.now() - this.snapAt) * this.speed;
   }
-  pause() { if (!this.running || this.paused) return; this.snapT = this.millis(); this.snapAt = performance.now(); this.paused = true; this.send({ type: 'pause' }); }
-  resume() { if (!this.paused) return; this.snapAt = performance.now(); this.paused = false; this.send({ type: 'resume' }); }
   setSpeed(s) {
     s = +s; if (!(s >= 0.05 && s <= 100)) return;
     this.snapT = this.millis(); this.snapAt = performance.now(); this.speed = s; this.send({ type: 'speed', speed: s });
@@ -110,7 +107,6 @@ class SimHost extends Simulator {
     this.resetHw(); this.ui = {};
     this.worker = this.spawn();
     if (!this.worker) return Promise.resolve(false);
-    this.paused = false;
     this.analog = null;
     if (this.nvProject !== this.app.project) { this.nvStore = {}; this.nvProject = this.app.project; } // saved data belongs to this project
     const boardComps = this.app.boards ? this.app.boards() : [];
@@ -126,7 +122,7 @@ class SimHost extends Simulator {
     if (this.worker) { this.worker.terminate(); this.worker = null; }
     const r = this.resolveRun; this.resolveRun = null;
     if (this.running) {
-      this.stoppedAt = this.millis(); this.running = false; this.runId++; this.paused = false;
+      this.stoppedAt = this.millis(); this.running = false; this.runId++;
       this.mqtt.connected = false;
       if (!silent) this.app.onSimState(false);
     }
@@ -173,7 +169,6 @@ class SimHost extends Simulator {
         break;
       case 'snap': {
         this.snapT = Math.max(0, finite(m.t, this.snapT)); this.snapAt = performance.now();
-        this.paused = m.paused === true;
         this.txAt = typeof m.serial === 'string' && m.serial ? performance.now() : this.txAt;
         { const sp = finite(m.speed, this.speed); if (sp >= 0.05 && sp <= 100) this.speed = sp; }
         if (m.boards && typeof m.boards === 'object') {
