@@ -1,6 +1,7 @@
 /* CatSim — diagram canvas: parts, wires, pan/zoom, selection, wiring. */
 import { DEFS } from './components.js';
 import { breadboardContacts, snapToBreadboard } from './contacts.js';
+import { pinPlacement, placeTransform } from './rotation.ts';
 import { esc } from './util.ts';
 import { RouteGrid, roundedPath } from './router.ts';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -64,8 +65,8 @@ class Canvas {
   pinPos(ref) {
     const [id, pid] = ref.split(':');
     const c = this.project.components.find((x) => x.id === id); if (!c) return null;
-    const p = this.def(c).pins.find((x) => x.id === pid); if (!p) return null;
-    return { x: c.x + p.x, y: c.y + p.y, dir: p.dir, pin: p, comp: c };
+    const d = this.def(c), p = d.pins.find((x) => x.id === pid); if (!p) return null;
+    return { ...pinPlacement(d, c, p), pin: p, comp: c };
   }
 
   wirePath(a, b) {
@@ -94,7 +95,7 @@ class Canvas {
       const g = document.createElementNS(SVGNS, 'g');
       g.setAttribute('class', `cs-comp${d.interactive ? ' cs-interactive' : ''}`);
       g.dataset.id = c.id;
-      g.setAttribute('transform', `translate(${c.x} ${c.y})`);
+      g.setAttribute('transform', placeTransform(d, c));
       let pins = '';
       for (const p of d.pins) {
         const key = `${c.id}:${p.id}`;
@@ -157,7 +158,7 @@ class Canvas {
 
   updateComp(c) {
     const g = this.compsG.querySelector(`.cs-comp[data-id="${CSS.escape(c.id)}"]`);
-    if (g) g.setAttribute('transform', `translate(${c.x} ${c.y})`);
+    if (g) g.setAttribute('transform', placeTransform(this.def(c), c));
   }
 
   renderSelection() {

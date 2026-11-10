@@ -1,5 +1,7 @@
 /* Parts plugged into a breadboard: a part's leg that sits on a hole (within half a hole pitch) is connected
  * to it, without a wire. Used by the logic nets, the analog circuit and the diagram. */
+import { pinPlacement, footprint } from './rotation.ts';
+
 const R2 = 5 * 5; // capture radius² (half the 10-unit pitch)
 
 /** [partPin, breadboardHole] pairs, e.g. ['led1:A', 'bb1:12c']. */
@@ -12,9 +14,10 @@ export function breadboardContacts(project, defs) {
     for (const c of project.components) {
       const d = defs[c.type];
       if (!d || c === bb || d.board || d.type === 'breadboard') continue;
-      if (c.x > bb.x + db.w || c.x + d.w < bb.x || c.y > bb.y + db.h || c.y + d.h < bb.y) continue; // not over it
+      const f = footprint(d, c.rot);
+      if (c.x > bb.x + db.w || c.x + f.w < bb.x || c.y > bb.y + db.h || c.y + f.h < bb.y) continue; // not over it
       for (const p of d.pins) {
-        const ax = c.x + p.x - bb.x, ay = c.y + p.y - bb.y;
+        const q = pinPlacement(d, c, p), ax = q.x - bb.x, ay = q.y - bb.y;
         let best = null, bd = R2;
         for (const h of db.pins) { const dx = h.x - ax, dy = h.y - ay, q = dx * dx + dy * dy; if (q <= bd) { bd = q; best = h; } }
         if (best) out.push([`${c.id}:${p.id}`, `${bb.id}:${best.id}`]);
@@ -30,7 +33,7 @@ export function snapToBreadboard(project, defs, c) {
   for (const bb of project.components) {
     const db = defs[bb.type]; if (!db || db.type !== 'breadboard') continue;
     for (const p of d.pins) {
-      const ax = c.x + p.x - bb.x, ay = c.y + p.y - bb.y;
+      const q = pinPlacement(d, c, p), ax = q.x - bb.x, ay = q.y - bb.y;
       let best = null, bd = 8 * 8;
       for (const h of db.pins) { const dx = h.x - ax, dy = h.y - ay, q = dx * dx + dy * dy; if (q <= bd) { bd = q; best = h; } }
       if (best) return { x: c.x + (best.x - ax), y: c.y + (best.y - ay) };

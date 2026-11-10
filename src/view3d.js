@@ -5,6 +5,7 @@ import { DEFS, LED_COLORS } from './components.js';
 import { LIB_PARTS } from './parts-libs.js';
 import { BASIC_PARTS } from './parts-basic.js';
 import { breadboardContacts } from './contacts.js';
+import { footprint } from './rotation.ts';
 const DIRS = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
 const BTN_COLORS = { red: '#e5484d', blue: '#3d8bff', green: '#2fbf71', yellow: '#f5c518', black: '#30343c' };
 const PIN_TOP = 10, ESP_PIN_TOP = 15, DEG = Math.PI / 180;
@@ -125,7 +126,8 @@ class View3D {
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const c of this.app.project.components) {
       const d = DEFS[c.type]; if (!d) continue;
-      x0 = Math.min(x0, c.x); z0 = Math.min(z0, c.y); x1 = Math.max(x1, c.x + d.w); z1 = Math.max(z1, c.y + d.h);
+      const f = footprint(d, c.rot);
+      x0 = Math.min(x0, c.x); z0 = Math.min(z0, c.y); x1 = Math.max(x1, c.x + f.w); z1 = Math.max(z1, c.y + f.h);
     }
     if (x0 === Infinity) return { x0: 0, z0: 0, x1: 300, z1: 300 };
     return { x0, z0, x1, z1 };
@@ -194,10 +196,12 @@ class View3D {
   // floor-level leg from a body point to a pin
   leg(g, x0, z0, x1, z1) { this.rod(g, [x0, 1, z0], [x1, 1, z1], 0.9, this.M.lead); }
 
-  pinTop(c, p) {
+  /** Top of a pin; `at` is the pin's place in the diagram (canvas.pinPos), which already includes any turn. */
+  pinTop(at) {
+    const c = at.comp, p = at.pin;
     if (c.type === 'esp32') return { x: c.x + (p.x === 0 ? 5 : 145), y: ESP_PIN_TOP, z: c.y + p.y };
     if (c.type === 'uno') return { x: c.x + p.x, y: 17, z: c.y + (p.y === 0 ? 4 : 176) }; // into the header sockets
-    return { x: c.x + p.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: c.y + p.y };
+    return { x: at.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
   }
 
   // ---------- scene ----------
@@ -244,20 +248,23 @@ class View3D {
     this.lift = new Map(breadboardContacts(P, DEFS).map(([a]) => [a.split(':')[0], FLAT_H.breadboard]));
     for (const c of P.components) {
       const d = DEFS[c.type]; if (!d) continue;
-      const g = new T.Group(); g.position.set(c.x, this.lift.get(c.id) || 0, c.y); g.userData.compId = c.id;
+      // the part turns about the middle of its footprint; its drawing is built in a pivot group that is offset to match
+      const f = footprint(d, c.rot);
+      const g = new T.Group(); g.position.set(c.x + f.w / 2, this.lift.get(c.id) || 0, c.y + f.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
+      const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot);
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
-      if (build) build.call(this, g, c, d);
+      if (build) build.call(this, pivot, c, d);
       if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
-        this.box(g, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
-        this.cyl(g, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
+        this.box(pivot, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
+        this.cyl(pivot, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
       }
     }
 
     // wires: tubes arching up between pin tops
     P.wires.forEach((w, i) => {
       const pa = this.app.canvas.pinPos(w.from), pb = this.app.canvas.pinPos(w.to); if (!pa || !pb) return;
-      const a = this.pinTop(pa.comp, pa.pin), z = this.pinTop(pb.comp, pb.pin);
+      const a = this.pinTop(pa), z = this.pinTop(pb);
       const A = new T.Vector3(a.x, a.y, a.z), B = new T.Vector3(z.x, z.y, z.z);
       const dist = A.distanceTo(B);
       const h = Math.min(90, Math.max(18, dist * 0.32)), d = Math.min(70, Math.max(10, dist * 0.25));

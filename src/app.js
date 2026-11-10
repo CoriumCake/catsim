@@ -10,6 +10,7 @@ import { normalizeProject, encodeShare, decodeShare } from './project.ts';
 import { Scope } from './scope.ts';
 import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
+import { snapToBreadboard } from './contacts.js';
 import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
@@ -169,6 +170,17 @@ const App = {
     let i = 1; while (this.project.wires.some((w) => w.id === 'w' + i)) i++;
     this.project.wires.push({ id: 'w' + i, from, to });
     this.changed();
+  },
+  /** Turn the selected part a quarter turn clockwise. Boards and breadboards stay upright (their pins are fixed). */
+  rotateSelection() {
+    const s = this.canvas.sel; if (!s || s.kind !== 'comp') return;
+    const c = this.project.components.find((x) => x.id === s.id); if (!c) return;
+    const d = DEFS[c.type]; if (d.board || d.type === 'breadboard') { this.toast('Boards and breadboards stay upright'); return; }
+    c.rot = ((c.rot || 0) + 90) % 360; if (!c.rot) delete c.rot;
+    const snap = snapToBreadboard(this.project, DEFS, c); // a part plugged into a breadboard stays on its holes
+    if (snap) Object.assign(c, snap);
+    this.changed();
+    this.onSelection(this.canvas.sel);
   },
   deleteSelection() {
     const s = this.canvas.sel; if (!s) return;
@@ -616,7 +628,7 @@ const App = {
       }).join('');
       const hint = d.hint && !live ? `<p class="hint">${d.hint}</p>` : '';
       panel.innerHTML = `<h4>${esc(d.name)}</h4><div class="sub">${esc(c.id)}</div>${rows}${hint}
-        ${live ? '' : d.board ? (this.boards().length > 1 ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : '') : d.fixed ? '' : '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
+        ${live ? '' : d.board ? (this.boards().length > 1 ? `<p class="hint">Its program is in the <b>${esc(c.id)}</b> tab above the editor.</p><div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete board</button></div>` : '') : d.fixed ? '' : (d.board || d.type === 'breadboard' ? '' : '<div class="actions"><button class="btn btn-sm" data-act="rotate" title="Turn clockwise (R)">Rotate</button></div>') + '<div class="actions"><button class="btn btn-sm danger" data-act="delete">Delete part</button></div>'}`;
       panel.querySelectorAll('[data-key]').forEach((inp) => {
         inp.addEventListener('input', () => {
           const ct = d.controls.find((x) => x.key === inp.dataset.key);
@@ -639,6 +651,7 @@ const App = {
       this.toast(text ? 'Custom SPICE model applied' : 'Back to the built-in model');
     }));
     const del = panel.querySelector('[data-act="delete"]'); if (del) del.onclick = () => this.deleteSelection();
+    const rot = panel.querySelector('[data-act="rotate"]'); if (rot) rot.onclick = () => this.rotateSelection();
     panel.hidden = false;
     this.positionProps();
     },
@@ -734,6 +747,7 @@ $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
       if (typing) return;
       if (e.key === 'Escape') { this.canvas.cancelWire(); this.canvas.select(null); }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); this.deleteSelection(); }
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) { this.rotateSelection(); }
     });
   },
 
