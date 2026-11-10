@@ -323,10 +323,11 @@ const breadboard = {
     let lbl = '';
     for (let col = 1; col <= BB_COLS; col += (col === 1 ? 4 : 5)) lbl += `<text x="${BB_X0 + (col - 1) * BB_P}" y="${BB_Y.a - 8}" class="cs-tiny cs-dark">${col}</text>`;
     for (const [i, r] of [...bbRows.top, ...bbRows.bottom].entries()) lbl += `<text x="6" y="${(i < 5 ? BB_Y.a : BB_Y.f) + (i % 5) * BB_P + 2.5}" class="cs-tiny cs-dark">${r}</text>`;
+    const holes = this.pins.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="2.3" fill="#2b2f37"/>`).join('');
     return `<rect x="0" y="0" width="${w}" height="180" rx="4" fill="#f4f1e8" stroke="#cfc8b6"/>
       <rect x="0" y="${BB_Y.a + 4 * BB_P + 6}" width="${w}" height="${BB_Y.f - BB_Y.a - 4 * BB_P - 12}" fill="#e3ddcd"/>
       <path d="M8 4 H${w - 8} M8 ${BB_Y.bp - 6} H${w - 8}" stroke-width="1.5" stroke="#e5484d"/>
-      <path d="M8 ${BB_Y.tn + 6} H${w - 8} M8 176 H${w - 8}" stroke-width="1.5" stroke="#3d8bff"/>${lbl}`;
+      <path d="M8 ${BB_Y.tn + 6} H${w - 8} M8 176 H${w - 8}" stroke-width="1.5" stroke="#3d8bff"/>${holes}${lbl}`;
   },
 };
 

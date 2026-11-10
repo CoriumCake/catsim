@@ -6,6 +6,7 @@ import { esc, clamp } from './util.ts';
 import { CHIPS } from './digital/chips.ts';
 import { LIB_PARTS } from './parts-libs.js';
 import { BASIC_PARTS } from './parts-basic.js';
+import { applyRealSizes } from './part-sizes.js';
 const LED_COLORS = {
   red: '#ff3b3b', green: '#22e06b', blue: '#3d8bff',
   yellow: '#ffd60a', white: '#f2f5ff', orange: '#ff8a1f',
@@ -143,7 +144,8 @@ const fmtOhms = (o) => (o >= 1e6 ? `${+(o / 1e6).toFixed(1)}MΩ` : o >= 1e3 ? `$
 
 DEFS.resistor = {
   type: 'resistor', name: 'Resistor', category: 'Passive', w: 70, h: 16,
-  pins: [{ id: '1', label: '1', x: 0, y: 8, dir: 'l' }, { id: '2', label: '2', x: 70, y: 8, dir: 'r' }],
+  // leads 10.16 mm apart (400 mil), the body 6.8 mm × 2.5 mm
+  pins: [{ id: '1', label: '1', x: 15, y: 8, dir: 'l' }, { id: '2', label: '2', x: 55, y: 8, dir: 'r' }],
   props: { ohms: 220 },
   // common E6/E12 values from 10 Ω to 1 MΩ (validated on load, so every value an example uses must be listed)
   controls: [{ key: 'ohms', label: 'Resistance (Ω)', type: 'select', options: ['10', '22', '47', '100', '150', '220', '330', '470', '680', '1000', '1500', '2200', '3300', '4700', '6800', '10000', '15000', '20000', '22000', '33000', '47000', '68000', '100000', '220000', '470000', '1000000'] }],
@@ -151,10 +153,10 @@ DEFS.resistor = {
   state: () => ({}),
   render(c) {
     const b = resistorBands(c.props.ohms);
-    return `<line x1="0" y1="8" x2="70" y2="8" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="17" y="2" width="36" height="12" rx="5" fill="#d9c49a" stroke="#9b8558"/>
-      <rect x="22" y="2" width="3" height="12" fill="${b[0]}"/><rect x="29" y="2" width="3" height="12" fill="${b[1]}"/>
-      <rect x="36" y="2" width="3" height="12" fill="${b[2]}"/><rect x="46" y="2" width="3" height="12" fill="${b[3]}"/>
+    return `<line x1="15" y1="8" x2="55" y2="8" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="21.5" y="3" width="27" height="10" rx="4.5" fill="#d9c49a" stroke="#9b8558"/>
+      <rect x="24" y="3" width="2.2" height="10" fill="${b[0]}"/><rect x="28" y="3" width="2.2" height="10" fill="${b[1]}"/>
+      <rect x="32" y="3" width="2.2" height="10" fill="${b[2]}"/><rect x="43.5" y="3" width="2.2" height="10" fill="${b[3]}"/>
       <text x="35" y="-3" class="cs-part-lbl">${fmtOhms(+c.props.ohms)}</text>`;
   },
 };
@@ -162,12 +164,12 @@ DEFS.resistor = {
 const BTN_COLORS = { red: '#e5484d', blue: '#3d8bff', green: '#2fbf71', yellow: '#f5c518', black: '#30343c' };
 DEFS.button = {
   // a 6 mm tactile switch: four legs in two pairs that are always joined (1–1b, 2–2b); pressing joins 1 to 2
-  type: 'button', name: 'Push Button', category: 'Input', w: 56, h: 44, interactive: 'press',
+  type: 'button', name: 'Push Button', category: 'Input', w: 30, h: 40, interactive: 'press',
   pins: [
-    { id: '1', label: '1', x: 0, y: 12, dir: 'l', title: 'Leg 1 (always joined to leg 1b)' },
-    { id: '2', label: '2', x: 0, y: 32, dir: 'l', title: 'Leg 2 (always joined to leg 2b); pressing joins 1 and 2' },
-    { id: '1b', label: '1b', x: 56, y: 12, dir: 'r', title: 'Leg 1b (always joined to leg 1)' },
-    { id: '2b', label: '2b', x: 56, y: 32, dir: 'r', title: 'Leg 2b (always joined to leg 2)' },
+    { id: '1', label: '1', x: 4, y: 6, dir: 't', title: 'Leg 1 (always joined to leg 1b)' },
+    { id: '1b', label: '1b', x: 22, y: 6, dir: 't', title: 'Leg 1b (always joined to leg 1)' },
+    { id: '2', label: '2', x: 4, y: 32, dir: 'b', title: 'Leg 2 (always joined to leg 2b); pressing joins 1 and 2' },
+    { id: '2b', label: '2b', x: 22, y: 32, dir: 'b', title: 'Leg 2b (always joined to leg 2)' },
   ],
   bonded: [['1', '1b'], ['2', '2b']],
   props: { color: 'red' },
@@ -177,20 +179,20 @@ DEFS.button = {
   state: (c, sim) => ({ pressed: !!(sim.ui[c.id] && sim.ui[c.id].pressed) }),
   render(c, s) {
     const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
-    return `<path d="M0 12 H10 M0 32 H10 M46 12 H56 M46 32 H56" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="10" y="4" width="36" height="36" rx="3" fill="#2a2e36" stroke="#14161b"/>
-      <circle cx="14" cy="8" r="1.6" fill="#555"/><circle cx="42" cy="8" r="1.6" fill="#555"/><circle cx="14" cy="36" r="1.6" fill="#555"/><circle cx="42" cy="36" r="1.6" fill="#555"/>
-      <circle cx="28" cy="22" r="${s.pressed ? 10.5 : 12}" fill="${col}" stroke="rgba(0,0,0,.4)" stroke-width="${s.pressed ? 3 : 1}"/>
-      ${s.pressed ? '' : '<circle cx="24" cy="18" r="4" fill="#fff" opacity=".25"/>'}`;
+    return `<path d="M4 6 V8 M22 6 V8 M4 32 V30 M22 32 V30" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="1" y="7" width="24" height="24" rx="2" fill="#2a2e36" stroke="#14161b"/>
+      <circle cx="13" cy="19" r="${s.pressed ? 6.2 : 7}" fill="${col}" stroke="rgba(0,0,0,.4)" stroke-width="${s.pressed ? 2 : 1}"/>
+      ${s.pressed ? '' : '<circle cx="10.5" cy="16.5" r="2" fill="#fff" opacity=".25"/>'}`;
   },
 };
 
 DEFS.pot = {
+  // a 9 mm rotary potentiometer: a 9 mm body, a Ø6 mm shaft, pins 2.5 mm apart
   type: 'pot', name: 'Potentiometer', category: 'Input', w: 56, h: 60,
   pins: [
-    { id: 'GND', label: 'GND', x: 12, y: 60, dir: 'b' },
+    { id: 'GND', label: 'GND', x: 18, y: 60, dir: 'b' },
     { id: 'SIG', label: 'SIG', x: 28, y: 60, dir: 'b', title: 'SIG — wiper output (analog)' },
-    { id: 'VCC', label: 'VCC', x: 44, y: 60, dir: 'b' },
+    { id: 'VCC', label: 'VCC', x: 38, y: 60, dir: 'b' },
   ],
   props: { value: 0.5 },
   controls: [{ key: 'value', label: 'Position', type: 'range', min: 0, max: 1, step: 0.001, fmt: (v) => `${Math.round(v * 100)}%` }],
@@ -198,11 +200,10 @@ DEFS.pot = {
   state: () => ({}),
   render(c) {
     const a = -135 + 270 * (+c.props.value);
-    return `<path d="M12 44 V60 M28 44 V60 M44 44 V60" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="2" y="2" width="52" height="44" rx="4" fill="#1e5bb8" stroke="#123a78"/>
-      <circle cx="28" cy="23" r="16" fill="#d7dbe2" stroke="#8b939f"/>
-      <g transform="rotate(${a.toFixed(1)} 28 23)"><circle cx="28" cy="23" r="10" fill="#eef0f3"/><rect x="26.5" y="8" width="3" height="11" rx="1.5" fill="#2a2e36"/></g>
-      <text x="12" y="44" class="cs-tiny cs-light">G</text><text x="28" y="44" class="cs-tiny cs-light">S</text><text x="44" y="44" class="cs-tiny cs-light">V</text>`;
+    return `<path d="M18 39 V60 M28 39 V60 M38 39 V60" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="10.5" y="4" width="35" height="35" rx="2" fill="#1e5bb8" stroke="#123a78"/>
+      <g transform="rotate(${a.toFixed(1)} 28 21.5)"><circle cx="28" cy="21.5" r="11.8" fill="#eef0f3" stroke="#8b939f"/><rect x="26.8" y="10" width="2.4" height="8" rx="1.2" fill="#2a2e36"/></g>
+      <text x="18" y="50" class="cs-tiny cs-light">G</text><text x="28" y="50" class="cs-tiny cs-light">S</text><text x="38" y="50" class="cs-tiny cs-light">V</text>`;
   },
 };
 
@@ -384,13 +385,13 @@ DEFS.uno = {
 // TO-92 package seen from the flat (marked) face; legs at the bottom.
 function to92(c, s, mark, legs) {
   const on = s.on > 0.02;
-  return `<path d="M10 44 V62 M20 44 V62 M30 44 V62" stroke="#a7adb7" stroke-width="2"/>
-    <path d="M4 44 V16 A16 16 0 0 1 36 16 V44 Z" fill="#23262d" stroke="#0c0d10"/>
-    <rect x="7" y="18" width="26" height="22" rx="2" fill="#2d3139"/>
-    <text x="20" y="27" class="cs-tiny cs-light">${mark}</text>
-    <text x="20" y="36" class="cs-tiny cs-light">${s.label}</text>
-    ${legs.map((l, i) => `<text x="${10 + i * 10}" y="56" class="cs-tiny cs-dark">${l}</text>`).join('')}
-    ${on ? `<circle cx="32" cy="10" r="2.2" fill="#22c55e" opacity="${Math.min(1, 0.4 + s.on).toFixed(2)}"/>` : ''}`;
+  // TO-92: a 4.7 mm wide, 5 mm tall body; the leads are 1.27 mm apart
+  return `<path d="M10 44 V62 M15 44 V62 M20 44 V62" stroke="#a7adb7" stroke-width="2"/>
+    <path d="M5.75 42 V27 A9.25 9.25 0 0 1 24.25 27 V42 Z" fill="#23262d" stroke="#0c0d10"/>
+    <rect x="8" y="26" width="14" height="10" rx="1.5" fill="#2d3139"/>
+    <text x="15" y="31" class="cs-tiny cs-light">${mark}</text>
+    ${legs.map((l, i) => `<text x="${10 + i * 5}" y="56" class="cs-tiny cs-dark">${l}</text>`).join('')}
+    ${on ? `<circle cx="21" cy="22" r="2" fill="#22c55e" opacity="${Math.min(1, 0.4 + s.on).toFixed(2)}"/>` : ''}`;
 }
 const TRANSISTOR_HINT = 'Shows a green dot when it conducts. Base/gate needs a resistor from the GPIO.';
 const spiceCtl = (accepts) => ({ key: 'spice', label: 'Custom SPICE model', type: 'spice', maxLength: 50000, accepts });
@@ -399,8 +400,8 @@ DEFS.npn = {
   type: 'npn', name: 'NPN Transistor (2N2222)', category: 'Semiconductors', w: 40, h: 62, hint: TRANSISTOR_HINT,
   pins: [
     { id: 'E', label: 'E', x: 10, y: 62, dir: 'b', title: 'Emitter' },
-    { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor, e.g. 1 kΩ)' },
-    { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
+    { id: 'B', label: 'B', x: 15, y: 62, dir: 'b', title: 'Base (through a resistor, e.g. 1 kΩ)' },
+    { id: 'C', label: 'C', x: 20, y: 62, dir: 'b', title: 'Collector' },
   ],
   props: { spice: '' }, controls: [spiceCtl('.model NAME NPN(IS=… BF=… VAF=…)')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'NPN' }),
@@ -411,8 +412,8 @@ DEFS.pnp = {
   type: 'pnp', name: 'PNP Transistor (2N2907)', category: 'Semiconductors', w: 40, h: 62, hint: TRANSISTOR_HINT,
   pins: [
     { id: 'E', label: 'E', x: 10, y: 62, dir: 'b', title: 'Emitter (to the positive supply)' },
-    { id: 'B', label: 'B', x: 20, y: 62, dir: 'b', title: 'Base (through a resistor)' },
-    { id: 'C', label: 'C', x: 30, y: 62, dir: 'b', title: 'Collector' },
+    { id: 'B', label: 'B', x: 15, y: 62, dir: 'b', title: 'Base (through a resistor)' },
+    { id: 'C', label: 'C', x: 20, y: 62, dir: 'b', title: 'Collector' },
   ],
   props: { spice: '' }, controls: [spiceCtl('.model NAME PNP(IS=… BF=…)')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'PNP' }),
@@ -425,8 +426,8 @@ DEFS.nmos = {
   structural: ['model'],
   pins: [
     { id: 'S', label: 'S', x: 10, y: 62, dir: 'b', title: 'Source (to GND for a low-side switch)' },
-    { id: 'G', label: 'G', x: 20, y: 62, dir: 'b', title: 'Gate' },
-    { id: 'D', label: 'D', x: 30, y: 62, dir: 'b', title: 'Drain (to the load)' },
+    { id: 'G', label: 'G', x: 15, y: 62, dir: 'b', title: 'Gate' },
+    { id: 'D', label: 'D', x: 20, y: 62, dir: 'b', title: 'Drain (to the load)' },
   ],
   props: { model: '2N7000', spice: '' }, controls: [{ key: 'model', label: 'Part', type: 'select', options: ['2N7000', 'AO3400'] }, spiceCtl('.model NAME NMOS(LEVEL=1 VTO=… KP=…), or a .subckt with pins D G S')],
   state: (c, sim) => ({ on: (sim.analog && sim.analog.parts && sim.analog.parts[c.id]) || 0, label: 'N-FET' }),
@@ -436,15 +437,16 @@ DEFS.nmos = {
 const DIODE_TYPES = ['1N4148', '1N4007', '1N5819'];
 DEFS.diode = {
   type: 'diode', name: 'Diode', category: 'Semiconductors', w: 70, h: 16,
-  pins: [{ id: 'A', label: 'A', x: 0, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 70, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
+  // DO-35: a 4 mm × 1.9 mm glass body, leads 10.16 mm apart
+  pins: [{ id: 'A', label: 'A', x: 15, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 55, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
   props: { model: '1N4148', spice: '' },
   controls: [{ key: 'model', label: 'Type', type: 'select', options: DIODE_TYPES }, spiceCtl('.model NAME D(IS=… N=… RS=…)')],
   render(c) {
     const big = c.props.model !== '1N4148';
     const body = big ? '#1d1f24' : '#c98a3a';
-    return `<line x1="0" y1="8" x2="70" y2="8" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="20" y="${big ? 1 : 3}" width="30" height="${big ? 14 : 10}" rx="${big ? 3 : 4}" fill="${body}" stroke="rgba(0,0,0,.35)"/>
-      <rect x="43" y="${big ? 1 : 3}" width="4" height="${big ? 14 : 10}" fill="${big ? '#cfd4dc' : '#222'}"/>
+    return `<line x1="15" y1="8" x2="55" y2="8" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="27" y="${big ? 1 : 4.25}" width="16" height="${big ? 14 : 7.5}" rx="${big ? 3 : 3.75}" fill="${body}" stroke="rgba(0,0,0,.35)"/>
+      <rect x="38.5" y="${big ? 1 : 4.25}" width="2.5" height="${big ? 14 : 7.5}" fill="${big ? '#cfd4dc' : '#222'}"/>
       <text x="35" y="-3" class="cs-part-lbl">${esc(c.props.model)}</text>`;
   },
 };
@@ -505,13 +507,13 @@ DEFS.capacitor = {
     const ceramic = c.props.value === '100nF';
     if (ceramic) {
       return `<path d="M10 30 V56 M20 30 V56" stroke="#a7adb7" stroke-width="2"/>
-        <ellipse cx="15" cy="20" rx="12" ry="11" fill="#e1a93b" stroke="#a8761f"/>
+        <ellipse cx="15" cy="20" rx="10" ry="10" fill="#e1a93b" stroke="#a8761f"/>
         <text x="15" y="23" class="cs-tiny cs-dark">104</text><text x="15" y="-3" class="cs-part-lbl">100nF</text>`;
     }
-    return `<path d="M10 40 V56 M20 40 V56" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="3" y="2" width="24" height="38" rx="4" fill="#2457b8" stroke="#16397a"/>
-      <rect x="19" y="2" width="6" height="38" fill="#9db7e6"/><text x="22" y="16" class="cs-tiny cs-dark">−</text>
-      <ellipse cx="15" cy="3" rx="11" ry="2" fill="#c3cad6"/>
+    return `<path d="M10 45 V56 M20 45 V56" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="5" y="2" width="20" height="43" rx="4" fill="#2457b8" stroke="#16397a"/>
+      <rect x="19" y="2" width="6" height="43" fill="#9db7e6"/><text x="22" y="16" class="cs-tiny cs-dark">−</text>
+      <ellipse cx="15" cy="3" rx="10" ry="2" fill="#c3cad6"/>
       <text x="15" y="-3" class="cs-part-lbl">${esc(c.props.value)}</text>`;
   },
 };
@@ -602,6 +604,7 @@ DEFS.lcd = {
 };
 
 Object.assign(DEFS, LIB_PARTS, BASIC_PARTS);
+applyRealSizes(DEFS);
 
 // Boards running from a battery show when they have no power (the sketch is stopped).
 for (const d of [DEFS.esp32, DEFS.uno]) {

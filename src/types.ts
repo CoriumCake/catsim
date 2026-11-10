@@ -5,6 +5,8 @@ export interface Component {
   type: string;
   x: number;
   y: number;
+  /** Quarter turns, clockwise, in degrees: 90, 180 or 270. Absent when the part is upright. */
+  rot?: number;
   props: Record<string, unknown>;
 }
 

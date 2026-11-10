@@ -1,6 +1,7 @@
 /* CatSim — diagram canvas: parts, wires, pan/zoom, selection, wiring. */
 import { DEFS } from './components.js';
 import { breadboardContacts, snapToBreadboard } from './contacts.js';
+import { pinPlacement, placeTransform } from './rotation.ts';
 import { esc } from './util.ts';
 import { RouteGrid, roundedPath } from './router.ts';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -64,8 +65,8 @@ class Canvas {
   pinPos(ref) {
     const [id, pid] = ref.split(':');
     const c = this.project.components.find((x) => x.id === id); if (!c) return null;
-    const p = this.def(c).pins.find((x) => x.id === pid); if (!p) return null;
-    return { x: c.x + p.x, y: c.y + p.y, dir: p.dir, pin: p, comp: c };
+    const d = this.def(c), p = d.pins.find((x) => x.id === pid); if (!p) return null;
+    return { ...pinPlacement(d, c, p), pin: p, comp: c };
   }
 
   wirePath(a, b) {
@@ -83,6 +84,21 @@ class Canvas {
     return WIRE_COLORS[i % 6];
   }
 
+  /** A click on a pin (in 2D or 3D): start a wire, finish one, or cancel the one started from that pin. */
+  clickPin(ref) {
+    if (!this.wireStart) this.startWire(ref);
+    else if (this.wireStart === ref) this.cancelWire();
+    else { const from = this.wireStart; this.cancelWire(); this.app.addWire(from, ref); }
+  }
+
+  /** A part was dragged and let go (in 2D or 3D): legs drop into breadboard holes, then the project is saved. */
+  endMove(c) {
+    const s = snapToBreadboard(this.project, DEFS, c);
+    if (s) { c.x = s.x; c.y = s.y; this.updateComp(c); }
+    this.app.changed({ structure: false });
+    if (this.project.components.some((x) => x.type === 'breadboard')) this.renderAll();
+  }
+
   // ---------- rendering ----------
   renderAll() {
     this.cache.clear();
@@ -94,7 +110,7 @@ class Canvas {
       const g = document.createElementNS(SVGNS, 'g');
       g.setAttribute('class', `cs-comp${d.interactive ? ' cs-interactive' : ''}`);
       g.dataset.id = c.id;
-      g.setAttribute('transform', `translate(${c.x} ${c.y})`);
+      g.setAttribute('transform', placeTransform(d, c));
       let pins = '';
       for (const p of d.pins) {
         const key = `${c.id}:${p.id}`;
@@ -157,7 +173,7 @@ class Canvas {
 
   updateComp(c) {
     const g = this.compsG.querySelector(`.cs-comp[data-id="${CSS.escape(c.id)}"]`);
-    if (g) g.setAttribute('transform', `translate(${c.x} ${c.y})`);
+    if (g) g.setAttribute('transform', placeTransform(this.def(c), c));
   }
 
   renderSelection() {
@@ -245,10 +261,7 @@ class Canvas {
     const comp = e.target.closest('.cs-comp');
     if (pin) {
       e.stopPropagation();
-      const ref = pin.dataset.ref;
-      if (!this.wireStart) this.startWire(ref);
-      else if (this.wireStart === ref) this.cancelWire();
-      else { const from = this.wireStart; this.cancelWire(); this.app.addWire(from, ref); }
+      this.clickPin(pin.dataset.ref);
       return;
     }
     if (this.wireStart) { this.cancelWire(); }
@@ -304,12 +317,7 @@ class Canvas {
     if (e && e.pointerType === 'touch') { const pinching = !!this.pinch; this.touchUp(e); if (pinching) return; }
     if (this.pressing) { this.app.sim.setPressed(this.pressing, false, this.pressKey); this.pressing = null; this.pressKey = undefined; this.renderDynamic(); }
     if (this.drag) {
-      if (this.drag.moved) {
-        const s = snapToBreadboard(this.project, DEFS, this.drag.c); // legs drop into the holes
-        if (s) { this.drag.c.x = s.x; this.drag.c.y = s.y; this.updateComp(this.drag.c); }
-        this.app.changed({ structure: false });
-        if (this.project.components.some((c) => c.type === 'breadboard')) this.renderAll();
-      }
+      if (this.drag.moved) this.endMove(this.drag.c);
       this.drag = null;
     }
     if (this.pan) { this.pan = null; this.svg.classList.remove('cs-panning'); }

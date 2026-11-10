@@ -257,15 +257,15 @@ void loop() { delay(10); }`);
   it('breadboard: a resistor and an LED plugged into it (no wires to their legs) light up', async () => {
     // breadboard at (0, 0): column k is at x = 16 + 10·(k−1); rows a–e at y = 40…80, f–j at y = 100…140
     const bb = comp('bb1', 'breadboard');
-    const r1 = { ...comp('r1', 'resistor'), x: 16 + 10 * 4, y: 60 - 8 };       // legs (0, 8) and (70, 8): holes 5c and 12c
-    const l1 = { ...comp('l1', 'led'), x: 16 + 10 * 11 - 10, y: 80 - 56 }; // legs (10, 56) and (20, 56): holes 12e and 13e
-    const { sim } = run([bb, r1, l1], [['esp:D23', 'bb1:5a'], ['bb1:13a', 'esp:GND.R']], `void setup() { pinMode(23, OUTPUT); digitalWrite(23, HIGH); }\n${LOOP}`);
+    const r1 = { ...comp('r1', 'resistor'), x: 41, y: 60 - 8 };                  // legs (15, 8) and (55, 8): holes 5c and 9c (40 units apart)
+    const l1 = { ...comp('l1', 'led'), x: 86, y: 80 - 56 };                      // legs (10, 56) and (20, 56): holes 9e and 10e
+    const { sim } = run([bb, r1, l1], [['esp:D23', 'bb1:5a'], ['bb1:10a', 'esp:GND.R']], `void setup() { pinMode(23, OUTPUT); digitalWrite(23, HIGH); }\n${LOOP}`);
     await settle(sim, 200);
     expect(led(sim, 'l1')).toBeGreaterThan(0.4);
     // the centre channel separates the halves: the same LED in the bottom half stays dark
     sim.stop(true);
     const l2 = { ...l1, y: 120 - 56 };
-    const b = run([bb, r1, l2], [['esp:D23', 'bb1:5a'], ['bb1:13j', 'esp:GND.R']], `void setup() { pinMode(23, OUTPUT); digitalWrite(23, HIGH); }\n${LOOP}`);
+    const b = run([bb, r1, l2], [['esp:D23', 'bb1:5a'], ['bb1:10j', 'esp:GND.R']], `void setup() { pinMode(23, OUTPUT); digitalWrite(23, HIGH); }\n${LOOP}`);
     await settle(b.sim, 200);
     expect(led(b.sim, 'l1')).toBe(0);
   });

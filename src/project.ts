@@ -41,7 +41,8 @@ export function normalizeProject(p: unknown, defs: Record<string, PartDef>): Pro
     if (typeof type !== 'string' || !has(defs, type) || typeof id !== 'string' || !ID.test(id) || seen.has(id)) continue;
 seen.add(id);
     const cc = c as Record<string, unknown>;
-    comps.push({ id, type, x: Math.round(num(cc.x)), y: Math.round(num(cc.y)), props: cleanProps(defs[type], cc.props) });
+    const rot = num(cc.rot);
+    comps.push({ id, type, x: Math.round(num(cc.x)), y: Math.round(num(cc.y)), ...(rot === 90 || rot === 180 || rot === 270 ? { rot } : {}), props: cleanProps(defs[type], cc.props) });
   }
   if (!comps.some((c) => defs[c.type].board)) comps.unshift({ id: seen.has('esp') ? 'esp32' : 'esp', type: 'esp32', x: 300, y: 80, props: {} });
 
