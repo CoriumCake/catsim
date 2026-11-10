@@ -32,6 +32,7 @@ test('the Start button is on screen and runs the sketch', async ({ page }) => {
 
 test('two fingers pinch to zoom the diagram in and out', async ({ page }) => {
   await loadExample(page, 'blink');
+  await page.waitForTimeout(500); // the diagram fits itself to the screen just after loading
   const k = () => page.evaluate(() => window.CatSim.App.canvas.view.k);
   const pinch = (from: number, to: number) => page.evaluate(([f, t]) => {
     const svg = document.querySelector('#canvas') as SVGSVGElement; const r = svg.getBoundingClientRect();
@@ -120,4 +121,14 @@ test('the sheet opens at half the screen; drag its handle up to fill the screen 
   await page.locator('#btnSide').tap();
   await expect(side).toBeVisible();
   expect(Math.round((await side.boundingBox())!.height)).toBeGreaterThan(844 * 0.45);
+});
+
+test('the run controls fit on one row at the top of a phone screen', async ({ page }) => {
+  await loadExample(page, 'blink');
+  const ids = ['#btnRun', '#btnRestart', '#btnPause', '#simSpeed', '#addPart', '#view3d'];
+  const boxes = await Promise.all(ids.map((id) => page.locator(id).boundingBox()));
+  const mid = boxes.map((b) => b!.y + b!.height / 2);
+  expect(Math.max(...mid) - Math.min(...mid)).toBeLessThanOrEqual(4); // one row (the 2D/3D pair is a few px taller)
+  for (const b of boxes) { expect(b!.x).toBeGreaterThanOrEqual(0); expect(b!.x + b!.width).toBeLessThanOrEqual(390); }
+  await expect(page.locator('#simTime')).toBeHidden();
 });

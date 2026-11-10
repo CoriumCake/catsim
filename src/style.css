@@ -269,7 +269,12 @@ select.btn { padding-right: 6px; }
   .bottom .tabs-actions { flex: none; }
   .brand { flex: none; white-space: nowrap; height: auto; }
   .proj-name { flex: 1 1 0; width: auto; min-width: 0; max-width: none; }
-  .tb-sim { flex: 1 1 100%; }
+  /* the run controls fit one row: Start, restart, pause, speed, Part, 2D/3D (the clock and separator are hidden) */
+  .tb-sim { flex: 1 1 100%; flex-wrap: nowrap; justify-content: space-between; gap: 4px; }
+  .tb-sim .sim-clock, .tb-sim .bar-sep { display: none; }
+  .tb-sim .run-btn { padding: 0 12px; }
+  .tb-sim .btn-icon { width: 32px; }
+  .tb-sim .speed-select { max-width: 72px; }
   /* the sidebar (Parts, code) is a sheet over the bottom of the screen; the hamburger opens and closes it */
   .side { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 50vh; z-index: 30; border-radius: 16px 16px 0 0; box-shadow: 0 -12px 32px rgba(0, 0, 0, .22); background: var(--panel); display: flex; flex-direction: column; }
   .side > .sheet-handle { display: flex; }
