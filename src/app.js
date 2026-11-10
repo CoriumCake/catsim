@@ -73,12 +73,14 @@ const App = {
     });
     this.plotter = new Plotter($('#plotCanvas'), $('#plotLegend'), $('#plotEmpty'));
     this.editor = createEditor($('#code'), { onRun: () => this.toggleRun() });
-    this.buildPalette(); this.bindUi(); this.bindSplitters();
+    this.buildPalette(); this.bindUi(); this.bindSplitters(); this.bindSheetHandle();
     this.load(await this.initialProject());
     this.editor.onChange(() => { if (this._loadingEditor) return; this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() }); this.save(); });
     requestAnimationFrame(() => this.frame());
     let v = '2d'; try { v = localStorage.getItem(VIEW_STORE) || '2d'; } catch (_) { /* ignore */ }
     try { if (localStorage.getItem(SIDE_STORE)) this.toggleSidebar(true); } catch (_) { /* ignore */ }
+    // on a phone the sidebar is a sheet that opens from the hamburger: it starts closed, so the diagram is on screen
+    if (window.matchMedia('(max-width: 900px)').matches) this.toggleSidebar(true, false);
     try { if (localStorage.getItem(DOCK_STORE)) this.toggleDock(true); } catch (_) { /* ignore */ }
     if (v === '3d') this.setView('3d');
     window.addEventListener('resize', () => this.editor.refresh());
@@ -179,12 +181,36 @@ const App = {
   stop() { if (this.sim && this.sim.running) this.sim.stop(); },
   restartSim() { this.stop(); this.start(); },
   /** Show or hide the left sidebar (editor, parts, terminal…). The choice is remembered. */
-  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden')) {
+  /** Phones: the sheet's height. Closed, half the screen (the default) or full (under the top bar). */
+  setSheetHeight(px) { const s = $('#side'); s.style.height = px == null ? '' : `${Math.round(px)}px`; },
+  /** Drag the sheet's handle: up enlarges it to the full screen, down collapses it (past a quarter of its height it closes). */
+  bindSheetHandle() {
+    const h = $('#sheetHandle'), side = $('#side');
+    let drag = null;
+    const full = () => window.innerHeight - $('.topbar').getBoundingClientRect().bottom;
+    h.addEventListener('pointerdown', (e) => { drag = { y: e.clientY, h: side.getBoundingClientRect().height }; h.setPointerCapture(e.pointerId); });
+    h.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      this.setSheetHeight(Math.min(full(), Math.max(0, drag.h - (e.clientY - drag.y))));
+    });
+    const end = () => {
+      if (!drag) return;
+      const cur = side.getBoundingClientRect().height, half = window.innerHeight / 2, top = full();
+      drag = null;
+      if (cur < half * 0.5) { this.setSheetHeight(null); this.toggleSidebar(true, false); return; } // closed
+      this.setSheetHeight(cur > (half + top) / 2 ? top : half); // snap: half or full
+    };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+  },
+  toggleSidebar(hidden = !$('#workspace').classList.contains('side-hidden'), remember = true) {
+    if (hidden) this.setSheetHeight(null); // the next opening starts at half the screen again
     $('#workspace').classList.toggle('side-hidden', hidden);
     const b = $('#btnSide');
     b.setAttribute('aria-expanded', String(!hidden));
     b.title = hidden ? 'Show the sidebar (Ctrl+B)' : 'Hide the sidebar (Ctrl+B)';
-    try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ }
+    if (remember) { try { localStorage.setItem(SIDE_STORE, hidden ? '1' : ''); } catch (_) { /* ignore */ } }
+    if (!hidden && window.matchMedia('(max-width: 900px)').matches) this.showTab('editor', 'partsPane'); // a phone's sheet opens on the Parts
     if (!hidden) requestAnimationFrame(() => this.editor.refresh());
   },
   /** Fold the Terminal/MQTT/Scope/Console panel down to its tab bar, or open it again. Remembered. */
@@ -541,7 +567,16 @@ const App = {
       return `<svg viewBox="-8 -8 ${d.w + 16} ${d.h + 16}" preserveAspectRatio="xMidYMid meet">${d.render(c, { b: 0, angle: 90, f: 0 })}${pins}</svg>`;
     };
     list.innerHTML = PALETTE.map((g) => `<div class="palette-group"><div class="palette-cat">${g.cat}</div>${g.types.map((t) => `<button class="part" draggable="true" data-type="${t}" title="Add ${esc(DEFS[t].name)}">${draw(t)}<span>${esc(DEFS[t].name)}</span></button>`).join('')}</div>`).join('');
-    list.addEventListener('click', (e) => { const b = e.target.closest('.part'); if (b) this.addComponent(b.dataset.type); });
+    list.addEventListener('click', (e) => {
+      const b = e.target.closest('.part'); if (!b) return;
+      this.addComponent(b.dataset.type);
+      // on a phone the diagram is above the Parts list: bring it into view so the new part can be seen and moved
+      if (window.matchMedia('(max-width: 900px)').matches && !DEFS[b.dataset.type].board) {
+        this.toggleSidebar(true, false); // the sheet closes, so the diagram is what you see next
+        $('#stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.toast(`Added ${DEFS[b.dataset.type].name}: drag it into place, or tap it to set it`);
+      }
+    });
     list.addEventListener('dragstart', (e) => { const b = e.target.closest('.part'); if (b) { e.dataTransfer.setData('text/catsim-part', b.dataset.type); e.dataTransfer.effectAllowed = 'copy'; } });
     $('#paletteSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();

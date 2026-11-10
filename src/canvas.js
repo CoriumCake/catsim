@@ -189,6 +189,7 @@ class Canvas {
     svg.addEventListener('pointerdown', (e) => this.onDown(e));
     window.addEventListener('pointermove', (e) => this.onMove(e));
     window.addEventListener('pointerup', (e) => this.onUp(e));
+    window.addEventListener('pointercancel', (e) => { this.touchUp(e); this.onUp(e); });
     svg.addEventListener('wheel', (e) => {
       e.preventDefault();
       const r = svg.getBoundingClientRect();
@@ -203,7 +204,41 @@ class Canvas {
     });
   }
 
+  /** Two fingers pinch to zoom around their midpoint (phones and tablets). One finger still drags or pans. */
+  touchDown(e) {
+    this.touches = this.touches || new Map();
+    this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.touches.size === 2) {
+      this.drag = null; this.pan = null; this.pressing = null;
+      const [a, b] = [...this.touches.values()];
+      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, k: this.view.k, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, view: { ...this.view } };
+    }
+  }
+
+  touchMove(e) {
+    if (!this.touches || !this.touches.has(e.pointerId)) return false;
+    this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.touches.size >= 2 && this.pinch) {
+      const [a, b] = [...this.touches.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const k = Math.min(3, Math.max(0.25, this.pinch.k * d / this.pinch.d));
+      const r = this.svg.getBoundingClientRect();
+      // the diagram point that was under the starting midpoint stays under the moving midpoint
+      const wx = (this.pinch.mid.x - r.left - this.pinch.view.x) / this.pinch.view.k, wy = (this.pinch.mid.y - r.top - this.pinch.view.y) / this.pinch.view.k;
+      this.view = { k, x: mid.x - r.left - wx * k, y: mid.y - r.top - wy * k };
+      this.applyView();
+    }
+    return true;
+  }
+
+  touchUp(e) {
+    if (!this.touches || !this.touches.delete(e.pointerId)) return false;
+    if (this.touches.size < 2) this.pinch = null;
+    return true;
+  }
+
   onDown(e) {
+    if (e.pointerType === 'touch') { this.touchDown(e); if (this.touches.size > 1) return; }
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     const pin = e.target.closest('.cs-pin');
     const wire = e.target.closest('.cs-wire');
@@ -246,6 +281,7 @@ class Canvas {
   }
 
   onMove(e) {
+    if (this.touchMove(e) && this.touches.size > 1) return;
     if (this.wireStart) {
       const a = this.pinPos(this.wireStart); const p = this.toLocal(e);
       if (a) this.temp.setAttribute('d', this.wirePath(a, { x: p.x, y: p.y, dir: '' }));
@@ -264,7 +300,8 @@ class Canvas {
     }
   }
 
-  onUp() {
+  onUp(e) {
+    if (e && e.pointerType === 'touch') { const pinching = !!this.pinch; this.touchUp(e); if (pinching) return; }
     if (this.pressing) { this.app.sim.setPressed(this.pressing, false, this.pressKey); this.pressing = null; this.pressKey = undefined; this.renderDynamic(); }
     if (this.drag) {
       if (this.drag.moved) {
