@@ -84,6 +84,21 @@ class Canvas {
     return WIRE_COLORS[i % 6];
   }
 
+  /** A click on a pin (in 2D or 3D): start a wire, finish one, or cancel the one started from that pin. */
+  clickPin(ref) {
+    if (!this.wireStart) this.startWire(ref);
+    else if (this.wireStart === ref) this.cancelWire();
+    else { const from = this.wireStart; this.cancelWire(); this.app.addWire(from, ref); }
+  }
+
+  /** A part was dragged and let go (in 2D or 3D): legs drop into breadboard holes, then the project is saved. */
+  endMove(c) {
+    const s = snapToBreadboard(this.project, DEFS, c);
+    if (s) { c.x = s.x; c.y = s.y; this.updateComp(c); }
+    this.app.changed({ structure: false });
+    if (this.project.components.some((x) => x.type === 'breadboard')) this.renderAll();
+  }
+
   // ---------- rendering ----------
   renderAll() {
     this.cache.clear();
@@ -246,10 +261,7 @@ class Canvas {
     const comp = e.target.closest('.cs-comp');
     if (pin) {
       e.stopPropagation();
-      const ref = pin.dataset.ref;
-      if (!this.wireStart) this.startWire(ref);
-      else if (this.wireStart === ref) this.cancelWire();
-      else { const from = this.wireStart; this.cancelWire(); this.app.addWire(from, ref); }
+      this.clickPin(pin.dataset.ref);
       return;
     }
     if (this.wireStart) { this.cancelWire(); }
@@ -305,12 +317,7 @@ class Canvas {
     if (e && e.pointerType === 'touch') { const pinching = !!this.pinch; this.touchUp(e); if (pinching) return; }
     if (this.pressing) { this.app.sim.setPressed(this.pressing, false, this.pressKey); this.pressing = null; this.pressKey = undefined; this.renderDynamic(); }
     if (this.drag) {
-      if (this.drag.moved) {
-        const s = snapToBreadboard(this.project, DEFS, this.drag.c); // legs drop into the holes
-        if (s) { this.drag.c.x = s.x; this.drag.c.y = s.y; this.updateComp(this.drag.c); }
-        this.app.changed({ structure: false });
-        if (this.project.components.some((c) => c.type === 'breadboard')) this.renderAll();
-      }
+      if (this.drag.moved) this.endMove(this.drag.c);
       this.drag = null;
     }
     if (this.pan) { this.pan = null; this.svg.classList.remove('cs-panning'); }

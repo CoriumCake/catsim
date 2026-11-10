@@ -31,6 +31,7 @@ class View3D {
     this.app = app; this.stage = stage;
     this.active = false; this.dirty = true; this.ready = false;
     this.updaters = []; this.disp = []; this.picks = [];
+    this.drag = null; this.overlayKey = ''; this.selBox = null; this.pendRing = null;
     this.camFitted = false;
   }
 
@@ -84,10 +85,10 @@ class View3D {
     c.enableDamping = true; c.dampingFactor = 0.12; c.screenSpacePanning = true;
     c.minPolarAngle = 0; c.maxPolarAngle = Math.PI; // full 360°: look under the boards too c.minDistance = 60; c.maxDistance = 4000;
 
-    this.ray = new T.Raycaster(); this.ptr = new T.Vector2();
-    this.el.addEventListener('pointerdown', (e) => this.onDown(e));
+    this.ray = new T.Raycaster(); this.ptr = new T.Vector2(); this.ground = new T.Plane(new T.Vector3(0, 1, 0), 0);
+    this.el.addEventListener('pointerdown', (e) => this.onDown(e), true); // capture: runs before the camera's own handler, so a dragged part doesn't also orbit
     window.addEventListener('pointerup', (e) => this.onUp(e));
-    window.addEventListener('pointercancel', () => this.release());
+    window.addEventListener('pointercancel', () => { this.drag = null; this.release(); });
     this.el.addEventListener('pointermove', (e) => this.onMove(e));
     this.el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
     this.el.addEventListener('drop', (e) => {
@@ -111,7 +112,8 @@ class View3D {
     const tick = () => {
       this._raf = 0;
       if (!this.active) return;
-      if (this.dirty) this.rebuild();
+      if (this.dirty && !this.drag) this.rebuild();
+      this.syncOverlay();
       this.update();
       this.controls.update();
       this.seeThrough();
@@ -212,7 +214,7 @@ class View3D {
   }
 
   rebuild() {
-    this.dirty = false;
+    this.dirty = false; this.overlayKey = '';
     this.clear();
     const T = THREE;
     this.M = {
@@ -251,13 +253,25 @@ class View3D {
       // the part turns about the middle of its footprint; its drawing is built in a pivot group that is offset to match
       const f = footprint(d, c.rot);
       const g = new T.Group(); g.position.set(c.x + f.w / 2, this.lift.get(c.id) || 0, c.y + f.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
-      const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot);
+      const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot); g.userData.pivot = pivot;
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
       if (build) build.call(this, pivot, c, d);
       if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
         this.box(pivot, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
         this.cyl(pivot, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
+      }
+    }
+
+    // pins: an invisible target on each pin's top, so a click there starts or finishes a wire, as in 2D
+    const hitMat = new T.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+    const hitGeo = new T.SphereGeometry(4.5, 10, 8); this.disp.push(hitMat, hitGeo);
+    for (const c of P.components) {
+      const d = DEFS[c.type]; if (!d) continue;
+      for (const p of d.pins) {
+        const ref = `${c.id}:${p.id}`, at = this.app.canvas.pinPos(ref); if (!at) continue;
+        const q = this.pinTop(at), m = new T.Mesh(hitGeo, hitMat);
+        m.position.set(q.x, q.y, q.z); m.userData.pinRef = ref; this.root.add(m); this.picks.push(m);
       }
     }
 
@@ -268,7 +282,7 @@ class View3D {
       const A = new T.Vector3(a.x, a.y, a.z), B = new T.Vector3(z.x, z.y, z.z);
       const dist = A.distanceTo(B);
       const h = Math.min(90, Math.max(18, dist * 0.32)), d = Math.min(70, Math.max(10, dist * 0.25));
-      const da = DIRS[pa.pin.dir] || [0, 0], db = DIRS[pb.pin.dir] || [0, 0];
+      const da = DIRS[pa.dir] || [0, 0], db = DIRS[pb.dir] || [0, 0];
       const curve = new T.CubicBezierCurve3(A,
         new T.Vector3(a.x + da[0] * d, a.y + h, a.z + da[1] * d),
         new T.Vector3(z.x + db[0] * d, z.y + h, z.z + db[1] * d), B);
@@ -714,14 +728,30 @@ class View3D {
   }
 
   // ---------- interaction ----------
-  hit(e) {
+  setRay(e) {
     const r = this.el.getBoundingClientRect();
     this.ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(this.ptr, this.camera);
+  }
+
+  /** Where the pointer is on the board (y = 0): diagram x is world x, diagram y is world z. */
+  planePoint(e) {
+    this.setRay(e);
+    return this.ray.ray.intersectPlane(this.ground, new THREE.Vector3());
+  }
+
+  /** The diagram point the camera looks at: where a part added from the palette lands. */
+  centerPoint() { const t = this.controls.target; return { x: t.x, y: t.z }; }
+
+  partGroup(id) { return this.root.children.find((o) => o.userData.compId === id) || null; }
+
+  hit(e) {
+    this.setRay(e);
     for (const h of this.ray.intersectObjects(this.picks, true)) {
       let o = h.object;
+      if (o.userData.pinRef) return { kind: 'pin', ref: o.userData.pinRef };
       while (o && !o.userData.compId && !o.userData.wireId) o = o.parent;
-      if (o && o.userData.compId) { const p = o.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z }; }
+      if (o && o.userData.compId) { const p = o.userData.pivot.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z }; }
       if (o) return { kind: 'wire', id: o.userData.wireId };
     }
     return null;
@@ -741,20 +771,63 @@ class View3D {
     if (e.button !== 0 && e.pointerType === 'mouse') { this.down = null; return; }
     const h = this.hit(e);
     this.down = { x: e.clientX, y: e.clientY, h };
+    if (h && h.kind === 'pin') { this.down = null; this.app.canvas.clickPin(h.ref); this.syncOverlay(); return; }
     if (this.app.sim.running && this.pressable(h)) {
       this.controls.enabled = false;
       const tc = this.app.project.components.find((x) => x.id === h.id);
       if (tc && DEFS[tc.type].interactive === 'toggle') { tc.props.on = !tc.props.on; this.app.sim.syncProject(); this.app.save(); this.app.canvas.renderDynamic(); this.controls.enabled = true; return; }
       this.pressing = h.id; this.pressKey = h.key; this.app.sim.setPressed(h.id, true, h.key); this.app.canvas.renderDynamic();
       this.app.canvas.select({ kind: 'comp', id: h.id });
+      return;
+    }
+    const c = h && h.kind === 'comp' ? this.app.project.components.find((x) => x.id === h.id) : null;
+    const p = c && this.planePoint(e);
+    if (p) { // drag a part along the board; the offset keeps the grab point under the pointer
+      this.drag = { id: c.id, dx: p.x - c.x, dz: p.z - c.y, sx: e.clientX, sy: e.clientY, moved: false };
+      this.controls.enabled = false;
+      this.app.canvas.select({ kind: 'comp', id: c.id });
     }
   }
 
   onUp(e) {
     const d = this.down; this.down = null;
     if (this.pressing) { this.release(); return; }
+    if (this.drag) {
+      const dr = this.drag; this.drag = null; this.controls.enabled = true;
+      const c = dr.moved && this.app.project.components.find((x) => x.id === dr.id);
+      if (c) { this.app.canvas.endMove(c); return; }
+    }
     if (!d || !this.active || e.target !== this.el) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) this.app.canvas.select(d.h);
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) { this.app.canvas.cancelWire(); this.app.canvas.select(d.h); }
+  }
+
+  dragMove(e) {
+    const dr = this.drag;
+    if (!dr.moved && Math.hypot(e.clientX - dr.sx, e.clientY - dr.sy) < 4) return;
+    const p = this.planePoint(e); if (!p) return;
+    dr.moved = true;
+    const c = this.app.project.components.find((x) => x.id === dr.id); if (!c) return;
+    c.x = Math.round((p.x - dr.dx) / 5) * 5; c.y = Math.round((p.z - dr.dz) / 5) * 5;
+    const g = this.partGroup(c.id), f = footprint(DEFS[c.type], c.rot);
+    if (g) { g.position.x = c.x + f.w / 2; g.position.z = c.y + f.h / 2; }
+    this.app.canvas.updateComp(c); this.app.canvas.scheduleWires(); // wires are rebuilt when the part is let go
+  }
+
+  /** Selection outline and the pin a wire starts from, drawn to match the 2D diagram. */
+  syncOverlay() {
+    const cv = this.app.canvas, sel = cv.sel;
+    const key = `${sel ? sel.kind + ':' + sel.id : ''}|${cv.wireStart || ''}`;
+    if (key === this.overlayKey) { if (this.selBox) this.selBox.update(); return; }
+    this.overlayKey = key;
+    if (this.selBox) { this.root.remove(this.selBox); this.selBox = null; }
+    if (this.pendRing) { this.root.remove(this.pendRing); this.pendRing.geometry.dispose(); this.pendRing = null; }
+    if (sel && sel.kind === 'comp') { const g = this.partGroup(sel.id); if (g) { this.selBox = new THREE.BoxHelper(g, 0xf5a524); this.root.add(this.selBox); } }
+    const at = cv.wireStart && cv.pinPos(cv.wireStart);
+    if (at) {
+      const q = this.pinTop(at);
+      this.pendRing = new THREE.Mesh(new THREE.SphereGeometry(3.4, 14, 10), new THREE.MeshBasicMaterial({ color: 0xf5a524 }));
+      this.pendRing.position.set(q.x, q.y + 2, q.z); this.root.add(this.pendRing);
+    }
   }
 
   release() {
@@ -763,6 +836,7 @@ class View3D {
   }
 
   onMove(e) {
+    if (this.drag) { this.dragMove(e); return; }
     if (this.down || (this._mt && performance.now() - this._mt < 50)) return;
     this._mt = performance.now();
     const h = this.hit(e);

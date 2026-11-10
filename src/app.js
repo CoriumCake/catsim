@@ -11,6 +11,7 @@ import { Scope } from './scope.ts';
 import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
 import { snapToBreadboard } from './contacts.js';
+import { footprint } from './rotation.ts';
 import { spiceLib } from './analog/models.ts';
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
@@ -158,7 +159,7 @@ const App = {
   addComponent(type, x, y) {
     const d = DEFS[type];
     if (d.board) { this.addBoard(type); return; }
-    if (x === undefined) { const c = this.canvas.centerPoint(); x = c.x - d.w / 2 + (Math.random() * 60 - 30); y = c.y - d.h / 2 + (Math.random() * 60 - 30); }
+    if (x === undefined) { const c = this.view3d.active ? this.view3d.centerPoint() : this.canvas.centerPoint(); x = c.x - d.w / 2 + (Math.random() * 60 - 30); y = c.y - d.h / 2 + (Math.random() * 60 - 30); }
     const c = { id: this.nextId(type), type, x: Math.round(x / 5) * 5, y: Math.round(y / 5) * 5, props: { ...d.props } };
     this.project.components.push(c);
     this.changed();
@@ -297,7 +298,7 @@ const App = {
     if (this.view3d.active && sel.kind === 'comp') {
       const c = this.project.components.find((x) => x.id === sel.id); const d = c && DEFS[c.type];
       if (d) {
-        const a = this.view3d.screenPoint(c.x, 30, c.y), b = this.view3d.screenPoint(c.x + d.w, 0, c.y + d.h);
+        const f = footprint(d, c.rot), a = this.view3d.screenPoint(c.x, 30, c.y), b = this.view3d.screenPoint(c.x + f.w, 0, c.y + f.h);
         box = { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) };
       }
     } else {
@@ -541,7 +542,7 @@ const App = {
       b3.disabled = false;
       this.canvas.cancelWire && this.canvas.wireStart && this.canvas.cancelWire();
       $('#zoomLabel').textContent = '3D';
-      this.hint('Drag to orbit 360° · right-drag to pan · scroll to zoom · switch to 2D to wire parts');
+      this.hint('Drag to orbit 360° · right-drag to pan · scroll to zoom · drag a part to move it · click two pins to wire them');
       clearTimeout(this._hintT); this._hintT = setTimeout(() => this.hint(''), 3500);
     } else {
       if (!this.view3d.active) return;
