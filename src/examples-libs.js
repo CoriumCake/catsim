@@ -589,11 +589,11 @@ void loop() {
   {
     key: 'breadboard', name: 'Breadboard: resistor and LED plugged in',
     components: [esp, { id: 'bb1', type: 'breadboard', x: 500, y: 260, props: {} },
-      { id: 'r1', type: 'resistor', x: 556, y: 312, props: { ohms: 220 } }, { id: 'led1', type: 'led', x: 616, y: 284, props: { color: 'green' } }],
-    wires: [W('esp:D23', 'bb1:5a', 'yellow'), W('bb1:13a', 'esp:GND.R', 'black')],
+      { id: 'r1', type: 'resistor', x: 541, y: 312, props: { ohms: 220 } }, { id: 'led1', type: 'led', x: 586, y: 284, props: { color: 'green' } }],
+    wires: [W('esp:D23', 'bb1:5a', 'yellow'), W('bb1:10a', 'esp:GND.R', 'black')],
     code: `// The resistor and the LED are plugged into the breadboard: no wires to their legs.
-// Column 5 (a-e) joins GPIO23 to the resistor, column 12 joins the resistor to the LED,
-// column 13 takes the LED back to GND. Drag a part off the board and the circuit breaks.
+// Column 5 (a-e) joins GPIO23 to the resistor, column 9 joins the resistor to the LED,
+// column 10 takes the LED back to GND. Drag a part off the board and the circuit breaks.
 void setup() { pinMode(23, OUTPUT); }
 
 void loop() {

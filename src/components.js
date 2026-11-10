@@ -143,7 +143,8 @@ const fmtOhms = (o) => (o >= 1e6 ? `${+(o / 1e6).toFixed(1)}MΩ` : o >= 1e3 ? `$
 
 DEFS.resistor = {
   type: 'resistor', name: 'Resistor', category: 'Passive', w: 70, h: 16,
-  pins: [{ id: '1', label: '1', x: 0, y: 8, dir: 'l' }, { id: '2', label: '2', x: 70, y: 8, dir: 'r' }],
+  // leads 10.16 mm apart (400 mil), the body 6.8 mm × 2.5 mm
+  pins: [{ id: '1', label: '1', x: 15, y: 8, dir: 'l' }, { id: '2', label: '2', x: 55, y: 8, dir: 'r' }],
   props: { ohms: 220 },
   // common E6/E12 values from 10 Ω to 1 MΩ (validated on load, so every value an example uses must be listed)
   controls: [{ key: 'ohms', label: 'Resistance (Ω)', type: 'select', options: ['10', '22', '47', '100', '150', '220', '330', '470', '680', '1000', '1500', '2200', '3300', '4700', '6800', '10000', '15000', '20000', '22000', '33000', '47000', '68000', '100000', '220000', '470000', '1000000'] }],
@@ -151,10 +152,10 @@ DEFS.resistor = {
   state: () => ({}),
   render(c) {
     const b = resistorBands(c.props.ohms);
-    return `<line x1="0" y1="8" x2="70" y2="8" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="17" y="2" width="36" height="12" rx="5" fill="#d9c49a" stroke="#9b8558"/>
-      <rect x="22" y="2" width="3" height="12" fill="${b[0]}"/><rect x="29" y="2" width="3" height="12" fill="${b[1]}"/>
-      <rect x="36" y="2" width="3" height="12" fill="${b[2]}"/><rect x="46" y="2" width="3" height="12" fill="${b[3]}"/>
+    return `<line x1="15" y1="8" x2="55" y2="8" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="21.5" y="3" width="27" height="10" rx="4.5" fill="#d9c49a" stroke="#9b8558"/>
+      <rect x="24" y="3" width="2.2" height="10" fill="${b[0]}"/><rect x="28" y="3" width="2.2" height="10" fill="${b[1]}"/>
+      <rect x="32" y="3" width="2.2" height="10" fill="${b[2]}"/><rect x="43.5" y="3" width="2.2" height="10" fill="${b[3]}"/>
       <text x="35" y="-3" class="cs-part-lbl">${fmtOhms(+c.props.ohms)}</text>`;
   },
 };
@@ -436,15 +437,16 @@ DEFS.nmos = {
 const DIODE_TYPES = ['1N4148', '1N4007', '1N5819'];
 DEFS.diode = {
   type: 'diode', name: 'Diode', category: 'Semiconductors', w: 70, h: 16,
-  pins: [{ id: 'A', label: 'A', x: 0, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 70, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
+  // DO-35: a 4 mm × 1.9 mm glass body, leads 10.16 mm apart
+  pins: [{ id: 'A', label: 'A', x: 15, y: 8, dir: 'l', title: 'Anode' }, { id: 'K', label: 'K', x: 55, y: 8, dir: 'r', title: 'Cathode (striped end)' }],
   props: { model: '1N4148', spice: '' },
   controls: [{ key: 'model', label: 'Type', type: 'select', options: DIODE_TYPES }, spiceCtl('.model NAME D(IS=… N=… RS=…)')],
   render(c) {
     const big = c.props.model !== '1N4148';
     const body = big ? '#1d1f24' : '#c98a3a';
-    return `<line x1="0" y1="8" x2="70" y2="8" stroke="#a7adb7" stroke-width="2"/>
-      <rect x="20" y="${big ? 1 : 3}" width="30" height="${big ? 14 : 10}" rx="${big ? 3 : 4}" fill="${body}" stroke="rgba(0,0,0,.35)"/>
-      <rect x="43" y="${big ? 1 : 3}" width="4" height="${big ? 14 : 10}" fill="${big ? '#cfd4dc' : '#222'}"/>
+    return `<line x1="15" y1="8" x2="55" y2="8" stroke="#a7adb7" stroke-width="2"/>
+      <rect x="27" y="${big ? 1 : 4.25}" width="16" height="${big ? 14 : 7.5}" rx="${big ? 3 : 3.75}" fill="${body}" stroke="rgba(0,0,0,.35)"/>
+      <rect x="38.5" y="${big ? 1 : 4.25}" width="2.5" height="${big ? 14 : 7.5}" fill="${big ? '#cfd4dc' : '#222'}"/>
       <text x="35" y="-3" class="cs-part-lbl">${esc(c.props.model)}</text>`;
   },
 };

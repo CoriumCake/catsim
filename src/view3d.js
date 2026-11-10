@@ -393,8 +393,8 @@ class View3D {
   build_led(g, c) {
     const m = this.mat('#ff3b3b', { transparent: true, opacity: 0.88, roughness: 0.25, emissive: '#000000' });
     this.cyl(g, 15, 16, 12.5, 12, 14.5, m);
-    this.cyl(g, 15, 16, 10.5, 14.5, 26, m);
-    const dome = this.mesh(new THREE.SphereGeometry(10.5, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 15, 26, 16);
+    this.cyl(g, 15, 16, 9.8, 14.5, 26, m); // a 5 mm LED: a 5.0 mm dome on a 2.54 mm lead pitch
+    const dome = this.mesh(new THREE.SphereGeometry(9.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 15, 26, 16);
     dome.castShadow = true;
     for (const x of [10, 20]) { this.rod(g, [x, 1, 16], [x, 12, 16], 0.9, this.M.lead); this.leg(g, x, 16, x, 56); }
     const glow = this.glow(g, 15, 24, 16, 60, '#ff3b3b');
@@ -409,13 +409,13 @@ class View3D {
 
   build_resistor(g, c) {
     const T = THREE;
-    this.rod(g, [0, 7, 8], [70, 7, 8], 0.9, this.M.lead);
-    for (const x of [0, 70]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.9, this.M.lead);
-    const body = this.mesh(new T.CylinderGeometry(5.5, 5.5, 36, 20), this.mat('#d9c49a'), g, 35, 7, 8);
+    this.rod(g, [15, 7, 8], [55, 7, 8], 0.9, this.M.lead);
+    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.9, this.M.lead);
+    const body = this.mesh(new T.CylinderGeometry(4.9, 4.9, 27, 20), this.mat('#d9c49a'), g, 35, 7, 8);
     body.rotation.z = Math.PI / 2;
     const bands = [];
-    for (const x of [23.5, 30.5, 37.5, 47.5]) {
-      const band = this.mesh(new T.CylinderGeometry(5.7, 5.7, 3, 20), this.mat('#000'), g, x, 7, 8);
+    for (const x of [24, 28, 32, 43.5]) {
+      const band = this.mesh(new T.CylinderGeometry(5.0, 5.0, 2.2, 20), this.mat('#000'), g, x, 7, 8);
       band.rotation.z = Math.PI / 2; bands.push(band);
     }
     let last = '';
@@ -558,12 +558,12 @@ class View3D {
 
   build_diode(g, c) {
     const T = THREE;
-    this.rod(g, [0, 7, 8], [70, 7, 8], 0.8, this.M.lead);
-    for (const x of [0, 70]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.8, this.M.lead);
+    this.rod(g, [15, 7, 8], [55, 7, 8], 0.8, this.M.lead);
+    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.8, this.M.lead);
     const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.9, roughness: 0.2 });
-    const body = this.mesh(new T.CylinderGeometry(5, 5, 30, 20), bodyM, g, 35, 7, 8); body.rotation.z = Math.PI / 2;
+    const body = this.mesh(new T.CylinderGeometry(3.75, 3.75, 16, 20), bodyM, g, 35, 7, 8); body.rotation.z = Math.PI / 2;
     const bandM = this.mat('#222');
-    const band = this.mesh(new T.CylinderGeometry(5.2, 5.2, 4, 20), bandM, g, 45, 7, 8); band.rotation.z = Math.PI / 2;
+    const band = this.mesh(new T.CylinderGeometry(3.8, 3.8, 2.5, 20), bandM, g, 39.5, 7, 8); band.rotation.z = Math.PI / 2;
     let last = '';
     this.live(c, () => {
       const m = String(c.props.model); if (m === last) return; last = m;
