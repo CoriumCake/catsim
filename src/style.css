@@ -329,6 +329,10 @@ select.btn { padding-right: 6px; }
   .tb-files { margin-left: auto; }
   .tb-sim { order: 10; flex-basis: 100%; justify-content: center; }
 }
+/* very narrow phones (320–420 px): the file actions wrap onto a second line instead of scrolling out of sight */
+@media (max-width: 420px) {
+  .tb-files { flex-wrap: wrap; overflow: visible; }
+}
 /* bottom dock: labels never wrap; contextual actions stay compact */
 .tab { white-space: nowrap; }
 .bottom .tabs .tab { padding: 6px 10px; }
