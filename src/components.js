@@ -6,6 +6,7 @@ import { esc, clamp } from './util.ts';
 import { CHIPS } from './digital/chips.ts';
 import { LIB_PARTS } from './parts-libs.js';
 import { BASIC_PARTS } from './parts-basic.js';
+import { applyRealSizes } from './part-sizes.js';
 const LED_COLORS = {
   red: '#ff3b3b', green: '#22e06b', blue: '#3d8bff',
   yellow: '#ffd60a', white: '#f2f5ff', orange: '#ff8a1f',
@@ -603,6 +604,7 @@ DEFS.lcd = {
 };
 
 Object.assign(DEFS, LIB_PARTS, BASIC_PARTS);
+applyRealSizes(DEFS);
 
 // Boards running from a battery show when they have no power (the sketch is stopped).
 for (const d of [DEFS.esp32, DEFS.uno]) {
