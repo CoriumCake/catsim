@@ -743,25 +743,12 @@ class View3D {
   }
 
   build_dht22(g, c) {
-    const T = THREE;
-    const draw = (x) => {
-      x.fillStyle = '#f4f6f8'; x.fillRect(0, 0, 144, 216);
-      x.fillStyle = '#c4cad4';
-      for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) { x.beginPath(); x.roundRect ? x.roundRect(28 + k * 28, 20 + r * 28, 16, 16, 3) : x.rect(28 + k * 28, 20 + r * 28, 16, 16); x.fill(); }
-      x.fillStyle = '#39404c'; x.textAlign = 'center'; x.font = '700 26px ui-monospace, Menlo, monospace';
-      x.fillText(`${(+c.props.temp).toFixed(1)}°C`, 72, 162); x.fillText(`${Math.round(c.props.hum)}%`, 72, 196);
-    };
-    const tex = this.tex(144, 216, draw);
-    const w = this.mat('#f4f6f8');
-    this.box(g, 2, 1, 36, 54, 0, 3, w);
-    const body = this.mesh(new T.BoxGeometry(36, 14, 54), [w, w, this.mat('#ffffff', { map: tex }), w, w, w], g, 20, 10, 28);
-    body.material.forEach((m) => this.disp.includes(m) || this.disp.push(m));
+    // the DHT22 module as in the reference photos: a red board with a three-pin header, and a white housing with vented slats on top
+    this.box(g, 2, 2, 36, 60, 0, 2, this.mat('#c62828', { roughness: 0.5 }));
+    const white = this.mat('#eeeee6', { roughness: 0.7 });
+    this.box(g, 4, 6, 32, 42, 2, 15, white);
+    for (let i = 0; i < 6; i++) this.box(g, 4, 6 + i * 7, 32, 3, 15, 18, white);
     for (const x of [10, 20, 30]) this.leg(g, x, 55, x, 72);
-    let last = `${c.props.temp}|${c.props.hum}`;
-    this.live(c, () => {
-      const k = `${c.props.temp}|${c.props.hum}`; if (k === last) return; last = k;
-      const x = tex.image.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); draw(x); tex.needsUpdate = true;
-    });
   }
 
   build_ldr(g, c) {
