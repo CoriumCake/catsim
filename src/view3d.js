@@ -795,20 +795,20 @@ class View3D {
   }
 
   build_servo(g, c) {
-    const blue = this.mat('#2163d6'), dark = this.mat('#1b4fb0');
-    this.box(g, 20, 8, 76, 40, 0, 30, blue);
-    this.box(g, 12, 8, 92, 40, 20, 23, dark);
-    this.cyl(g, 44, 28, 8, 30, 33, blue);
-    this.cyl(g, 44, 28, 3, 33, 37, this.M.metal, 12);
-    const horn = new THREE.Group(); horn.position.set(44, 37, 28); g.add(horn);
+    // an SG90 micro servo as in the reference photos: a translucent blue case 23 × 12 mm and 22 mm tall, a mounting flange near the top, and one white horn on the shaft
+    const blue = this.mat('#2a6fe0', { transparent: true, opacity: 0.9, roughness: 0.4 });
+    this.box(g, 4, 4, 91, 48, 0, 89, blue);
+    this.box(g, 0, 4, 100, 48, 60, 70, blue);
     const white = this.mat('#ffffff', { roughness: 0.5 });
-    this.cyl(horn, 0, 0, 5.5, 0, 3, white);
-    const arm = this.mesh(new THREE.CylinderGeometry(3, 4.5, 26, 12), white, horn, 0, 1.5, -12);
-    arm.rotation.x = Math.PI / 2; arm.scale.z = 0.5;
+    const horn = new THREE.Group(); horn.position.set(30, 89, 28); g.add(horn);
+    this.cyl(horn, 0, 0, 4, 0, 4, white, 16);
+    const arm = this.mesh(new THREE.BoxGeometry(6, 2.5, 56), white, horn, 0, 2.5, -20);
+    arm.position.set(0, 2.5, -20);
     // cable: brown/red/orange from the case to the pins
     [['#6b3e1f', 20], ['#d63b3b', 28], ['#f08a24', 36]].forEach(([col, z]) => this.rod(g, [0, PIN_TOP - 1, z], [20, 8, z], 1.4, this.mat(col)));
     this.live(c, (s) => { horn.rotation.y = -((s.angle ?? 90) - 90) * DEG; });
   }
+
 
   // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
   build_to92(g, c, mark) {
