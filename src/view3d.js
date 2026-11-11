@@ -505,12 +505,16 @@ class View3D {
 
   // ---------- real-size modules (dimensions in diagram units: 1 unit = 0.254 mm) ----------
   build_lcd_parallel(g, c, d) {
-    // HD44780 16×2: an 80 × 36 mm green board, a metal bezel and the glass window
+    // HD44780 16×2 as in the reference photos: a green board with a 16-pin header, a black frame, and a grey-green screen with its character cells
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1f7a3a', { roughness: 0.5 }));
-    this.box(g, 22, 22, 271, 98, 6, 11, this.M.metal);
-    this.box(g, 30, 30, 255, 82, 11, 12.2, this.mat('#1f3f9a', { roughness: 0.3 }));
-    const win = this.tex(256, 64, (x) => { x.fillStyle = '#2b5ad6'; x.fillRect(0, 0, 256, 64); x.fillStyle = '#9fc3ff'; x.font = '600 24px monospace'; x.fillText('CatSim 16x2', 14, 40); });
-    this.mesh(new THREE.PlaneGeometry(255, 82), this.mat('#ffffff', { map: win, transparent: true, opacity: 0.85 }), g, 157.5, 12.4, 71).rotation.x = -Math.PI / 2;
+    this.box(g, 22, 22, 271, 98, 6, 11, this.mat('#1a1a1a', { roughness: 0.6 }));
+    this.box(g, 30, 30, 255, 82, 11, 12.2, this.mat('#2a2a2a', { roughness: 0.3 }));
+    const screen = this.tex(256, 64, (x) => {
+      x.fillStyle = '#9fb89a'; x.fillRect(0, 0, 256, 64);
+      x.fillStyle = '#2f3f2f';
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 16; k++) x.fillRect(8 + k * 15.5, 6 + r * 30, 12, 24);
+    });
+    this.mesh(new THREE.PlaneGeometry(255, 82), this.mat('#ffffff', { map: screen }), g, 157.5, 12.4, 71).rotation.x = -Math.PI / 2;
   }
 
   build_mpu6050(g, c, d) {
@@ -778,13 +782,14 @@ class View3D {
   }
 
   build_buzzer(g, c) {
+    // a 12 mm piezo buzzer: a black cylinder 9 mm tall, with the piezo disc and sound hole in its top
     const T = THREE;
-    this.cyl(g, 22, 22, 20, 0, 14, this.mat('#1c1e22', { roughness: 0.5 }), 36);
-    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, 14, 22, false); ring.rotation.x = Math.PI / 2;
-    this.cyl(g, 22, 22, 3.5, 13.6, 14.1, this.mat('#000'), 16);
+    this.cyl(g, 22, 22, 21, 0, 35, this.mat('#1c1e22', { roughness: 0.5 }), 40);
+    this.cyl(g, 22, 22, 15, 34, 35.4, this.mat('#c9ced6', { metalness: 0.6, roughness: 0.35 }), 32);
+    this.cyl(g, 22, 22, 4, 35.4, 35.9, this.mat('#000'), 16);
     for (const x of [16, 28]) this.leg(g, x, 42, x, 62);
     const wm = new T.MeshBasicMaterial({ color: '#ffd60a', transparent: true, opacity: 0, depthWrite: false }); this.disp.push(wm);
-    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 16, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
+    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 37, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
     this.live(c, (s) => {
       const on = s.f > 0; const t = performance.now() / 700;
       waves.forEach((w, i) => {
