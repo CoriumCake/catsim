@@ -298,7 +298,9 @@ const mq2 = sensorModule('mq2', 'Gas Sensor (MQ-2)', { key: 'gas', label: 'Gas /
 // ---------- half-size breadboard (400 holes) ----------
 const BB_COLS = 30, BB_P = 10, BB_X0 = 16; // 10 units = 0.1", the legs of most parts
 const bbRows = { top: ['a', 'b', 'c', 'd', 'e'], bottom: ['f', 'g', 'h', 'i', 'j'] };
-const BB_Y = { tp: 10, tn: 20, a: 40, f: 100, bp: 160, bn: 170 };
+// a half-size board is 55 mm (216 units) deep: the rows a–e, a 7.6 mm trench, the rows f–j, then the bottom rails
+const BB_H = 216;
+const BB_Y = { tp: 10, tn: 20, a: 40, f: 110, bp: 186, bn: 196 };
 const bbPins = [];
 const bbBonded = [];
 for (let col = 1; col <= BB_COLS; col++) {
@@ -314,7 +316,7 @@ for (const [rail, y, dir] of [['T+', BB_Y.tp, 't'], ['T-', BB_Y.tn, 't'], ['B+',
   }
 }
 const breadboard = {
-  type: 'breadboard', name: 'Breadboard (half, 400 holes)', category: 'Passive', w: BB_X0 * 2 + (BB_COLS - 1) * BB_P, h: 180,
+  type: 'breadboard', name: 'Breadboard (half, 400 holes)', category: 'Passive', w: BB_X0 * 2 + (BB_COLS - 1) * BB_P, h: BB_H,
   pins: bbPins, bonded: bbBonded, optional: true, props: {}, noPinHeaders: true,
   hint: 'Drop a part onto it and its legs plug into the holes (they snap into place). Holes a–e in one column are joined, and so are f–j; the red/blue rails are joined along their length. Wires can go to any hole.',
   state: () => ({}),
@@ -324,10 +326,10 @@ const breadboard = {
     for (let col = 1; col <= BB_COLS; col += (col === 1 ? 4 : 5)) lbl += `<text x="${BB_X0 + (col - 1) * BB_P}" y="${BB_Y.a - 8}" class="cs-tiny cs-dark">${col}</text>`;
     for (const [i, r] of [...bbRows.top, ...bbRows.bottom].entries()) lbl += `<text x="6" y="${(i < 5 ? BB_Y.a : BB_Y.f) + (i % 5) * BB_P + 2.5}" class="cs-tiny cs-dark">${r}</text>`;
     const holes = this.pins.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="2.3" fill="#2b2f37"/>`).join('');
-    return `<rect x="0" y="0" width="${w}" height="180" rx="4" fill="#f4f1e8" stroke="#cfc8b6"/>
+    return `<rect x="0" y="0" width="${w}" height="${BB_H}" rx="4" fill="#f4f1e8" stroke="#cfc8b6"/>
       <rect x="0" y="${BB_Y.a + 4 * BB_P + 6}" width="${w}" height="${BB_Y.f - BB_Y.a - 4 * BB_P - 12}" fill="#e3ddcd"/>
       <path d="M8 4 H${w - 8} M8 ${BB_Y.bp - 6} H${w - 8}" stroke-width="1.5" stroke="#e5484d"/>
-      <path d="M8 ${BB_Y.tn + 6} H${w - 8} M8 176 H${w - 8}" stroke-width="1.5" stroke="#3d8bff"/>${holes}${lbl}`;
+      <path d="M8 ${BB_Y.tn + 6} H${w - 8} M8 ${BB_Y.bn + 6} H${w - 8}" stroke-width="1.5" stroke="#3d8bff"/>${holes}${lbl}`;
   },
 };
 
