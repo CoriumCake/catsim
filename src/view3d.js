@@ -442,10 +442,13 @@ class View3D {
 
   build_pot(g, c) {
     // a 9 mm × 9 mm body, 6 mm tall; the Ø6 mm shaft rises 13 mm above the board
-    this.box(g, 10.5, 4, 35, 35, 0, 24, this.mat('#1e5bb8'));
+    // round body with a bushing, as in the reference photos: a Ø9 mm body, the knob on a Ø6 mm shaft
+    this.cyl(g, 28, 21.5, 17.5, 0, 24, this.mat('#b9975a', { metalness: 0.6, roughness: 0.4 }), 40);
+    this.cyl(g, 28, 21.5, 7, 24, 26, this.mat('#9aa1ab', { metalness: 0.7, roughness: 0.3 }), 24);
     this.cyl(g, 28, 21.5, 11.8, 24, 75, this.mat('#d7dbe2', { metalness: 0.4, roughness: 0.4 }), 32);
     const knob = new THREE.Group(); knob.position.set(28, 75, 21.5); g.add(knob);
     this.box(knob, -1.2, -11.8, 2.4, 8, 0, 1.5, this.mat('#2a2e36'));
+    this.cyl(knob, 0, 0, 14, 0, 12, this.mat('#15171c', { roughness: 0.5 }), 32); // the black knob, as in the photos
     this.live(c, () => { knob.rotation.y = -(-135 + 270 * (+c.props.value)) * DEG; });
   }
 
