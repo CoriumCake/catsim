@@ -486,6 +486,7 @@ class View3D {
     const T = THREE, aw = 85.6, ah = 42.8, ax = 11.2, ay = 28.6;
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d3f8f', { roughness: 0.5 }));
     this.box(g, 4, 22, 100, 56, 6, 8, this.mat('#05070b', { roughness: 0.3 }));
+    for (const [x, z] of [[4, 4], [104, 4], [4, 105], [104, 105]]) this.cyl(g, x, z, 3.5, 5.9, 6.1, this.mat('#0d1f4a'), 12); // the four mounting holes
     const tex = this.tex(128, 64, (x) => { x.fillStyle = '#05070b'; x.fillRect(0, 0, 128, 64); });
     const screen = this.mesh(new T.PlaneGeometry(aw, ah), this.mat('#ffffff', { map: tex, emissive: '#9fd8ff', emissiveIntensity: 0.25 }), g, ax + aw / 2, 8.1, ay + ah / 2, false);
     screen.rotation.x = -Math.PI / 2;
