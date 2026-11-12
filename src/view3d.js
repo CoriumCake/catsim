@@ -533,7 +533,10 @@ class View3D {
 
   build_bme280(g, c, d) {
     // a BME280 breakout: a 16 × 18 mm blue board with the 2.5 × 2.5 mm sensor under its metal lid
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#2a6fb8', { roughness: 0.5 }));
+    // a black breakout board with two mounting holes at the top and a Qwiic connector on the left, as in the reference photos
+    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#15171c', { roughness: 0.5 }));
+    for (const x of [8, 56]) this.cyl(g, x, 8, 5, 5.9, 6.1, this.mat('#050505'), 12);
+    this.box(g, 0, 24, 8, 22, 6, 10, this.mat('#2a2c33', { roughness: 0.6 }));
     this.box(g, 27, 30, 10, 10, 6, 8, this.mat('#c4c8cf', { metalness: 0.6, roughness: 0.35 }));
     this.box(g, 14, 50, 8, 3, 6, 7, this.mat('#222'));
   }
@@ -554,7 +557,6 @@ class View3D {
   build_ws2812_ring(g, c, d) {
     // 16 × 5050 WS2812B on a 44.5 mm ring with a white diffuser in the middle
     this.mesh(new THREE.RingGeometry(62, 88, 64), this.mat('#1b1d22', { roughness: 0.5 }), g, 88, 4, 88, false).rotation.x = -Math.PI / 2;
-    this.cyl(g, 88, 88, 62, 0, 3, this.mat('#f6f7f9', { roughness: 0.6 }), 64);
     const lens = [];
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2 - Math.PI / 2, x = 88 + Math.cos(a) * 75, z = 88 + Math.sin(a) * 75;
