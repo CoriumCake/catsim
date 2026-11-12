@@ -528,6 +528,7 @@ class View3D {
     this.box(g, 36, 25, 16, 16, 6, 8, this.mat('#15171c'));
     this.box(g, 22, 12, 6, 4, 6, 9, this.M.gold);
     this.box(g, 60, 46, 5, 5, 6, 8, this.mat('#222'));
+    for (const z of [12, 52]) this.cyl(g, 76, z, 6, 5.9, 6.1, this.mat('#0d1f4a'), 16); // the two mounting holes on the right edge
   }
 
   build_bme280(g, c, d) {
