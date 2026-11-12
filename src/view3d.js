@@ -611,9 +611,10 @@ class View3D {
 
   build_ir_remote(g, c, d) {
     // a 21-key NEC remote: a 21 × 51 mm body with a row of keys and the IR emitter at the top
+    // a 21-key NEC remote as in the reference photos: a dark body with white round keys and an orange power key
     this.box(g, 0, 0, d.w, d.h, 0, 8, this.mat('#1d1f24', { roughness: 0.5 }));
-    const key = this.mat('#2c2f36');
-    for (let r = 0; r < 7; r++) for (let k = 0; k < 3; k++) this.cyl(g, 18 + k * 24, 20 + r * 24, 7, 8, 9.5, key, 14);
+    const key = this.mat('#e8e9ec', { roughness: 0.4 });
+    for (let r = 0; r < 7; r++) for (let k = 0; k < 3; k++) this.cyl(g, 18 + k * 24, 20 + r * 24, 7, 8, 9.5, r === 0 && k === 0 ? this.mat('#f07a2a') : key, 14);
     this.cyl(g, 42, 180, 4, 8, 9, this.mat('#050505', { roughness: 0.2 }), 12);
   }
 
