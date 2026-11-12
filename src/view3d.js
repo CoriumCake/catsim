@@ -588,14 +588,15 @@ class View3D {
 
   build_keypad(g, c, d) {
     // a 4 × 4 membrane keypad, 69 × 76 mm, with its key labels printed on the membrane
-    this.box(g, 0, 0, d.w, d.h, 0, 3, this.mat('#3a3f48', { roughness: 0.7 }));
+    // a membrane keypad as in the reference photos: a dark frame with blue keys and red legends
+    this.box(g, 0, 0, d.w, d.h, 0, 3, this.mat('#1b1d22', { roughness: 0.7 }));
     const face = this.tex(272, 300, (x) => {
-      x.fillStyle = '#2f343d'; x.fillRect(0, 0, 272, 300);
+      x.fillStyle = '#1b1d22'; x.fillRect(0, 0, 272, 300);
       const L = [['1', '2', '3', 'A'], ['4', '5', '6', 'B'], ['7', '8', '9', 'C'], ['*', '0', '#', 'D']];
       for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) {
         const cx = 23.5 + 75 * k, cy = 37.5 + 75 * r;
-        x.fillStyle = '#d9dde3'; x.beginPath(); x.roundRect(cx - 27, cy - 27, 54, 54, 6); x.fill();
-        x.fillStyle = '#20242b'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '600 34px system-ui, sans-serif'; x.fillText(L[r][k], cx, cy + 2);
+        x.fillStyle = '#4f9fd6'; x.beginPath(); x.roundRect(cx - 27, cy - 27, 54, 54, 6); x.fill();
+        x.fillStyle = '#d32f2f'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '600 34px system-ui, sans-serif'; x.fillText(L[r][k], cx, cy + 2);
       }
     });
     this.mesh(new THREE.PlaneGeometry(272, 300), this.mat('#ffffff', { map: face }), g, 136, 3.2, 150, false).rotation.x = -Math.PI / 2;
