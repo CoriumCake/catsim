@@ -569,9 +569,12 @@ class View3D {
 
   build_tm1637(g, c, d) {
     // a red 42 × 24 mm module with four 0.36" digits behind a dark window
-    this.box(g, 0, 0, d.w, d.h, 0, 4, this.mat('#b5271f', { roughness: 0.5 }));
+    // a blue 42 × 24 mm board with four corner holes, four 0.36" digits and a colon, as in the reference photos
+    this.box(g, 0, 0, d.w, d.h, 0, 4, this.mat('#1d5fb5', { roughness: 0.5 }));
+    for (const [x, z] of [[6, 6], [159, 6], [6, 88], [159, 88]]) this.cyl(g, x, z, 3, 3.9, 4.1, this.mat('#0d1f4a'), 12);
     this.box(g, 12, 16, 141, 62, 4, 5, this.mat('#1b0d0e', { roughness: 0.4 }));
     for (let i = 0; i < 4; i++) this.box(g, 22 + i * 34, 26, 24, 36, 5, 6, this.mat('#2a0f11'));
+    for (const z of [36, 50]) this.box(g, 82, z, 4, 4, 5, 6, this.mat('#7a1218'));
   }
 
   build_ds3231(g, c, d) {
