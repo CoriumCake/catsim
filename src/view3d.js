@@ -469,7 +469,11 @@ class View3D {
     // a blue 45 × 20 mm board, 1.6 mm thick, and two 16 mm × 12 mm metal transducers with mesh tops
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d5fb5', { roughness: 0.5 }));
     const mesh = this.mat('#2c2f35');
-    for (const x of [48.5, 128.5]) { this.cyl(g, x, 39.5, 31.5, 6, 53, this.M.metal, 40); this.cyl(g, x, 39.5, 26, 53, 53.8, mesh, 40); }
+    // transducer centres at 6.8 mm and 35.1 mm from the left edge (from the reference photos); they overhang the board a little
+    for (const x of [27, 138]) { this.cyl(g, x, 39.5, 31.5, 6, 53, this.M.metal, 40); this.cyl(g, x, 39.5, 26, 53, 53.8, mesh, 40); }
+    // the 4 MHz crystal between the transducers, and the four corner holes
+    this.box(g, 66, 4, 44, 20, 6, 14, this.mat('#c9a227', { metalness: 0.6, roughness: 0.3 }));
+    for (const [x, z] of [[4, 4], [173, 4], [4, 75], [173, 75]]) this.cyl(g, x, z, 3, 5.9, 6.1, this.mat('#0d1f4a'), 12);
   }
 
   build_ds18b20(g, c) {
