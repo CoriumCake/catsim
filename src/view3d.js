@@ -442,10 +442,13 @@ class View3D {
 
   build_pot(g, c) {
     // a 9 mm × 9 mm body, 6 mm tall; the Ø6 mm shaft rises 13 mm above the board
-    this.box(g, 10.5, 4, 35, 35, 0, 24, this.mat('#1e5bb8'));
+    // round body with a bushing, as in the reference photos: a Ø9 mm body, the knob on a Ø6 mm shaft
+    this.cyl(g, 28, 21.5, 17.5, 0, 24, this.mat('#b9975a', { metalness: 0.6, roughness: 0.4 }), 40);
+    this.cyl(g, 28, 21.5, 7, 24, 26, this.mat('#9aa1ab', { metalness: 0.7, roughness: 0.3 }), 24);
     this.cyl(g, 28, 21.5, 11.8, 24, 75, this.mat('#d7dbe2', { metalness: 0.4, roughness: 0.4 }), 32);
     const knob = new THREE.Group(); knob.position.set(28, 75, 21.5); g.add(knob);
     this.box(knob, -1.2, -11.8, 2.4, 8, 0, 1.5, this.mat('#2a2e36'));
+    this.cyl(knob, 0, 0, 14, 0, 12, this.mat('#15171c', { roughness: 0.5 }), 32); // the black knob, as in the photos
     this.live(c, () => { knob.rotation.y = -(-135 + 270 * (+c.props.value)) * DEG; });
   }
 
@@ -466,7 +469,11 @@ class View3D {
     // a blue 45 × 20 mm board, 1.6 mm thick, and two 16 mm × 12 mm metal transducers with mesh tops
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d5fb5', { roughness: 0.5 }));
     const mesh = this.mat('#2c2f35');
-    for (const x of [48.5, 128.5]) { this.cyl(g, x, 39.5, 31.5, 6, 53, this.M.metal, 40); this.cyl(g, x, 39.5, 26, 53, 53.8, mesh, 40); }
+    // transducer centres at 6.8 mm and 35.1 mm from the left edge (from the reference photos); they overhang the board a little
+    for (const x of [27, 138]) { this.cyl(g, x, 39.5, 31.5, 6, 53, this.M.metal, 40); this.cyl(g, x, 39.5, 26, 53, 53.8, mesh, 40); }
+    // the 4 MHz crystal between the transducers, and the four corner holes
+    this.box(g, 66, 4, 44, 20, 6, 14, this.mat('#c9a227', { metalness: 0.6, roughness: 0.3 }));
+    for (const [x, z] of [[4, 4], [173, 4], [4, 75], [173, 75]]) this.cyl(g, x, z, 3, 5.9, 6.1, this.mat('#0d1f4a'), 12);
   }
 
   build_ds18b20(g, c) {
@@ -483,6 +490,7 @@ class View3D {
     const T = THREE, aw = 85.6, ah = 42.8, ax = 11.2, ay = 28.6;
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d3f8f', { roughness: 0.5 }));
     this.box(g, 4, 22, 100, 56, 6, 8, this.mat('#05070b', { roughness: 0.3 }));
+    for (const [x, z] of [[4, 4], [104, 4], [4, 105], [104, 105]]) this.cyl(g, x, z, 3.5, 5.9, 6.1, this.mat('#0d1f4a'), 12); // the four mounting holes
     const tex = this.tex(128, 64, (x) => { x.fillStyle = '#05070b'; x.fillRect(0, 0, 128, 64); });
     const screen = this.mesh(new T.PlaneGeometry(aw, ah), this.mat('#ffffff', { map: tex, emissive: '#9fd8ff', emissiveIntensity: 0.25 }), g, ax + aw / 2, 8.1, ay + ah / 2, false);
     screen.rotation.x = -Math.PI / 2;
@@ -502,12 +510,16 @@ class View3D {
 
   // ---------- real-size modules (dimensions in diagram units: 1 unit = 0.254 mm) ----------
   build_lcd_parallel(g, c, d) {
-    // HD44780 16×2: an 80 × 36 mm green board, a metal bezel and the glass window
+    // HD44780 16×2 as in the reference photos: a green board with a 16-pin header, a black frame, and a grey-green screen with its character cells
     this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1f7a3a', { roughness: 0.5 }));
-    this.box(g, 22, 22, 271, 98, 6, 11, this.M.metal);
-    this.box(g, 30, 30, 255, 82, 11, 12.2, this.mat('#1f3f9a', { roughness: 0.3 }));
-    const win = this.tex(256, 64, (x) => { x.fillStyle = '#2b5ad6'; x.fillRect(0, 0, 256, 64); x.fillStyle = '#9fc3ff'; x.font = '600 24px monospace'; x.fillText('CatSim 16x2', 14, 40); });
-    this.mesh(new THREE.PlaneGeometry(255, 82), this.mat('#ffffff', { map: win, transparent: true, opacity: 0.85 }), g, 157.5, 12.4, 71).rotation.x = -Math.PI / 2;
+    this.box(g, 22, 22, 271, 98, 6, 11, this.mat('#1a1a1a', { roughness: 0.6 }));
+    this.box(g, 30, 30, 255, 82, 11, 12.2, this.mat('#2a2a2a', { roughness: 0.3 }));
+    const screen = this.tex(256, 64, (x) => {
+      x.fillStyle = '#9fb89a'; x.fillRect(0, 0, 256, 64);
+      x.fillStyle = '#2f3f2f';
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 16; k++) x.fillRect(8 + k * 15.5, 6 + r * 30, 12, 24);
+    });
+    this.mesh(new THREE.PlaneGeometry(255, 82), this.mat('#ffffff', { map: screen }), g, 157.5, 12.4, 71).rotation.x = -Math.PI / 2;
   }
 
   build_mpu6050(g, c, d) {
@@ -516,11 +528,15 @@ class View3D {
     this.box(g, 36, 25, 16, 16, 6, 8, this.mat('#15171c'));
     this.box(g, 22, 12, 6, 4, 6, 9, this.M.gold);
     this.box(g, 60, 46, 5, 5, 6, 8, this.mat('#222'));
+    for (const z of [12, 52]) this.cyl(g, 76, z, 6, 5.9, 6.1, this.mat('#0d1f4a'), 16); // the two mounting holes on the right edge
   }
 
   build_bme280(g, c, d) {
     // a BME280 breakout: a 16 × 18 mm blue board with the 2.5 × 2.5 mm sensor under its metal lid
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#2a6fb8', { roughness: 0.5 }));
+    // a black breakout board with two mounting holes at the top and a Qwiic connector on the left, as in the reference photos
+    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#15171c', { roughness: 0.5 }));
+    for (const x of [8, 56]) this.cyl(g, x, 8, 5, 5.9, 6.1, this.mat('#050505'), 12);
+    this.box(g, 0, 24, 8, 22, 6, 10, this.mat('#2a2c33', { roughness: 0.6 }));
     this.box(g, 27, 30, 10, 10, 6, 8, this.mat('#c4c8cf', { metalness: 0.6, roughness: 0.35 }));
     this.box(g, 14, 50, 8, 3, 6, 7, this.mat('#222'));
   }
@@ -541,7 +557,6 @@ class View3D {
   build_ws2812_ring(g, c, d) {
     // 16 × 5050 WS2812B on a 44.5 mm ring with a white diffuser in the middle
     this.mesh(new THREE.RingGeometry(62, 88, 64), this.mat('#1b1d22', { roughness: 0.5 }), g, 88, 4, 88, false).rotation.x = -Math.PI / 2;
-    this.cyl(g, 88, 88, 62, 0, 3, this.mat('#f6f7f9', { roughness: 0.6 }), 64);
     const lens = [];
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2 - Math.PI / 2, x = 88 + Math.cos(a) * 75, z = 88 + Math.sin(a) * 75;
@@ -554,9 +569,12 @@ class View3D {
 
   build_tm1637(g, c, d) {
     // a red 42 × 24 mm module with four 0.36" digits behind a dark window
-    this.box(g, 0, 0, d.w, d.h, 0, 4, this.mat('#b5271f', { roughness: 0.5 }));
+    // a blue 42 × 24 mm board with four corner holes, four 0.36" digits and a colon, as in the reference photos
+    this.box(g, 0, 0, d.w, d.h, 0, 4, this.mat('#1d5fb5', { roughness: 0.5 }));
+    for (const [x, z] of [[6, 6], [159, 6], [6, 88], [159, 88]]) this.cyl(g, x, z, 3, 3.9, 4.1, this.mat('#0d1f4a'), 12);
     this.box(g, 12, 16, 141, 62, 4, 5, this.mat('#1b0d0e', { roughness: 0.4 }));
     for (let i = 0; i < 4; i++) this.box(g, 22 + i * 34, 26, 24, 36, 5, 6, this.mat('#2a0f11'));
+    for (const z of [36, 50]) this.box(g, 82, z, 4, 4, 5, 6, this.mat('#7a1218'));
   }
 
   build_ds3231(g, c, d) {
@@ -570,14 +588,15 @@ class View3D {
 
   build_keypad(g, c, d) {
     // a 4 × 4 membrane keypad, 69 × 76 mm, with its key labels printed on the membrane
-    this.box(g, 0, 0, d.w, d.h, 0, 3, this.mat('#3a3f48', { roughness: 0.7 }));
+    // a membrane keypad as in the reference photos: a dark frame with blue keys and red legends
+    this.box(g, 0, 0, d.w, d.h, 0, 3, this.mat('#1b1d22', { roughness: 0.7 }));
     const face = this.tex(272, 300, (x) => {
-      x.fillStyle = '#2f343d'; x.fillRect(0, 0, 272, 300);
+      x.fillStyle = '#1b1d22'; x.fillRect(0, 0, 272, 300);
       const L = [['1', '2', '3', 'A'], ['4', '5', '6', 'B'], ['7', '8', '9', 'C'], ['*', '0', '#', 'D']];
       for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) {
         const cx = 23.5 + 75 * k, cy = 37.5 + 75 * r;
-        x.fillStyle = '#d9dde3'; x.beginPath(); x.roundRect(cx - 27, cy - 27, 54, 54, 6); x.fill();
-        x.fillStyle = '#20242b'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '600 34px system-ui, sans-serif'; x.fillText(L[r][k], cx, cy + 2);
+        x.fillStyle = '#4f9fd6'; x.beginPath(); x.roundRect(cx - 27, cy - 27, 54, 54, 6); x.fill();
+        x.fillStyle = '#d32f2f'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '600 34px system-ui, sans-serif'; x.fillText(L[r][k], cx, cy + 2);
       }
     });
     this.mesh(new THREE.PlaneGeometry(272, 300), this.mat('#ffffff', { map: face }), g, 136, 3.2, 150, false).rotation.x = -Math.PI / 2;
@@ -592,18 +611,25 @@ class View3D {
 
   build_ir_remote(g, c, d) {
     // a 21-key NEC remote: a 21 × 51 mm body with a row of keys and the IR emitter at the top
+    // a 21-key NEC remote as in the reference photos: a dark body with white round keys and an orange power key
     this.box(g, 0, 0, d.w, d.h, 0, 8, this.mat('#1d1f24', { roughness: 0.5 }));
-    const key = this.mat('#2c2f36');
-    for (let r = 0; r < 7; r++) for (let k = 0; k < 3; k++) this.cyl(g, 18 + k * 24, 20 + r * 24, 7, 8, 9.5, key, 14);
+    const key = this.mat('#e8e9ec', { roughness: 0.4 });
+    for (let r = 0; r < 7; r++) for (let k = 0; k < 3; k++) this.cyl(g, 18 + k * 24, 20 + r * 24, 7, 8, 9.5, r === 0 && k === 0 ? this.mat('#f07a2a') : key, 14);
     this.cyl(g, 42, 180, 4, 8, 9, this.mat('#050505', { roughness: 0.2 }), 12);
   }
 
   build_stepper(g, c, d) {
     // a 28BYJ-48 motor (Ø28 × 19 mm, Ø5 mm shaft) beside its ULN2003 driver board (35 × 25 mm)
-    this.cyl(g, 55, 55, 55, 0, 75, this.mat('#d7d3c3', { roughness: 0.5 }), 48);
-    this.cyl(g, 55, 55, 50, 75, 76, this.mat('#e8e4d6'), 40);
+    // the motor as in the reference photos: a silver can with a blue plastic cap, two mounting ears and the shaft
+    this.cyl(g, 55, 55, 55, 0, 75, this.mat('#c9ccd2', { metalness: 0.4, roughness: 0.5 }), 48);
+    this.cyl(g, 55, 55, 56, 0, 10, this.mat('#2f6fd0', { roughness: 0.5 }), 48);
+    for (const z of [18, 92]) this.box(g, 46, z - 4, 18, 8, 0, 4, this.mat('#c9ccd2', { metalness: 0.4 }));
+    this.cyl(g, 55, 55, 50, 75, 76, this.mat('#9aa0a8', { metalness: 0.4 }), 40);
     this.cyl(g, 55, 55, 10, 76, 111, this.M.metal, 20);
-    this.box(g, 118, 6, 138, 98, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
+    // the ULN2003 driver: a beige board with a white five-pin connector, the chip and mounting holes
+    this.box(g, 118, 6, 138, 98, 0, 6, this.mat('#c9b98a', { roughness: 0.6 }));
+    for (const [x, z] of [[124, 12], [250, 12], [124, 98], [250, 98]]) this.cyl(g, x, z, 4, 5.9, 6.1, this.mat('#4a4438'), 12);
+    this.box(g, 130, 16, 30, 14, 6, 12, this.mat('#f2f2f2', { roughness: 0.5 }));
     this.box(g, 150, 30, 40, 20, 6, 10, this.mat('#15171c'));
   }
 
@@ -740,25 +766,12 @@ class View3D {
   }
 
   build_dht22(g, c) {
-    const T = THREE;
-    const draw = (x) => {
-      x.fillStyle = '#f4f6f8'; x.fillRect(0, 0, 144, 216);
-      x.fillStyle = '#c4cad4';
-      for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) { x.beginPath(); x.roundRect ? x.roundRect(28 + k * 28, 20 + r * 28, 16, 16, 3) : x.rect(28 + k * 28, 20 + r * 28, 16, 16); x.fill(); }
-      x.fillStyle = '#39404c'; x.textAlign = 'center'; x.font = '700 26px ui-monospace, Menlo, monospace';
-      x.fillText(`${(+c.props.temp).toFixed(1)}°C`, 72, 162); x.fillText(`${Math.round(c.props.hum)}%`, 72, 196);
-    };
-    const tex = this.tex(144, 216, draw);
-    const w = this.mat('#f4f6f8');
-    this.box(g, 2, 1, 36, 54, 0, 3, w);
-    const body = this.mesh(new T.BoxGeometry(36, 14, 54), [w, w, this.mat('#ffffff', { map: tex }), w, w, w], g, 20, 10, 28);
-    body.material.forEach((m) => this.disp.includes(m) || this.disp.push(m));
+    // the DHT22 module as in the reference photos: a red board with a three-pin header, and a white housing with vented slats on top
+    this.box(g, 2, 2, 36, 60, 0, 2, this.mat('#c62828', { roughness: 0.5 }));
+    const white = this.mat('#eeeee6', { roughness: 0.7 });
+    this.box(g, 4, 6, 32, 42, 2, 15, white);
+    for (let i = 0; i < 6; i++) this.box(g, 4, 6 + i * 7, 32, 3, 15, 18, white);
     for (const x of [10, 20, 30]) this.leg(g, x, 55, x, 72);
-    let last = `${c.props.temp}|${c.props.hum}`;
-    this.live(c, () => {
-      const k = `${c.props.temp}|${c.props.hum}`; if (k === last) return; last = k;
-      const x = tex.image.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); draw(x); tex.needsUpdate = true;
-    });
   }
 
   build_ldr(g, c) {
@@ -788,13 +801,14 @@ class View3D {
   }
 
   build_buzzer(g, c) {
+    // a 12 mm piezo buzzer: a black cylinder 9 mm tall, with the piezo disc and sound hole in its top
     const T = THREE;
-    this.cyl(g, 22, 22, 20, 0, 14, this.mat('#1c1e22', { roughness: 0.5 }), 36);
-    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, 14, 22, false); ring.rotation.x = Math.PI / 2;
-    this.cyl(g, 22, 22, 3.5, 13.6, 14.1, this.mat('#000'), 16);
+    this.cyl(g, 22, 22, 21, 0, 35, this.mat('#1c1e22', { roughness: 0.5 }), 40);
+    this.cyl(g, 22, 22, 15, 34, 35.4, this.mat('#c9ced6', { metalness: 0.6, roughness: 0.35 }), 32);
+    this.cyl(g, 22, 22, 4, 35.4, 35.9, this.mat('#000'), 16);
     for (const x of [16, 28]) this.leg(g, x, 42, x, 62);
     const wm = new T.MeshBasicMaterial({ color: '#ffd60a', transparent: true, opacity: 0, depthWrite: false }); this.disp.push(wm);
-    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 16, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
+    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 37, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
     this.live(c, (s) => {
       const on = s.f > 0; const t = performance.now() / 700;
       waves.forEach((w, i) => {
@@ -805,20 +819,20 @@ class View3D {
   }
 
   build_servo(g, c) {
-    const blue = this.mat('#2163d6'), dark = this.mat('#1b4fb0');
-    this.box(g, 20, 8, 76, 40, 0, 30, blue);
-    this.box(g, 12, 8, 92, 40, 20, 23, dark);
-    this.cyl(g, 44, 28, 8, 30, 33, blue);
-    this.cyl(g, 44, 28, 3, 33, 37, this.M.metal, 12);
-    const horn = new THREE.Group(); horn.position.set(44, 37, 28); g.add(horn);
+    // an SG90 micro servo as in the reference photos: a translucent blue case 23 × 12 mm and 22 mm tall, a mounting flange near the top, and one white horn on the shaft
+    const blue = this.mat('#2a6fe0', { transparent: true, opacity: 0.9, roughness: 0.4 });
+    this.box(g, 4, 4, 91, 48, 0, 89, blue);
+    this.box(g, 0, 4, 100, 48, 60, 70, blue);
     const white = this.mat('#ffffff', { roughness: 0.5 });
-    this.cyl(horn, 0, 0, 5.5, 0, 3, white);
-    const arm = this.mesh(new THREE.CylinderGeometry(3, 4.5, 26, 12), white, horn, 0, 1.5, -12);
-    arm.rotation.x = Math.PI / 2; arm.scale.z = 0.5;
+    const horn = new THREE.Group(); horn.position.set(30, 89, 28); g.add(horn);
+    this.cyl(horn, 0, 0, 4, 0, 4, white, 16);
+    const arm = this.mesh(new THREE.BoxGeometry(6, 2.5, 56), white, horn, 0, 2.5, -20);
+    arm.position.set(0, 2.5, -20);
     // cable: brown/red/orange from the case to the pins
     [['#6b3e1f', 20], ['#d63b3b', 28], ['#f08a24', 36]].forEach(([col, z]) => this.rod(g, [0, PIN_TOP - 1, z], [20, 8, z], 1.4, this.mat(col)));
     this.live(c, (s) => { horn.rotation.y = -((s.angle ?? 90) - 90) * DEG; });
   }
+
 
   // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
   build_to92(g, c, mark) {
