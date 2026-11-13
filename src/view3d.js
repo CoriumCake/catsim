@@ -620,10 +620,16 @@ class View3D {
 
   build_stepper(g, c, d) {
     // a 28BYJ-48 motor (Ø28 × 19 mm, Ø5 mm shaft) beside its ULN2003 driver board (35 × 25 mm)
-    this.cyl(g, 55, 55, 55, 0, 75, this.mat('#d7d3c3', { roughness: 0.5 }), 48);
-    this.cyl(g, 55, 55, 50, 75, 76, this.mat('#e8e4d6'), 40);
+    // the motor as in the reference photos: a silver can with a blue plastic cap, two mounting ears and the shaft
+    this.cyl(g, 55, 55, 55, 0, 75, this.mat('#c9ccd2', { metalness: 0.4, roughness: 0.5 }), 48);
+    this.cyl(g, 55, 55, 56, 0, 10, this.mat('#2f6fd0', { roughness: 0.5 }), 48);
+    for (const z of [18, 92]) this.box(g, 46, z - 4, 18, 8, 0, 4, this.mat('#c9ccd2', { metalness: 0.4 }));
+    this.cyl(g, 55, 55, 50, 75, 76, this.mat('#9aa0a8', { metalness: 0.4 }), 40);
     this.cyl(g, 55, 55, 10, 76, 111, this.M.metal, 20);
-    this.box(g, 118, 6, 138, 98, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
+    // the ULN2003 driver: a beige board with a white five-pin connector, the chip and mounting holes
+    this.box(g, 118, 6, 138, 98, 0, 6, this.mat('#c9b98a', { roughness: 0.6 }));
+    for (const [x, z] of [[124, 12], [250, 12], [124, 98], [250, 98]]) this.cyl(g, x, z, 4, 5.9, 6.1, this.mat('#4a4438'), 12);
+    this.box(g, 130, 16, 30, 14, 6, 12, this.mat('#f2f2f2', { roughness: 0.5 }));
     this.box(g, 150, 30, 40, 20, 6, 10, this.mat('#15171c'));
   }
 
