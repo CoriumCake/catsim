@@ -111,3 +111,24 @@ test('3D: a turned part keeps its wires attached to its drawn pins', async ({ pa
   });
   for (const gap of gaps) expect(gap).toBeLessThan(0.5);
 });
+
+test('3D: breadboard holes can be clicked to wire them', async ({ page }) => {
+  const errors = await collectErrors(page);
+  await setupBoard(page);
+  await page.evaluate(() => { const A = window.CatSim.App; A.project.components.push({ id: 'bb1', type: 'breadboard', x: 700, y: 60, props: {} }); A.changed(); });
+  await page.waitForFunction(() => window.CatSim.App.view3d.active && !window.CatSim.App.view3d.dirty);
+  await page.evaluate(() => window.CatSim.App.view3d.fit()); // bring the whole breadboard into view
+  await page.waitForTimeout(100);
+  // a hole in each block of the board, and two neighbours: each click must land on its own hole
+  const pairs = [['led1:A', 'bb1:1a'], ['bb1:12c', 'bb1:13c'], ['bb1:30j', 'bb1:T+1'], ['bb1:B-25', 'r1:1']];
+  for (const [from, to] of pairs) {
+    await page.waitForFunction(() => !window.CatSim.App.view3d.dirty); // the scene is rebuilt after each new wire
+    const a = await pinAt(page, from), b = await pinAt(page, to);
+    await page.mouse.click(a.x, a.y);
+    await expect.poll(() => page.evaluate(() => window.CatSim.App.canvas.wireStart)).toBe(from);
+    await page.mouse.click(b.x, b.y);
+    await expect.poll(() => page.evaluate(() => window.CatSim.App.canvas.wireStart)).toBeFalsy();
+  }
+  expect(await page.evaluate(() => window.CatSim.App.project.wires.map((w: { from: string; to: string }) => [w.from, w.to]))).toEqual(pairs);
+  expect(errors).toEqual([]);
+});

@@ -202,6 +202,7 @@ class View3D {
     const c = at.comp, p = at.pin;
     if (c.type === 'esp32') return { x: c.x + (p.x === 0 ? 5 : 145), y: ESP_PIN_TOP, z: c.y + p.y };
     if (c.type === 'uno') return { x: c.x + p.x, y: 17, z: c.y + (p.y === 0 ? 4 : 176) }; // into the header sockets
+    if (c.type === 'breadboard') return { x: at.x, y: BREADBOARD_H, z: at.y }; // the hole, on the top face: a target inside the block can't be clicked
     return { x: at.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
   }
 
@@ -452,13 +453,16 @@ class View3D {
   build_breadboard(g, c, d) {
     // a half-size breadboard: an 8.5 mm block, holes on the top, a centre trench, red and blue rails
     const T = THREE, w = d.w, h = d.h;
-    this.box(g, 0, 0, w, h, 0, 33.5, this.mat('#f4f1e8', { roughness: 0.8 }));
-    this.box(g, 8, 84, w - 16, 12, 33.5, 33.9, this.mat('#d6cfb8'));
+    // the trench and the rail stripes are placed from the holes themselves, as in the 2D drawing: a stripe runs
+    // beside each rail (red outside the + holes, blue outside the − holes), never over the holes
+    const y = (id) => d.pins.find((p) => p.id === id).y, H = BREADBOARD_H;
+    this.box(g, 0, 0, w, h, 0, H, this.mat('#f4f1e8', { roughness: 0.8 }));
+    this.box(g, 0, y('1e') + 6, w, y('1f') - y('1e') - 12, H, H + 0.4, this.mat('#d6cfb8'));
     const red = this.mat('#e5484d'), blue = this.mat('#3d8bff');
-    for (const [y, m] of [[10, red], [20, blue], [160, red], [170, blue]]) this.box(g, 8, y - 2.5, w - 16, 5, 33.5, 33.9, m);
+    for (const [at, m] of [[y('T+1') - 6, red], [y('T-1') + 6, blue], [y('B+1') - 6, red], [y('B-1') + 6, blue]]) this.box(g, 8, at - 1, w - 16, 2, H, H + 0.4, m);
     const geo = new T.CylinderGeometry(1.9, 1.9, 0.8, 10); this.disp.push(geo);
     const holes = new T.InstancedMesh(geo, this.mat('#2b2f37'), d.pins.length), m4 = new T.Matrix4();
-    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, 33.4, p.y); holes.setMatrixAt(i, m4); });
+    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.1, p.y); holes.setMatrixAt(i, m4); });
     holes.instanceMatrix.needsUpdate = true; g.add(holes);
   }
 
