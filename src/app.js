@@ -166,7 +166,9 @@ const App = {
     this.canvas.select({ kind: 'comp', id: c.id });
   },
   addWire(from, to) {
-    if (from.split(':')[0] === to.split(':')[0] && !DEFS[this.project.components.find((c) => c.id === from.split(':')[0]).type].board) { this.toast('Connect pins of different parts'); return; }
+    // a jumper may join two pins of one board, or two holes of one breadboard (rail to row, across the trench)
+    const own = from.split(':')[0] === to.split(':')[0] && DEFS[this.project.components.find((c) => c.id === from.split(':')[0]).type];
+    if (own && !own.board && own.type !== 'breadboard') { this.toast('Connect pins of different parts'); return; }
     if (this.project.wires.some((w) => (w.from === from && w.to === to) || (w.from === to && w.to === from))) return;
     let i = 1; while (this.project.wires.some((w) => w.id === 'w' + i)) i++;
     this.project.wires.push({ id: 'w' + i, from, to });
