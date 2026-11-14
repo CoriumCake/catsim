@@ -255,7 +255,6 @@ select.btn { padding-right: 6px; }
   .stage { height: 60vh; flex: none; }
   .splitter-v, .splitter-h { display: none; }
   .side { width: 100%; max-width: none; min-width: 0; }
-  .editor-wrap { height: 55vh; flex: none; }
   .bottom { height: 40vh; }
   .tb-sim { flex-wrap: wrap; }
   /* nothing may be wider than the phone: the editor, toolbars and tab strips scroll inside themselves */
