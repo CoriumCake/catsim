@@ -123,6 +123,25 @@ test('the sheet opens at half the screen; drag its handle up to fill the screen 
   expect(Math.round((await side.boundingBox())!.height)).toBeGreaterThan(844 * 0.45);
 });
 
+test('the Parts list fills the sheet at half and at full height, with a search result fully shown', async ({ page }) => {
+  for (const full of [false, true]) {
+    await page.evaluate((f) => {
+      const A = window.CatSim.App; A.toggleSidebar(false);
+      A.setSheetHeight(f ? window.innerHeight - document.querySelector('.topbar')!.getBoundingClientRect().bottom : null);
+    }, full);
+    await page.locator('.tab[data-tab="partsPane"]').tap();
+    await page.fill('#paletteSearch', 'board');
+    const r = await page.evaluate(() => {
+      const box = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      return { side: box('#side'), list: box('#paletteList'), part: box('.part[data-type="breadboard"]'), hint: box('.palette-hint') };
+    });
+    expect(Math.abs(r.hint.bottom - r.side.bottom)).toBeLessThan(2); // the hint ends the sheet: no gap under it, nothing cut off
+    expect(r.part.top).toBeGreaterThanOrEqual(r.list.top);
+    expect(r.part.bottom).toBeLessThanOrEqual(r.list.bottom);
+    await page.fill('#paletteSearch', '');
+  }
+});
+
 test('the run controls fit on one row at the top of a phone screen', async ({ page }) => {
   await loadExample(page, 'blink');
   const ids = ['#btnRun', '#simSpeed', '#addPart', '#view3d'];
