@@ -33,7 +33,12 @@
     </div>
     <div class="tb-spacer"></div>
     <div class="tb-group tb-files">
-      <select id="exampleSelect" class="btn" aria-label="Load example"><option value="">Examples…</option></select>
+      <button id="exampleBtn" class="btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="exampleMenu">Examples… <span aria-hidden="true">▾</span></button>
+      <div id="exampleMenu" class="example-menu" hidden>
+        <input id="exampleSearch" class="search" type="search" placeholder="Search examples…" aria-label="Search examples" autocomplete="off">
+        <div id="exampleList" class="example-list" role="listbox" aria-label="Examples"></div>
+        <p id="exampleNone" class="example-none" hidden>No example matches.</p>
+      </div>
       <button id="btnNew" class="btn btn-ilabel" title="New project"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M5 3h7l3 3v11H5z M12 3v3h3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">New</span></button>
       <button id="btnImport" class="btn btn-ilabel" title="Import a project file"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M10 13V3 M6 7l4-4 4 4 M4 13v4h12v-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Import</span></button>
       <button id="btnIno" class="btn btn-ilabel" title="Download the sketch (.ino) to upload to a real board with the Arduino IDE" aria-label="Download sketch for the Arduino IDE"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M7 6l-4 4 4 4 M13 6l4 4-4 4 M11 4l-2 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>

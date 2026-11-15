@@ -279,6 +279,14 @@ select.btn { padding-right: 6px; }
   .side > .tabpane, .side > .tabs { flex: none; }
   .side > .tabpane.active { flex: 1 1 auto; min-height: 0; }
 }
+/* Examples: the list under its button, with a search box on top */
+.example-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .18); overflow: hidden; }
+.example-menu .search { flex: none; margin: 8px; }
+.example-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 6px; }
+.example-item { display: block; width: 100%; text-align: left; padding: 7px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; }
+.example-item:hover, .example-item:focus-visible { background: var(--panel-2); outline: none; }
+.example-item:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.example-none { margin: 0; padding: 4px 16px 14px; color: var(--muted); font-size: 12.5px; }
 .sheet-handle { display: none; justify-content: center; align-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
 .sheet-handle span { width: 42px; height: 5px; border-radius: 3px; background: var(--line-2); }
 
@@ -312,7 +320,6 @@ select.btn { padding-right: 6px; }
 .hamburger:hover { background: var(--panel-2); }
 .workspace.side-hidden > .side, .workspace.side-hidden > .splitter-v { display: none; }
 .tb-files { flex: none; }
-#exampleSelect { width: 150px; }
 .proj-name { width: auto; flex: 1 1 140px; max-width: 240px; }
 .btn-ilabel { display: inline-flex; align-items: center; gap: 5px; }
 /* narrower screens: icon-only buttons (labels stay as tooltips), compact brand */
@@ -320,7 +327,6 @@ select.btn { padding-right: 6px; }
   .btn-ilabel .lbl, .brand-name, .brand .chip { display: none; }
   .brand { padding-right: 10px; }
   .topbar, .tb-sim { gap: 6px; }
-  #exampleSelect { width: 128px; }
 }
 /* too narrow for one row: the simulation controls move to a second row of the top bar */
 @media (max-width: 1180px) {
