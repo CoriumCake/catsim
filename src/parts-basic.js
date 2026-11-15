@@ -337,16 +337,17 @@ const breadboard = {
 const C3_LEFT = [['5V', '5V', null, 'vcc'], ['GND', 'GND', null, 'gnd'], ['3V3', '3V3', null, 'vcc'], ['IO4', '4', 4], ['IO3', '3', 3], ['IO2', '2', 2], ['IO1', '1', 1], ['IO0', '0', 0]];
 const C3_RIGHT = [['IO5', '5', 5], ['IO6', '6', 6], ['IO7', '7', 7], ['IO8', '8', 8], ['IO9', '9', 9], ['IO10', '10', 10], ['IO20', '20', 20], ['IO21', '21', 21]];
 const C3_NOTE = { 0: 'ADC1_CH0', 1: 'ADC1_CH1', 2: 'ADC1_CH2, strapping pin', 3: 'ADC1_CH3', 4: 'ADC1_CH4', 5: 'ADC2 (not with WiFi)', 8: 'on-board LED (active LOW), default SDA, strapping pin', 9: 'BOOT button, default SCL, strapping pin', 20: 'RX', 21: 'TX' };
-const C3_W = 100;
-// Top view, USB-C at the top (checked against the espboards.dev pinout): GPIO 5–10, 20, 21 down the left edge,
-// 5V, GND, 3V3, GPIO 4–0 down the right edge.
+// The real board, 18 × 22.5 mm (1 unit = 0.254 mm): two rows of 8 pins, 2.54 mm apart, the rows 15.24 mm apart.
+// Top view, USB-C at the top (checked against the espboards.dev pinout): GPIO 5–10, 20, 21 down the left row,
+// 5V, GND, 3V3, GPIO 4–0 down the right row.
+const C3_W = 71, C3_H = 88, C3_XL = 5.5, C3_XR = 65.5, C3_Y0 = 9;
 const c3Pins = [
-  ...C3_RIGHT.map(([id, label, gpio], i) => ({ id, label, gpio, kind: 'gpio', x: 0, y: 40 + i * 16, dir: 'l' })),
-  ...C3_LEFT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: C3_W, y: 40 + i * 16, dir: 'r' })),
+  ...C3_RIGHT.map(([id, label, gpio], i) => ({ id, label, gpio, kind: 'gpio', x: C3_XL, y: C3_Y0 + i * 10, dir: 'l' })),
+  ...C3_LEFT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: C3_XR, y: C3_Y0 + i * 10, dir: 'r' })),
 ];
 c3Pins.forEach((p) => { p.title = p.kind === 'gpio' ? `GPIO${p.gpio}${C3_NOTE[p.gpio] ? ` — ${C3_NOTE[p.gpio]}` : ''}` : p.kind === 'gnd' ? 'GND' : p.id === '5V' ? '5V — USB 5 V, or a 3.5–5.5 V input' : '3V3 — 3.3 V (output on USB, or feed 3.3 V here from a battery regulator)'; });
 const esp32c3 = {
-  type: 'esp32c3', name: 'ESP32-C3 Super Mini', category: 'Boards', w: C3_W, h: 176, fixed: true, board: true,
+  type: 'esp32c3', name: 'ESP32-C3 Super Mini', category: 'Boards', w: C3_W, h: C3_H, fixed: true, board: true,
   pins: c3Pins,
   props: { power: 'usb' },
   structural: ['power'],
@@ -354,15 +355,16 @@ const esp32c3 = {
   hint: '13 GPIOs (0–10, 20, 21), ADC on 0–4, WiFi + Bluetooth LE, no DAC. The blue LED on GPIO8 lights when the pin is LOW.',
   state: (c, sim) => { const b = (sim.boardState && sim.boardState(c.id)) || sim; return { led: !!(sim.running && b.mode && b.mode[8] === 3 && !b.out[8]), off: !!b.halted }; },
   render(c, s) {
-    const pins = c3Pins.map((p) => `<text x="${p.x === 0 ? 10 : C3_W - 10}" y="${p.y + 3}" class="cs-tiny cs-light" style="text-anchor:${p.x === 0 ? 'start' : 'end'}">${esc(p.label)}</text>`).join('');
-    return `<rect x="2" y="12" width="${C3_W - 4}" height="162" rx="5" fill="#16191f" stroke="#000"/>
-      <rect x="32" y="0" width="36" height="22" rx="4" fill="#c9ced6" stroke="#7d848e"/><rect x="38" y="6" width="24" height="10" rx="3" fill="#2b2f37"/>
-      <rect x="32" y="64" width="36" height="36" rx="2" fill="#2a2d33" stroke="#444"/><text x="50" y="80" class="cs-tiny cs-light">ESP32</text><text x="50" y="89" class="cs-tiny cs-light">C3</text>
-      <rect x="40" y="132" width="20" height="30" rx="2" fill="#8a6a2c" opacity=".8"/>
-      ${glow(50, 114, 7, '#3d8bff', s.led ? 0.9 : 0)}<circle cx="50" cy="114" r="3" fill="${s.led ? '#5aa0ff' : '#15254a'}"/>
-      <rect x="22" y="30" width="12" height="8" rx="1" fill="#e5e7eb"/><rect x="66" y="30" width="12" height="8" rx="1" fill="#e5e7eb"/>
-      <text x="28" y="47" class="cs-tiny cs-light">BOOT</text><text x="72" y="47" class="cs-tiny cs-light">RST</text>${pins}
-      ${s.off ? `<rect x="2" y="12" width="${C3_W - 4}" height="162" rx="5" fill="#000" opacity=".55"/><text x="50" y="128" class="cs-part-lbl" fill="#fca5a5">no power</text>` : ''}`;
+    // each label sits beside its own pin, as the silkscreen does
+    const pins = c3Pins.map((p) => `<text x="${p.x < C3_W / 2 ? p.x + 5 : p.x - 5}" y="${p.y + 2.2}" class="cs-tiny cs-light" style="font-size:5.5px;text-anchor:${p.x < C3_W / 2 ? 'start' : 'end'}">${esc(p.label)}</text>`).join('');
+    return `<rect x="0" y="0" width="${C3_W}" height="${C3_H}" rx="3" fill="#16191f" stroke="#000"/>
+      <rect x="21" y="-4" width="29" height="28" rx="3" fill="#c9ced6" stroke="#7d848e"/><rect x="25" y="-2" width="21" height="5" rx="2.5" fill="#2b2f37"/>
+      <rect x="23" y="27" width="9" height="8" rx="1" fill="#e5e7eb"/><rect x="39" y="27" width="9" height="8" rx="1" fill="#e5e7eb"/>
+      <text x="27.5" y="41" class="cs-tiny cs-light" style="font-size:4px">BOOT</text><text x="43.5" y="41" class="cs-tiny cs-light" style="font-size:4px">RST</text>
+      <rect x="27.5" y="47" width="16" height="16" fill="#2a2d33" stroke="#444" transform="rotate(45 35.5 55)"/>
+      ${glow(35.5, 71, 5, '#3d8bff', s.led ? 0.9 : 0)}<circle cx="35.5" cy="71" r="2" fill="${s.led ? '#5aa0ff' : '#15254a'}"/>
+      <rect x="27" y="78" width="17" height="6" rx="1" fill="#c2413b"/>${pins}
+      ${s.off ? `<rect x="0" y="0" width="${C3_W}" height="${C3_H}" rx="3" fill="#000" opacity=".55"/><text x="${C3_W / 2}" y="58" class="cs-part-lbl" fill="#fca5a5">no power</text>` : ''}`;
   },
 };
 
