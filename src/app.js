@@ -615,7 +615,7 @@ const App = {
     list.addEventListener('dragstart', (e) => { const b = e.target.closest('.part[data-type]'); if (b) { e.dataTransfer.setData('text/catsim-part', b.dataset.type); e.dataTransfer.effectAllowed = 'copy'; } });
     $('#paletteSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
-      list.querySelectorAll('.part').forEach((b) => { b.hidden = q && !b.textContent.toLowerCase().includes(q) && !(b.dataset.type || b.title.toLowerCase()).includes(q); });
+      list.querySelectorAll('.part').forEach((b) => { b.hidden = q && !b.textContent.toLowerCase().includes(q) && !(b.dataset.type || '').includes(q); });
       list.querySelectorAll('.palette-group').forEach((g) => { g.hidden = ![...g.querySelectorAll('.part')].some((b) => !b.hidden); });
     });
   },
