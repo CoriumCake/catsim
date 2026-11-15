@@ -464,6 +464,20 @@ class View3D {
     const holes = new T.InstancedMesh(geo, this.mat('#2b2f37'), d.pins.length), m4 = new T.Matrix4();
     d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.1, p.y); holes.setMatrixAt(i, m4); });
     holes.instanceMatrix.needsUpdate = true; g.add(holes);
+    // printed on the top, as on the real board: the row letters a–j at both ends, the column numbers along
+    // the outer rows, and + / − at the ends of the rails
+    const S = 4, pin = (id) => d.pins.find((p) => p.id === id), last = d.pins.filter((p) => /^\d+a$/.test(p.id)).length;
+    const print = this.tex(w * S, h * S, (x) => {
+      x.scale(S, S); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#5b6170';
+      x.font = '600 6.5px system-ui, sans-serif';
+      for (const r of 'abcdefghij') for (const at of [6, w - 6]) x.fillText(r, at, pin('1' + r).y);
+      for (let col = 1; col <= last; col += (col === 1 ? 4 : 5)) for (const at of [pin('1a').y - 7.5, pin('1j').y + 7.5]) x.fillText(String(col), pin(col + 'a').x, at);
+      x.font = '700 9px system-ui, sans-serif';
+      for (const [id, sign, color] of [['T+1', '+', '#e5484d'], ['T-1', '−', '#3d8bff'], ['B+1', '+', '#e5484d'], ['B-1', '−', '#3d8bff']]) {
+        x.fillStyle = color; for (const at of [14, w - 6]) x.fillText(sign, at, pin(id).y);
+      }
+    });
+    this.mesh(new T.PlaneGeometry(w, h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.8 }), g, w / 2, H + 0.45, h / 2, false).rotation.x = -Math.PI / 2;
   }
 
   build_hcsr04(g, c, d) {
