@@ -746,15 +746,25 @@ class View3D {
   }
 
   build_esp32c3(g, c, d) {
-    // an ESP32-C3 Super Mini: an 18 × 22.5 mm black board, the module shield, the USB-C socket, two buttons and the LED
-    this.box(g, 0, 0, d.w, d.h, 0, 4, this.mat('#1a1d24', { roughness: 0.6 }));
-    this.box(g, 10, 18, 51, 52, 4, 10, this.mat('#c9ced6', { metalness: 0.6, roughness: 0.35 }));
-    this.box(g, 20, 0, 31, 8, 4, 9, this.M.metal);
-    this.box(g, 4, 78, 6, 6, 4, 6, this.mat('#8a8f98'));
-    this.box(g, 60, 78, 6, 6, 4, 6, this.mat('#8a8f98'));
-    const led = this.mat('#22c55e', { emissive: '#22c55e', emissiveIntensity: 0 });
-    this.box(g, 30, 70, 5, 5, 4, 6, led);
+    // an ESP32-C3 Super Mini: an 18 × 22.5 mm black board, the USB-C socket at the top, BOOT and RST below it,
+    // the bare chip turned 45°, the red chip antenna at the bottom, and the pin names printed beside the pins
+    const T = THREE, top = 4;
+    this.box(g, 0, 0, d.w, d.h, 0, top, this.mat('#1a1d24', { roughness: 0.6 }));
+    this.box(g, 21, -4, 29, 28, top, top + 12.6, this.M.metal);
+    for (const x of [23, 39]) { this.box(g, x, 27, 9, 8, top, top + 3, this.mat('#c9ced6', { metalness: 0.5, roughness: 0.4 })); this.cyl(g, x + 4.5, 31, 2, top + 3, top + 4.5, this.mat('#2a2e36'), 12); }
+    const chip = this.mesh(new T.BoxGeometry(16, 3, 16), this.mat('#23262c', { roughness: 0.4 }), g, 35.5, top + 1.5, 55); chip.rotation.y = Math.PI / 4;
+    this.box(g, 27, 78, 17, 6, top, top + 3, this.mat('#c2413b'));
+    const led = this.mat('#15254a', { emissive: '#3d8bff', emissiveIntensity: 0 });
+    this.box(g, 33.5, 69, 4, 4, top, top + 1.5, led);
     this.live(c, (s) => { led.emissiveIntensity = s.led ? 1.5 : 0; });
+    const S = 8, print = this.tex(d.w * S, d.h * S, (x) => {
+      x.scale(S, S); x.fillStyle = '#e7f0ff'; x.textBaseline = 'middle';
+      x.font = '600 5.5px ui-monospace, Menlo, monospace';
+      for (const p of d.pins) { const left = p.x < d.w / 2; x.textAlign = left ? 'left' : 'right'; x.fillText(p.label, left ? p.x + 5 : p.x - 5, p.y + 0.3); }
+      x.font = '600 4px ui-monospace, Menlo, monospace'; x.textAlign = 'center';
+      x.fillText('BOOT', 27.5, 39.5); x.fillText('RST', 43.5, 39.5);
+    });
+    this.mesh(new T.PlaneGeometry(d.w, d.h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.6 }), g, d.w / 2, top + 0.05, d.h / 2, false).rotation.x = -Math.PI / 2;
   }
 
   build_dht22(g, c) {

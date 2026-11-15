@@ -51,8 +51,8 @@ export const REAL_SIZES = {
   soil: { w: 118, h: 59, pins: row(['VCC', 'GND', 'DO', 'AO'], 44, 59, 'b') },
   // MQ-2 gas sensor board: 32 × 22 mm
   mq2: { w: 126, h: 87, pins: row(['VCC', 'GND', 'DO', 'AO'], 44, 87, 'b') },
-  // ESP32-C3 Super Mini: 22.5 × 18 mm, 8 pins on each long side
-  esp32c3: { w: 71, h: 88, pins: { ...row(['IO5', 'IO6', 'IO7', 'IO8', 'IO9', 'IO10', 'IO20', 'IO21'], 0, 9, 'l', 0, 10), ...row(['5V', 'GND', '3V3', 'IO4', 'IO3', 'IO2', 'IO1', 'IO0'], 71, 9, 'r', 0, 10) } },
+  // ESP32-C3 Super Mini: 22.5 × 18 mm, 8 pins on each long side, the two rows 15.24 mm (60 units) apart
+  esp32c3: { w: 71, h: 88, pins: { ...row(['IO5', 'IO6', 'IO7', 'IO8', 'IO9', 'IO10', 'IO20', 'IO21'], 5.5, 9, 'l', 0, 10), ...row(['5V', 'GND', '3V3', 'IO4', 'IO3', 'IO2', 'IO1', 'IO0'], 65.5, 9, 'r', 0, 10) } },
 };
 
 /** Put every part in REAL_SIZES at its real size, with its pins at their real positions. */
