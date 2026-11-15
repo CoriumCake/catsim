@@ -456,6 +456,18 @@ test('wiring problems pop up as alerts that point at the part', async ({ page })
   await expect(page.locator('#consoleOut')).toContainText('wrong way round');
 });
 
+test('FSR logger: the three readings are printed, and pressing a sensor raises its value', async ({ page }) => {
+  await loadExample(page, 'fsrlog'); await startSim(page);
+  const reading = async (n: number) => { const m = [...(await serial(page)).matchAll(new RegExp(`fsr${n}:(\\d+)`, 'g'))]; return m.length ? +m[m.length - 1][1] : -1; };
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('FSR logger ready');
+  await expect.poll(() => reading(2), { timeout: 5000 }).toBeGreaterThanOrEqual(0);
+  for (const n of [1, 2, 3]) expect(await reading(n)).toBeLessThan(100); // untouched
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', true)); // a firm 10 N press
+  await expect.poll(() => reading(2), { timeout: 5000 }).toBeGreaterThan(3000);
+  expect(await reading(1)).toBeLessThan(100);
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', false));
+});
+
 test('pressure glove: battery-powered ESP32-C3, FSR press turns the RGB LED red and buzzes; the plotter graphs the fingers', async ({ page }) => {
   await loadExample(page, 'glove'); await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');

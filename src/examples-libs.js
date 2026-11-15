@@ -94,6 +94,42 @@ void loop() {
 `,
   },
   {
+    key: 'fsrlog', name: 'FSR logger: ESP32-C3 + 3 force sensors, values in the Terminal',
+    components: [
+      { id: 'c3', type: 'esp32c3', x: 300, y: 300, props: { power: 'usb' } },
+      { id: 'f1', type: 'fsr', x: 430, y: 60, props: { force: 0 } }, { id: 'rf1', type: 'resistor', x: 400, y: 200, props: { ohms: 10000 } },
+      { id: 'f2', type: 'fsr', x: 560, y: 60, props: { force: 0 } }, { id: 'rf2', type: 'resistor', x: 530, y: 200, props: { ohms: 10000 } },
+      { id: 'f3', type: 'fsr', x: 690, y: 60, props: { force: 0 } }, { id: 'rf3', type: 'resistor', x: 660, y: 200, props: { ohms: 10000 } },
+    ],
+    // each FSR: pin 1 to 3V3, pin 2 to its ADC pin and, through 10 k, to GND
+    wires: [
+      W('f1:1', 'c3:3V3', '#ff4d4d'), W('f1:2', 'c3:IO4', '#b06cff'), W('f1:2', 'rf1:2', '#b06cff'), W('rf1:1', 'c3:GND', '#5c6370'),
+      W('f2:1', 'c3:3V3', '#ff4d4d'), W('f2:2', 'c3:IO3', '#ffd60a'), W('f2:2', 'rf2:2', '#ffd60a'), W('rf2:1', 'c3:GND', '#5c6370'),
+      W('f3:1', 'c3:3V3', '#ff4d4d'), W('f3:2', 'c3:IO2', '#2ecc71'), W('f3:2', 'rf3:2', '#2ecc71'), W('rf3:1', 'c3:GND', '#5c6370'),
+    ],
+    code: `// FSR logger: three force sensors (FSR 402) on an ESP32-C3 Super Mini, powered over USB.
+// Each FSR goes from 3V3 to an ADC pin, with a 10 k resistor from that pin to GND (a voltage divider).
+// The harder you press, the lower the FSR's resistance and the higher the reading (0 to 4095).
+// Press an FSR with the mouse, or select it and drag its Force slider. The Plotter tab graphs the three values.
+const int FSR_PINS[3] = {4, 3, 2};   // GPIO4, GPIO3, GPIO2 (ADC1)
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("FSR logger ready");
+}
+
+void loop() {
+  for (int i = 0; i < 3; i++) {
+    Serial.print("fsr"); Serial.print(i + 1); Serial.print(":");
+    Serial.print(analogRead(FSR_PINS[i]));
+    Serial.print(" ");
+  }
+  Serial.println();
+  delay(200);
+}
+`,
+  },
+  {
     key: 'oled', name: 'OLED display (Adafruit SSD1306 + GFX)',
     components: [esp, { id: 'oled1', type: 'oled', x: 540, y: 10, props: { addr: '0x3C', color: 'yellow + blue' } }],
     wires: [W('esp:3V3', 'oled1:VCC', 'red'), W('oled1:GND', 'esp:GND.R', 'black'), W('esp:D22', 'oled1:SCL', 'yellow'), W('esp:D21', 'oled1:SDA', 'blue')],
