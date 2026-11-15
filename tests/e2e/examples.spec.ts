@@ -567,3 +567,27 @@ test('the parallel 16×2 LCD shows the sketch text in the app', async ({ page })
   const st = await partState(page, 'lcd_parallel');
   expect(st[0].d).toMatchObject({ kind: 'lcd', backlight: true });
 });
+
+test('the Examples list has a search box: typing filters it, Enter loads the first match, Escape closes it', async ({ page }) => {
+  const errors = await collectErrors(page);
+  await page.goto('/'); await page.waitForFunction(() => window.CatSim?.App?.project);
+  await page.click('#exampleBtn');
+  await expect(page.locator('#exampleSearch')).toBeFocused();
+  const shown = page.locator('#exampleList .example-item:visible');
+  const all = await shown.count();
+  expect(all).toBeGreaterThan(20);
+  await page.keyboard.type('fsr c3');
+  expect(await shown.count()).toBeLessThan(all);
+  for (const t of await shown.allTextContents()) expect(t.toLowerCase()).toMatch(/fsr.*c3|c3.*fsr/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#exampleMenu')).toBeHidden();
+  await page.click('#exampleBtn');
+  await expect(page.locator('#exampleSearch')).toHaveValue(''); // it opens with the whole list again
+  await page.keyboard.type('zzzz');
+  await expect(page.locator('#exampleNone')).toBeVisible();
+  await page.fill('#exampleSearch', 'fsr logger');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#exampleMenu')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.CatSim.App.project.name)).toContain('FSR logger');
+  expect(errors).toEqual([]);
+});

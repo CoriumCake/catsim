@@ -13,8 +13,9 @@ export async function collectErrors(page: Page) {
 }
 
 export async function loadExample(page: Page, key: string) {
-  await page.selectOption('#exampleSelect', key);
-  await page.waitForFunction((k) => window.CatSim.App.project.name.length > 0 && document.querySelector('#exampleSelect') !== null, key);
+  await page.click('#exampleBtn');
+  await page.click(`#exampleList .example-item[data-key="${key}"]`);
+  await page.waitForFunction(() => window.CatSim.App.project.name.length > 0 && document.querySelector<HTMLElement>('#exampleMenu')!.hidden);
 }
 
 export async function startSim(page: Page) {

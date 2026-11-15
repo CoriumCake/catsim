@@ -674,9 +674,35 @@ $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
     $('#view3d').onclick = () => this.setView('3d');
     $('#projectName').addEventListener('input', (e) => { this.project.name = e.target.value; this.save(); });
 
-    const sel = $('#exampleSelect');
-    sel.innerHTML += EXAMPLES.map((e) => `<option value="${e.key}">${esc(e.name)}</option>`).join('');
-    sel.onchange = () => { if (sel.value) { this.load(this.fromExample(sel.value)); this.toast(`Loaded “${EXAMPLES.find((e) => e.key === sel.value).name}”`); } sel.value = ''; };
+    // Examples: a button that opens a list with a search box (type a few letters of a part or a topic)
+    const exBtn = $('#exampleBtn'), exMenu = $('#exampleMenu'), exSearch = $('#exampleSearch'), exList = $('#exampleList');
+    exList.innerHTML = EXAMPLES.map((e) => `<button class="example-item" role="option" data-key="${e.key}">${esc(e.name)}</button>`).join('');
+    const exFilter = () => {
+      const words = exSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const b of exList.children) { const t = b.textContent.toLowerCase(); b.hidden = !words.every((w) => t.includes(w)); if (!b.hidden) shown++; }
+      $('#exampleNone').hidden = shown > 0;
+    };
+    const exOpen = (open) => {
+      exMenu.hidden = !open; exBtn.setAttribute('aria-expanded', String(open));
+      if (!open) return;
+      const r = exBtn.getBoundingClientRect(), w = Math.min(440, window.innerWidth - 16); // under the button, kept on the screen
+      Object.assign(exMenu.style, { width: `${w}px`, left: `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`, top: `${r.bottom + 4}px`, maxHeight: `${window.innerHeight - r.bottom - 12}px` });
+      exSearch.value = ''; exFilter(); exList.scrollTop = 0; exSearch.focus();
+    };
+    const exLoad = (key) => { exOpen(false); this.load(this.fromExample(key)); this.toast(`Loaded “${EXAMPLES.find((e) => e.key === key).name}”`); };
+    exBtn.onclick = () => exOpen(exMenu.hidden);
+    exSearch.addEventListener('input', exFilter);
+    exList.addEventListener('click', (e) => { const b = e.target.closest('.example-item'); if (b) exLoad(b.dataset.key); });
+    exMenu.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); exOpen(false); exBtn.focus(); return; }
+      const items = [...exList.children].filter((b) => !b.hidden), i = items.indexOf(document.activeElement);
+      if (e.key === 'Enter' && e.target === exSearch && items[0]) exLoad(items[0].dataset.key); // Enter takes the first match
+      else if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); items[Math.min(i + 1, items.length - 1)].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); (i > 0 ? items[i - 1] : exSearch).focus(); }
+    });
+    document.addEventListener('pointerdown', (e) => { if (!exMenu.hidden && !exMenu.contains(e.target) && !exBtn.contains(e.target)) exOpen(false); });
+    window.addEventListener('resize', () => exOpen(false));
 
     $('#btnNew').onclick = () => {
       if (!confirm('Start a new empty project? The current one will be replaced (export it first to keep it).')) return;
