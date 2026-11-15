@@ -471,20 +471,20 @@ test('FSR logger: the three readings are printed, and pressing a sensor raises i
 test('pressure glove: battery-powered ESP32-C3, FSR press turns the RGB LED red and buzzes; the plotter graphs the fingers', async ({ page }) => {
   await loadExample(page, 'glove'); await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');
-  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', true)); // a firm 10 N press
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('finger2', true)); // a firm 10 N press
   await expect.poll(async () => (await partState(page, 'rgb_led'))[0].r, { timeout: 5000 }).toBeGreaterThan(0.3);
   await expect.poll(async () => Math.abs((await partState(page, 'vibmotor'))[0].rpm), { timeout: 5000 }).toBeGreaterThan(3000);
   await page.click('.tab[data-tab="plotPane"]');
   await expect(page.locator('#plotLegend span')).toHaveCount(3);
   await expect(page.locator('#plotLegend')).toContainText('f2');
-  await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', false));
+  await page.evaluate(() => window.CatSim.App.sim.setPressed('finger2', false));
 });
 
 test('the ON/OFF slide switch cuts the battery: the board shows "no power" and restarts when switched on', async ({ page }) => {
   await loadExample(page, 'glove'); await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');
   const flip = async () => {
-    const p = await page.evaluate(() => { const g = document.querySelector('.cs-comp[data-id="sw1"]') as SVGGraphicsElement; const r = g.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    const p = await page.evaluate(() => { const g = document.querySelector('.cs-comp[data-id="onOff"]') as SVGGraphicsElement; const r = g.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     await page.mouse.click(p.x, p.y);
   };
   await flip();
@@ -498,7 +498,7 @@ test('every part in the Parts palette can be added, simulated and shown in 3D', 
   test.setTimeout(90_000);
   await loadExample(page, 'blink');
   await page.click('#addPart');
-  const types = await page.locator('#paletteList .part').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.type!));
+  const types = await page.locator('#paletteList .part[data-type]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.type!));
   const boards = await page.evaluate(() => Object.keys(window.CatSim.DEFS).filter((t) => window.CatSim.DEFS[t].board));
   for (const t of types) if (!boards.includes(t)) await page.click(`#paletteList .part[data-type="${t}"]`);
   const placed = await page.evaluate(() => window.CatSim.App.project.components.map((c: { type: string }) => c.type));
