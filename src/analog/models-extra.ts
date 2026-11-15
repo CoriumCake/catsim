@@ -208,8 +208,10 @@ Object.assign(MODELS, {
   },
 
   vibmotor(ckt: Circuit, c0: Component, pin: PinNode): PartModel {
-    // 10 mm coin motor (3 V, ~70 mA running, 12 000 rpm): same electromechanical model as the DC motor, smaller
-    const ra = 22, la = 0.1e-3, k = 0.0017, j = 2e-8, bf = 2e-9;
+    // 10 mm coin motor: same electromechanical model as the DC motor, smaller. The constants give its rated point,
+    // 3 V → 12 000 rpm at 70 mA (back-EMF 3 − 0.07·22 = 1.46 V at 1257 rad/s; friction torque = k·i), and an
+    // eccentric weight light enough to reach speed in ~0.1 s and stop ~0.3 s after the supply is cut.
+    const ra = 22, la = 0.1e-3, k = 0.00116, j = 1e-8, bf = 6.5e-8;
     const n1 = ckt.node(`${c0.id}#ra`), n2 = ckt.node(`${c0.id}#la`), w = ckt.node(`${c0.id}#speed`);
     ckt.resistor(pin('+'), n1, ra, `${c0.id}_Ra`);
     ckt.inductor(n1, n2, la, `${c0.id}_La`);

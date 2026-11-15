@@ -175,6 +175,21 @@ describe('power parts', () => {
     expect(Math.abs(sim.analog.mechanics().motors.m1[0])).toBeGreaterThan(5000);
     expect(host.logs.filter((m) => /spike|carrying|Not enough/.test(m))).toEqual([]);
   });
+  it('vibration motor: about 12 000 rpm at 3 V, and it stops soon after its MOSFET turns off', async () => {
+    const parts = [comp('bat1', 'battery', { type: '2× AA (3 V)', charge: 100 }), comp('m1', 'vibmotor'), comp('q1', 'nmos', { model: 'AO3400' }), comp('r1', 'resistor', { ohms: 100 }), comp('r2', 'resistor', { ohms: 100000 }), comp('d1', 'diode', { model: '1N5819' })];
+    const wires: Array<[string, string]> = [['bat1:+', 'm1:+'], ['m1:-', 'q1:D'], ['q1:S', 'bat1:-'], ['bat1:-', 'esp:GND.L'], ['esp:D5', 'r1:1'], ['r1:2', 'q1:G'], ['q1:G', 'r2:1'], ['r2:2', 'esp:GND.L'], ['d1:A', 'm1:-'], ['d1:K', 'm1:+']];
+    const rpm = (sim: { analog: { mechanics(): { motors: Record<string, number[]> } } }) => Math.abs(sim.analog.mechanics().motors.m1[0]);
+    const on = run(parts, wires, `void setup() { pinMode(5, OUTPUT); digitalWrite(5, HIGH); }\n${LOOP}`);
+    await settle(on.sim, 400);
+    expect(rpm(on.sim)).toBeGreaterThan(10000);
+    expect(rpm(on.sim)).toBeLessThan(14500);
+    const off = run(parts, wires, `void setup() { pinMode(5, OUTPUT); digitalWrite(5, HIGH); delay(600); digitalWrite(5, LOW); }\n${LOOP}`);
+    await settle(off.sim, 150);
+    expect(rpm(off.sim)).toBeGreaterThan(8000); // up to speed while the pin is HIGH
+    await settle(off.sim, 1200); // the pin went LOW at 0.6 s: this is about 0.75 s later
+    expect(rpm(off.sim)).toBeLessThan(300); // stopped: no buzz left after the pin goes LOW
+    expect(off.host.errors).toEqual([]);
+  });
   it('TP4056: charging and full LEDs, and the protection cuts a flat cell', async () => {
     const wires: Array<[string, string]> = [['bat1:+', 'chg1:B+'], ['bat1:-', 'chg1:B-'], ['chg1:OUT+', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'chg1:OUT-']];
     const { sim, set } = run([comp('bat1', 'battery', { charge: 50 }), comp('chg1', 'tp4056'), comp('r1', 'resistor'), comp('l1', 'led')], wires, `void setup() {}\n${LOOP}`);

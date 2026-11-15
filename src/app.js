@@ -11,8 +11,16 @@ import { Scope } from './scope.ts';
 import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
 import { snapToBreadboard } from './contacts.js';
+import { KITS, addKit, kitPresent, linkKits } from './kits.js';
 import { footprint } from './rotation.ts';
 import { spiceLib } from './analog/models.ts';
+// palette thumbnails for the kits
+const KIT_ICONS = {
+  sg_sensors: [8, 24, 40].map((y) => `<circle cx="14" cy="${y}" r="6.5" fill="#2b2f37"/><circle cx="14" cy="${y}" r="4.5" fill="#c9a24a"/><path d="M21 ${y} H34" stroke="#e5484d" stroke-width="1.6"/><rect x="34" y="${y - 2.5}" width="12" height="5" rx="2" fill="#d9b98a" stroke="#8a6a2c" stroke-width=".6"/><path d="M46 ${y} H56" stroke="#5c6370" stroke-width="1.6"/>`).join('') + '<path d="M56 6 V44" stroke="#5c6370" stroke-width="1.6"/>',
+  sg_outputs: '<circle cx="14" cy="13" r="9" fill="#2b2f37"/><circle cx="10.5" cy="11" r="2.6" fill="#e5484d"/><circle cx="17.5" cy="11" r="2.6" fill="#2ecc71"/><circle cx="14" cy="17" r="2.6" fill="#3d8bff"/><rect x="38" y="5" width="16" height="16" rx="2" fill="#c9ced6" stroke="#7d848e"/><circle cx="46" cy="13" r="4.5" fill="#2b2f37"/><circle cx="46" cy="36" r="9" fill="#9aa1ae" stroke="#5c6370"/><rect x="8" y="30" width="14" height="11" rx="1.5" fill="#2b2f37"/><path d="M22 36 H37" stroke="#f39c12" stroke-width="1.6"/>',
+  sg_power: '<rect x="3" y="8" width="26" height="12" rx="5" fill="#b06cff" stroke="#7a3fd0"/><rect x="36" y="6" width="24" height="16" rx="2" fill="#1d5fb5"/><rect x="6" y="30" width="18" height="12" rx="2" fill="#2b2f37"/><rect x="9" y="33" width="7" height="6" rx="1" fill="#e5e7eb"/><rect x="36" y="29" width="24" height="14" rx="2" fill="#1d5fb5"/><path d="M29 14 H36 M48 22 V26 H15 V30 M24 36 H36" stroke="#e5484d" stroke-width="1.6" fill="none"/>',
+};
+
 const $ = (s) => document.querySelector(s);
 const STORE = 'catsim.project.v1';
 const VIEW_STORE = 'catsim.view';
@@ -164,6 +172,18 @@ const App = {
     this.project.components.push(c);
     this.changed();
     this.canvas.select({ kind: 'comp', id: c.id });
+  },
+  /** Add a kit (a ready-made group of parts). It wires itself to the ESP32-C3 and to the other kits already there. */
+  addKit(key) {
+    const kit = KITS.find((k) => k.key === key);
+    if (kitPresent(this.project, key) === kit.parts.length) { this.toast(`“${kit.name}” is already on the canvas`); return; }
+    const at = this.view3d.active ? this.view3d.centerPoint() : this.canvas.centerPoint();
+    const r = addKit(this.project, key, { x: Math.round(at.x / 5) * 5, y: Math.round(at.y / 5) * 5 });
+    this.changed(); requestAnimationFrame(() => (this.view3d.active ? this.view3d.fit() : this.canvas.fit()));
+    const whole = KITS.every((k) => kitPresent(this.project, k.key) === k.parts.length);
+    this.toast(!r.board ? `Added “${kit.name}”. Add an ESP32-C3 Super Mini (Boards) and it wires itself to it`
+      : whole ? 'SmartGrip is complete: all three kits are wired together. Its sketch is in Examples → “SmartGrip pressure glove”'
+        : `Added “${kit.name}”, wired to ${r.board}`);
   },
   addWire(from, to) {
     // a jumper may join two pins of one board, or two holes of one breadboard (rail to row, across the trench)
@@ -368,6 +388,7 @@ const App = {
     let maxX = 0, minY = Infinity;
     for (const c of this.project.components) { const d = DEFS[c.type]; if (d) { maxX = Math.max(maxX, c.x + d.w); minY = Math.min(minY, c.y); } }
     this.project.components.push({ id, type, x: Math.round((maxX + 80) / 5) * 5, y: Number.isFinite(minY) ? minY : 80, props: {} });
+    if (type === 'esp32c3') linkKits(this.project); // kits waiting for a board wire themselves to it
     if (this.boards().length > 1) this.setProgram(id, { code: type === 'uno' ? UNO_TEMPLATE : ESP_TEMPLATE });
     this.changed(); requestAnimationFrame(() => this.canvas.fit());
     this.switchBoard(id);
@@ -406,7 +427,7 @@ const App = {
         tabs.appendChild(t);
       }
     }
-    document.querySelectorAll('#paletteList .part').forEach((b) => { if (DEFS[b.dataset.type].board) b.title = `Add a ${DEFS[b.dataset.type].name}`; });
+    document.querySelectorAll('#paletteList .part[data-type]').forEach((b) => { if (DEFS[b.dataset.type].board) b.title = `Add a ${DEFS[b.dataset.type].name}`; });
     const c3 = this.boardType() === 'esp32c3';
     document.querySelector('.brand .chip').textContent = uno ? 'UNO' : c3 ? 'ESP32-C3' : 'ESP32';
     $('#serialInput').placeholder = `Message to ${multi ? this.activeBoard : uno ? 'Arduino' : c3 ? 'ESP32-C3' : 'ESP32'} (Enter to send)`;
@@ -578,20 +599,23 @@ const App = {
       return `<svg viewBox="-8 -8 ${d.w + 16} ${d.h + 16}" preserveAspectRatio="xMidYMid meet">${d.render(c, { b: 0, angle: 90, f: 0 })}${pins}</svg>`;
     };
     list.innerHTML = PALETTE.map((g) => `<div class="palette-group"><div class="palette-cat">${g.cat}</div>${g.types.map((t) => `<button class="part" draggable="true" data-type="${t}" title="Add ${esc(DEFS[t].name)}">${draw(t)}<span>${esc(DEFS[t].name)}</span></button>`).join('')}</div>`).join('');
+    // kits: ready-made groups of parts, after the boards they wire themselves to
+    list.children[0].insertAdjacentHTML('afterend', `<div class="palette-group"><div class="palette-cat">Kits (ready-wired)</div>${KITS.map((k) => `<button class="part" data-kit="${k.key}" title="${esc(k.hint)}"><svg viewBox="0 0 64 48" aria-hidden="true">${KIT_ICONS[k.key]}</svg><span>${esc(k.name)}</span></button>`).join('')}</div>`);
     list.addEventListener('click', (e) => {
       const b = e.target.closest('.part'); if (!b) return;
-      this.addComponent(b.dataset.type);
+      const kit = b.dataset.kit;
+      if (kit) this.addKit(kit); else this.addComponent(b.dataset.type);
       // on a phone the diagram is above the Parts list: bring it into view so the new part can be seen and moved
-      if (window.matchMedia('(max-width: 900px)').matches && !DEFS[b.dataset.type].board) {
+      if (window.matchMedia('(max-width: 900px)').matches && (kit || !DEFS[b.dataset.type].board)) {
         this.toggleSidebar(true, false); // the sheet closes, so the diagram is what you see next
         $('#stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        this.toast(`Added ${DEFS[b.dataset.type].name}: drag it into place, or tap it to set it`);
+        if (!kit) this.toast(`Added ${DEFS[b.dataset.type].name}: drag it into place, or tap it to set it`);
       }
     });
-    list.addEventListener('dragstart', (e) => { const b = e.target.closest('.part'); if (b) { e.dataTransfer.setData('text/catsim-part', b.dataset.type); e.dataTransfer.effectAllowed = 'copy'; } });
+    list.addEventListener('dragstart', (e) => { const b = e.target.closest('.part[data-type]'); if (b) { e.dataTransfer.setData('text/catsim-part', b.dataset.type); e.dataTransfer.effectAllowed = 'copy'; } });
     $('#paletteSearch').addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
-      list.querySelectorAll('.part').forEach((b) => { b.hidden = q && !DEFS[b.dataset.type].name.toLowerCase().includes(q) && !b.dataset.type.includes(q); });
+      list.querySelectorAll('.part').forEach((b) => { b.hidden = q && !b.textContent.toLowerCase().includes(q) && !(b.dataset.type || '').includes(q); });
       list.querySelectorAll('.palette-group').forEach((g) => { g.hidden = ![...g.querySelectorAll('.part')].some((b) => !b.hidden); });
     });
   },

@@ -1,4 +1,6 @@
 /* CatSim — examples for the built-in Arduino libraries. ESP32 at (300, 80): left pins x=300, right pins x=450. */
+import { kitCircuit } from './kits.js';
+
 const esp = { id: 'esp', type: 'esp32', x: 300, y: 80, props: {} };
 const W = (from, to, color) => ({ from, to, ...(color ? { color } : {}) });
 const led = (id, x, y, color) => ({ id, type: 'led', x, y, props: { color } });
@@ -8,50 +10,18 @@ const ledWires = (pin, r, l, gnd = 'esp:GND.R') => [W(pin, `${r}:1`), W(`${r}:2`
 
 export const LIB_EXAMPLES = [
   {
-    key: 'glove', name: 'Pressure glove: ESP32-C3 + 3 FSRs + RGB LED + vibration (battery powered)',
-    components: [
-      { id: 'c3', type: 'esp32c3', x: 400, y: 60, props: { power: 'pins' } },
-      { id: 'bat1', type: 'battery', x: -80, y: 360, props: { type: '18650 Li-ion (3.7 V)', charge: 80 } },
-      { id: 'chg1', type: 'tp4056', x: -90, y: 230, props: { usb: false } },
-      { id: 'sw1', type: 'slide_switch', x: 110, y: 40, props: { on: true } },
-      { id: 'reg1', type: 'buckboost', x: 220, y: 150, props: {} },
-      { id: 'f1', type: 'fsr', x: 170, y: 330, props: { force: 0 } }, { id: 'rf1', type: 'resistor', x: 150, y: 460, props: { ohms: 10000 } },
-      { id: 'f2', type: 'fsr', x: 240, y: 330, props: { force: 0 } }, { id: 'rf2', type: 'resistor', x: 230, y: 490, props: { ohms: 10000 } },
-      { id: 'f3', type: 'fsr', x: 310, y: 330, props: { force: 0 } }, { id: 'rf3', type: 'resistor', x: 310, y: 520, props: { ohms: 10000 } },
-      { id: 'rgb1', type: 'rgb_led', x: 640, y: -40, props: { common: 'anode' } },
-      { id: 'r1', type: 'resistor', x: 530, y: 60, props: { ohms: 220 } },
-      { id: 'r2', type: 'resistor', x: 530, y: 90, props: { ohms: 220 } },
-      { id: 'r3', type: 'resistor', x: 530, y: 120, props: { ohms: 220 } },
-      { id: 'btn1', type: 'button', x: 560, y: 220, props: { color: 'blue' } },
-      { id: 'm1', type: 'vibmotor', x: 700, y: 330, props: {} },
-      { id: 'q1', type: 'nmos', x: 600, y: 410, props: { model: 'AO3400', spice: '' } },
-      { id: 'rg', type: 'resistor', x: 470, y: 330, props: { ohms: 100 } },
-      { id: 'rpd', type: 'resistor', x: 500, y: 480, props: { ohms: 100000 } },
-      { id: 'd1', type: 'diode', x: 760, y: 440, props: { model: '1N5819', spice: '' } },
-    ],
-    wires: [
-      W('bat1:+', 'chg1:B+', 'red'), W('bat1:-', 'chg1:B-', 'black'),
-      W('chg1:OUT+', 'sw1:COM', 'red'), W('sw1:B', 'reg1:VIN', 'red'), W('chg1:OUT-', 'reg1:GND', 'black'),
-      W('reg1:VOUT', 'c3:3V3', 'orange'), W('reg1:GND2', 'c3:GND', 'black'),
-      W('f1:1', 'c3:3V3', 'orange'), W('f1:2', 'c3:IO0'), W('rf1:1', 'c3:IO0'), W('rf1:2', 'c3:GND', 'black'),
-      W('f2:1', 'c3:3V3', 'orange'), W('f2:2', 'c3:IO1'), W('rf2:1', 'c3:IO1'), W('rf2:2', 'c3:GND', 'black'),
-      W('f3:1', 'c3:3V3', 'orange'), W('f3:2', 'c3:IO3'), W('rf3:1', 'c3:IO3'), W('rf3:2', 'c3:GND', 'black'),
-      W('rgb1:COM', 'c3:3V3', 'orange'), W('rgb1:R', 'r1:2', 'red'), W('r1:1', 'c3:IO5', 'red'), W('rgb1:G', 'r2:2', 'green'), W('r2:1', 'c3:IO6', 'green'),
-      W('rgb1:B', 'r3:2', 'blue'), W('r3:1', 'c3:IO7', 'blue'),
-      W('btn1:1', 'c3:IO10'), W('btn1:2', 'c3:GND', 'black'),
-      W('m1:+', 'c3:3V3', 'orange'), W('m1:-', 'q1:D'), W('q1:S', 'c3:GND', 'black'),
-      W('c3:IO4', 'rg:1', 'purple'), W('rg:2', 'q1:G', 'purple'), W('q1:G', 'rpd:1'), W('rpd:2', 'c3:GND', 'black'),
-      W('d1:K', 'm1:+'), W('d1:A', 'm1:-'),
-    ],
+    // the three SmartGrip kits on an ESP32-C3 (see kits.js): the same parts and wires the Parts list adds
+    key: 'glove', name: 'SmartGrip pressure glove: ESP32-C3 + 3 FSRs + RGB LED + vibration (battery powered)',
+    ...kitCircuit(500, 260),
     code: `// Pressure glove: three FSR fingertips on an ESP32-C3 Super Mini, powered by an 18650 cell
 // (TP4056 charger -> ON/OFF switch -> 3.3 V buck-boost -> the board's 3V3 pin).
 // Green = light touch, yellow = firm, red = too hard (and the motor buzzes).
 // Drag the FSR force sliders (or press an FSR with the mouse). The button re-calibrates with no touch.
 // Open the Plotter tab to see the three fingers.
 const int FSR_PINS[3] = {0, 1, 3};   // ADC1 pins
-const int LED_R = 5, LED_G = 6, LED_B = 7;   // common-anode RGB LED: LOW = on
-const int MOTOR = 4;                 // AO3400 gate (100 ohm in series, 100k pull-down)
-const int BUTTON = 10;               // to GND, internal pull-up
+const int LED_R = 4, LED_G = 5, LED_B = 6;   // common-anode RGB LED: LOW = on
+const int MOTOR = 10;                // AO3400 gate (100 ohm in series, 100k pull-down)
+const int BUTTON = 7;                // CAL button to GND, internal pull-up
 int baseline[3] = {0, 0, 0};
 
 void setColor(bool r, bool g, bool b) {
