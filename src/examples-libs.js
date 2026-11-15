@@ -100,6 +100,54 @@ void loop() {
 `,
   },
   {
+    key: 'buckboost', name: 'Buck-boost regulator: steady 3.3 V from a draining battery',
+    components: [
+      { id: 'c3', type: 'esp32c3', x: 500, y: 200, props: { power: 'pins' } },
+      { id: 'bat1', type: 'battery', x: 120, y: 300, props: { type: '18650 Li-ion (3.7 V)', charge: 100 } },
+      { id: 'reg1', type: 'buckboost', x: 330, y: 180, props: {} },
+      { id: 'r1', type: 'resistor', x: 330, y: 300, props: { ohms: 10000 } }, { id: 'r2', type: 'resistor', x: 430, y: 300, props: { ohms: 10000 } },
+      { id: 'r3', type: 'resistor', x: 610, y: 120, props: { ohms: 10000 } }, { id: 'r4', type: 'resistor', x: 710, y: 120, props: { ohms: 10000 } },
+    ],
+    wires: [
+      W('bat1:+', 'reg1:VIN', '#ff4d4d'), W('bat1:-', 'reg1:GND', '#5c6370'),
+      W('reg1:VOUT', 'c3:3V3', '#f39c12'), W('reg1:GND2', 'c3:GND', '#5c6370'),
+      // two 10 k halve each voltage, so a 4.2 V battery stays inside the ADC's range
+      W('bat1:+', 'r1:1', '#ff4d4d'), W('r1:2', 'r2:1', '#3d8bff'), W('r2:1', 'c3:IO0', '#3d8bff'), W('r2:2', 'c3:GND', '#5c6370'),
+      W('c3:3V3', 'r3:1', '#f39c12'), W('r3:2', 'r4:1', '#2ecc71'), W('r3:2', 'c3:IO1', '#2ecc71'), W('r4:2', 'c3:GND', '#5c6370'),
+    ],
+    code: `// Buck-boost regulator: an 18650 cell falls from 4.2 V (full) to 3.0 V (empty), but the board needs 3.3 V.
+// The regulator steps the voltage DOWN while the battery is above 3.3 V (buck) and UP when it is below (boost).
+// Select the battery and drag its Charge slider: the battery voltage changes, the output stays at 3.3 V.
+// Each voltage is read through two 10 k resistors that halve it. The Plotter tab graphs both.
+const int PIN_BATTERY = 0;   // GPIO0: half the battery voltage
+const int PIN_OUTPUT = 1;    // GPIO1: half the regulator's output
+
+float volts(int pin) {
+  return analogRead(pin) * 3.3 / 4095.0 * 2.0;   // ADC counts -> volts, times 2 for the divider
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Buck-boost demo ready");
+}
+
+int lastMode = -1;   // 1 = buck, 0 = boost
+
+void loop() {
+  float battery = volts(PIN_BATTERY);
+  float output = volts(PIN_OUTPUT);
+  int mode = battery > output ? 1 : 0;
+  if (mode != lastMode) {
+    Serial.println(mode ? "Battery above 3.3 V: stepping down (buck)" : "Battery below 3.3 V: stepping up (boost)");
+    lastMode = mode;
+  }
+  Serial.print("battery:"); Serial.print(battery, 2);
+  Serial.print(" output:"); Serial.println(output, 2);
+  delay(500);
+}
+`,
+  },
+  {
     key: 'oled', name: 'OLED display (Adafruit SSD1306 + GFX)',
     components: [esp, { id: 'oled1', type: 'oled', x: 540, y: 10, props: { addr: '0x3C', color: 'yellow + blue' } }],
     wires: [W('esp:3V3', 'oled1:VCC', 'red'), W('oled1:GND', 'esp:GND.R', 'black'), W('esp:D22', 'oled1:SCL', 'yellow'), W('esp:D21', 'oled1:SDA', 'blue')],

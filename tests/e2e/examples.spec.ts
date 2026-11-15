@@ -468,6 +468,24 @@ test('FSR logger: the three readings are printed, and pressing a sensor raises i
   await page.evaluate(() => window.CatSim.App.sim.setPressed('f2', false));
 });
 
+test('buck-boost example: the output stays at 3.3 V while the battery goes from full (buck) to empty (boost)', async ({ page }) => {
+  await loadExample(page, 'buckboost'); await startSim(page);
+  const lastLine = async () => { const t = await serial(page), m = [...t.matchAll(/battery:([\d.]+) output:([\d.]+)/g)], l = m[m.length - 1], modes = [...t.matchAll(/\((buck|boost)\)/g)]; return { battery: l ? +l[1] : -1, output: l ? +l[2] : -1, mode: modes.length ? modes[modes.length - 1][1] : '' }; };
+  const setCharge = (charge: number) => page.evaluate((c) => { const A = window.CatSim.App; A.project.components.find((x: { id: string }) => x.id === 'bat1').props.charge = c; A.sim.syncProject(); }, charge);
+  await expect.poll(() => serial(page), { timeout: 5000 }).toContain('Buck-boost demo ready');
+  await expect.poll(async () => (await lastLine()).battery, { timeout: 5000 }).toBeGreaterThan(4.0); // full cell: about 4.2 V
+  let l = await lastLine();
+  expect(l.output).toBeGreaterThan(3.2); expect(l.output).toBeLessThan(3.4); expect(l.mode).toBe('buck');
+  await setCharge(0);
+  await expect.poll(async () => (await lastLine()).battery, { timeout: 5000 }).toBeLessThan(3.15); // empty cell: about 3.0 V
+  l = await lastLine();
+  expect(l.battery).toBeGreaterThan(2.8);
+  expect(l.output).toBeGreaterThan(3.2); expect(l.output).toBeLessThan(3.4); expect(l.mode).toBe('boost');
+  expect((await partState(page, 'esp32c3'))[0].off).toBe(false); // still running on the empty cell
+  await page.click('.tab[data-tab="plotPane"]');
+  await expect(page.locator('#plotLegend span')).toHaveCount(2);
+});
+
 test('pressure glove: battery-powered ESP32-C3, FSR press turns the RGB LED red and buzzes; the plotter graphs the fingers', async ({ page }) => {
   await loadExample(page, 'glove'); await startSim(page);
   await expect.poll(() => serial(page), { timeout: 5000 }).toContain('calibrated');
