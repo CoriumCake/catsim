@@ -14,8 +14,8 @@ async function projectWith(page: Page, boardType: string) {
 const addKit = (page: Page, key: string) => page.click(`#paletteList .part[data-kit="${key}"]`);
 const wires = (page: Page) => page.evaluate(() => window.CatSim.App.project.wires.map((w: { from: string; to: string }) => [w.from, w.to].sort().join(' — ')).sort());
 const rpm = async (page: Page) => Math.abs((await partState(page, 'vibmotor'))[0].rpm);
-/** The motor's supply is cut: it slows down. (The simulated coin motor coasts for many seconds; its model has very little friction.) */
-const coastsDown = async (page: Page) => { const top = await rpm(page); await expect.poll(() => rpm(page), { timeout: 8000 }).toBeLessThan(top * 0.9); };
+/** The motor's supply is cut: the buzz stops within a moment. */
+const stops = (page: Page) => expect.poll(() => rpm(page), { timeout: 3000 }).toBeLessThan(100);
 const last = async (page: Page, name: string) => { const m = [...(await serial(page)).matchAll(new RegExp(`${name}:(-?\\d+)`, 'g'))]; return m.length ? +m[m.length - 1][1] : -1; };
 
 let errors: string[] = [];
@@ -57,7 +57,7 @@ void loop() { int b = digitalRead(7); Serial.print("btn:"); Serial.println(b);
   await expect.poll(async () => (await partState(page, 'rgb_led'))[0].g, { timeout: 5000 }).toBeLessThan(0.1);
   await expect.poll(async () => Math.abs((await partState(page, 'vibmotor'))[0].rpm), { timeout: 5000 }).toBeGreaterThan(3000);
   await page.evaluate(() => window.CatSim.App.sim.setPressed('calBtn', false));
-  await coastsDown(page);
+  await stops(page);
 });
 
 test('kit 3 alone: the battery powers the board through the charger, switch and regulator; the switch cuts it', async ({ page }) => {
@@ -96,7 +96,7 @@ test('the three kits together are the SmartGrip example circuit, and its sketch 
   await page.evaluate(() => window.CatSim.App.sim.setPressed('finger3', false));
   await expect.poll(() => last(page, 'f3'), { timeout: 5000 }).toBeLessThan(100);
   await expect.poll(async () => (await partState(page, 'rgb_led'))[0].r, { timeout: 5000 }).toBeLessThan(0.1); // the LED goes dark again
-  await coastsDown(page);
+  await stops(page);
   const before = ((await serial(page)).match(/calibrated/g) || []).length;
   await page.evaluate(() => window.CatSim.App.sim.setPressed('calBtn', true));
   await expect.poll(async () => ((await serial(page)).match(/calibrated/g) || []).length, { timeout: 5000 }).toBeGreaterThan(before);
