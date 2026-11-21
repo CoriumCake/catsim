@@ -108,6 +108,12 @@ export interface PartDef {
   /** Pins that output an analog level (0..1 of 3.3 V) */
   analog?: Record<string, (c: Component, sim: SimView) => number>;
   // ---- visuals ----
+  /** boards: the outline of the circuit board when it isn't a plain rectangle (points, in part units) */
+  outline?: Array<[number, number]>;
+  /** boards: the centres of the mounting holes */
+  holes?: Array<[number, number]>;
+  /** boards with socket strips: [x of the first socket, number of sockets, y] for each strip */
+  headers?: Array<[number, number, number]>;
   /** Live state derived from the simulator, passed to render() (and the 3D view) */
   state?: (c: Component, sim: SimView) => Record<string, unknown>;
   /** 2D SVG markup for the part body */

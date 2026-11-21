@@ -23,7 +23,13 @@ const ESP_RIGHT = [
   ['D19', 'D19', 19], ['D18', 'D18', 18], ['D5', 'D5', 5], ['TX2', 'TX2', 17], ['RX2', 'RX2', 16],
   ['D4', 'D4', 4], ['D2', 'D2', 2], ['D15', 'D15', 15], ['GND.R', 'GND', null, 'gnd'], ['3V3', '3V3', null, 'vcc'],
 ];
-const ESP_W = 150;
+// The real board, top view with the antenna up: 28.2 × 51.8 mm, i.e. 111 × 204 units (1 unit = 0.254 mm). Two rows of
+// 15 pins on the 2.54 mm grid, the rows 25.4 mm apart. There is no maker's drawing of this board (and clones differ a
+// little): the outline and the hole spacing (43.9 mm along the board) are measurements of a real one, the hole
+// spacing across it and the place of the pin rows along it are read from photos. The WROOM-32 module is 18 × 25.5 mm
+// (Espressif's datasheet).
+const ESP_W = 111, ESP_H = 204, ESP_XL = 5.5, ESP_XR = 105.5, ESP_Y0 = 32;
+const ESP_HOLES = [[9, 15.5], [102, 15.5], [9, 188.5], [102, 188.5]]; // Ø2.8 mm
 const ADC1 = { 32: 4, 33: 5, 34: 6, 35: 7, 36: 0, 39: 3 };
 const ADC2 = { 4: 0, 0: 1, 2: 2, 15: 3, 13: 4, 12: 5, 14: 6, 27: 7, 25: 8, 26: 9 };
 const TOUCH = { 4: 0, 0: 1, 2: 2, 15: 3, 13: 4, 12: 5, 14: 6, 27: 7, 33: 8, 32: 9 };
@@ -48,8 +54,8 @@ function espPinTitle(p) {
 }
 
 const espPins = [
-  ...ESP_LEFT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: 0, y: 36 + i * 14, dir: 'l' })),
-  ...ESP_RIGHT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: ESP_W, y: 36 + i * 14, dir: 'r' })),
+  ...ESP_LEFT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: ESP_XL, y: ESP_Y0 + i * 10, dir: 'l' })),
+  ...ESP_RIGHT.map(([id, label, gpio, kind], i) => ({ id, label, gpio, kind: kind || 'gpio', x: ESP_XR, y: ESP_Y0 + i * 10, dir: 'r' })),
 ];
 espPins.forEach((p) => { p.title = espPinTitle(p); });
 
@@ -60,7 +66,8 @@ const glow = (cx, cy, r, color, o) =>
 const DEFS = {};
 
 DEFS.esp32 = {
-  type: 'esp32', name: 'ESP32 DevKit V1', category: 'Boards', w: ESP_W, h: 274, fixed: true, board: true,
+  type: 'esp32', name: 'ESP32 DevKit V1', category: 'Boards', w: ESP_W, h: ESP_H, fixed: true, board: true,
+  holes: ESP_HOLES,
   props: { power: 'usb' },
   structural: ['power'],
   controls: [{ key: 'power', label: 'Powered by', type: 'select', options: ['usb', 'pins'], fmt: (v) => (v === 'pins' ? 'Its VIN / 3V3 pins (battery)' : 'USB') }],
@@ -72,29 +79,34 @@ DEFS.esp32 = {
     return { led2: on, power: sim.running };
   },
   render(c, s) {
-    let o = `<rect x="6" y="0" width="${ESP_W - 12}" height="262" rx="7" fill="#151b28" stroke="#05070c" stroke-width="1.5"/>`;
-    o += `<rect x="34" y="6" width="82" height="120" rx="3" fill="#1f232d" stroke="#0a0c11"/>`;
-    o += `<path d="M40 12 h8 v13 h8 v-13 h8 v13 h8 v-13 h8 v13 h8 v-13 h8" fill="none" stroke="#c9a227" stroke-width="2"/>`;
-    o += `<rect x="40" y="34" width="70" height="86" rx="2" fill="url(#cs-metal)" stroke="#7d8591"/>`;
-    o += `<text x="75" y="72" class="cs-chip">ESP32</text><text x="75" y="86" class="cs-chip cs-chip-sm">WROOM-32</text>`;
-    o += `<text x="75" y="146" class="cs-chip cs-chip-sm" fill="#7f8aa3">DEVKIT V1</text>`;
+    let o = `<rect x="0" y="0" width="${ESP_W}" height="${ESP_H}" rx="4" fill="#151b28" stroke="#05070c"/>`;
+    for (const [x, y] of ESP_HOLES) o += `<circle cx="${x}" cy="${y}" r="5.5" fill="var(--canvas)" stroke="#8b8f98" stroke-width="1.2"/>`;
+    // the WROOM-32 module: its antenna end at the top edge, the metal can below it
+    o += `<rect x="20" y="0" width="71" height="100" rx="1.5" fill="#1f232d" stroke="#0a0c11" stroke-width=".8"/>`;
+    o += `<path d="M27 21 V6 h8 v12 h8 v-12 h8 v12 h8 v-12 h8 v12 h8 v-12 h9" fill="none" stroke="#c9a227" stroke-width="1.6"/>`;
+    o += `<rect x="24" y="27" width="63" height="70" rx="1.5" fill="url(#cs-metal)" stroke="#7d8591" stroke-width=".8"/>`;
+    o += `<text x="55.5" y="61" class="cs-chip" style="font-size:10px">ESP32</text><text x="55.5" y="72" class="cs-chip cs-chip-sm" style="font-size:6px">WROOM-32</text>`;
+    // each label sits beside its own pin, as the silkscreen does
     espPins.forEach((p) => {
-      const left = p.x === 0;
-      o += `<text x="${left ? 10 : ESP_W - 10}" y="${p.y + 2.6}" class="cs-esp-lbl" text-anchor="${left ? 'start' : 'end'}">${p.label}</text>`;
+      const left = p.x < ESP_W / 2;
+      o += `<text x="${left ? p.x + 5 : p.x - 5}" y="${p.y + 1.8}" class="cs-esp-lbl" style="font-size:5px" text-anchor="${left ? 'start' : 'end'}">${p.label}</text>`;
     });
     // LEDs
-    o += glow(62, 202, 9, '#ff3344', s.power ? 0.6 : 0);
-    o += `<rect x="58" y="200" width="8" height="5" rx="1" fill="${s.power ? '#ff4d5e' : '#3a1418'}"/>`;
-    o += `<text x="62" y="214" class="cs-tiny">PWR</text>`;
-    o += glow(90, 202, 11, '#3d8bff', s.led2 * 0.9);
-    o += `<rect x="86" y="200" width="8" height="5" rx="1" fill="${s.led2 > 0.02 ? '#7db5ff' : '#14233d'}"/>`;
-    o += `<text x="90" y="214" class="cs-tiny">IO2</text>`;
-    // buttons
-    [[44, 'EN'], [94, 'BOOT']].forEach(([x, l]) => {
-      o += `<rect x="${x}" y="236" width="14" height="10" rx="1.5" fill="#cfd4dc"/><circle cx="${x + 7}" cy="241" r="3" fill="#2b2f38"/>`;
-      o += `<text x="${x + 7}" y="232" class="cs-tiny">${l}</text>`;
+    o += glow(37, 110, 7, '#ff3344', s.power ? 0.6 : 0);
+    o += `<rect x="34" y="108" width="6" height="4" rx=".8" fill="${s.power ? '#ff4d5e' : '#3a1418'}"/><text x="37" y="119" class="cs-tiny" style="font-size:4px">PWR</text>`;
+    o += glow(74, 110, 8, '#3d8bff', s.led2 * 0.9);
+    o += `<rect x="71" y="108" width="6" height="4" rx=".8" fill="${s.led2 > 0.02 ? '#7db5ff' : '#14233d'}"/><text x="74" y="119" class="cs-tiny" style="font-size:4px">IO2</text>`;
+    // USB-serial chip, 3.3 V regulator and its capacitor
+    o += `<rect x="45.5" y="124" width="20" height="20" rx="1" fill="#23262c" stroke="#3a3e47" stroke-width=".6"/>`;
+    o += `<rect x="24" y="152" width="26" height="14" rx="1" fill="#23262c" stroke="#3a3e47" stroke-width=".6"/><rect x="31" y="148" width="12" height="4" fill="#aeb5c0"/>`;
+    o += `<rect x="60" y="153" width="14" height="8" rx="1" fill="#d9a441"/>`;
+    o += `<text x="55.5" y="174" class="cs-tiny" style="font-size:4.5px" fill="#7f8aa3">DEVKIT V1</text>`;
+    // EN / BOOT buttons and the micro-USB socket (it overhangs the end of the board)
+    [[22, 'EN'], [77, 'BOOT']].forEach(([x, l]) => {
+      o += `<rect x="${x}" y="180" width="12" height="16" rx="1.5" fill="#cfd4dc"/><circle cx="${x + 6}" cy="188" r="3.2" fill="#2b2f38"/>`;
+      o += `<text x="${x + 6}" y="201" class="cs-tiny" style="font-size:4px">${l}</text>`;
     });
-    o += `<rect x="58" y="252" width="34" height="22" rx="2" fill="#aeb5c0" stroke="#6c737e"/><rect x="63" y="258" width="24" height="5" rx="1" fill="#555c66"/>`;
+    o += `<rect x="40.5" y="186" width="30" height="22" rx="2" fill="#aeb5c0" stroke="#6c737e"/><rect x="45.5" y="200" width="20" height="4" rx="1" fill="#555c66"/>`;
     return o;
   },
 };
@@ -348,12 +360,23 @@ const UNO_TOP = ['SCL', 'SDA', 'AREF', 'GND1', 'D13', 'D12', 'D11', 'D10', 'D9',
 const UNO_TOP2 = ['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'];
 const UNO_BOT = ['IOREF', 'RESET', '3V3', '5V', 'GND2', 'GND3', 'VIN'];
 const UNO_BOT2 = ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+// The real board, top view with the USB socket on the left: 68.6 × 53.4 mm, i.e. 270 × 210 units (1 unit = 10 mil).
+// The outline and the four Ø3.2 mm mounting holes are Arduino's drawing (A000066 datasheet, section 5.4); the four
+// headers are on the board's 100 mil grid, 100 mil in from the long edges. The USB and power sockets are scaled from
+// that drawing. The small parts (crystal, capacitors, regulator, ICSP headers, reset button, LEDs) are placed from
+// photos of the board, not from a drawing.
+const UNO_W = 270, UNO_H = 210, UNO_TOP_Y = 10, UNO_BOT_Y = 200;
+const UNO_OUTLINE = [[0, 0], [254, 0], [260, 6], [260, 41], [270, 51], [270, 180], [260, 190], [260, 204], [254, 210], [0, 210]];
+const UNO_HOLES = [[60, 10], [55, 200], [260, 70], [260, 180]];
+// each header: its first socket, the number of sockets (the power header has an unused one before IOREF), its row
+const UNO_HEADERS = [[74, 10, UNO_TOP_Y], [180, 8, UNO_TOP_Y], [110, 8, UNO_BOT_Y], [200, 6, UNO_BOT_Y]];
 const unoPins = [
-  ...UNO_TOP.map((id, i) => unoPin(id, 40 + i * 12, 0, 't')), ...UNO_TOP2.map((id, i) => unoPin(id, 166 + i * 12, 0, 't')),
-  ...UNO_BOT.map((id, i) => unoPin(id, 76 + i * 12, 180, 'b')), ...UNO_BOT2.map((id, i) => unoPin(id, 172 + i * 12, 180, 'b')),
+  ...UNO_TOP.map((id, i) => unoPin(id, 74 + i * 10, UNO_TOP_Y, 't')), ...UNO_TOP2.map((id, i) => unoPin(id, 180 + i * 10, UNO_TOP_Y, 't')),
+  ...UNO_BOT.map((id, i) => unoPin(id, 120 + i * 10, UNO_BOT_Y, 'b')), ...UNO_BOT2.map((id, i) => unoPin(id, 200 + i * 10, UNO_BOT_Y, 'b')),
 ];
 DEFS.uno = {
-  type: 'uno', name: 'Arduino Uno R3', category: 'Boards', w: 264, h: 180, fixed: true, board: true,
+  type: 'uno', name: 'Arduino Uno R3', category: 'Boards', w: UNO_W, h: UNO_H, fixed: true, board: true,
+  outline: UNO_OUTLINE, holes: UNO_HOLES, headers: UNO_HEADERS,
   props: { power: 'usb' },
   structural: ['power'],
   controls: [{ key: 'power', label: 'Powered by', type: 'select', options: ['usb', 'pins'], fmt: (v) => (v === 'pins' ? 'Its VIN / 5V pins (battery)' : 'USB') }],
@@ -365,18 +388,28 @@ DEFS.uno = {
     return { L: sim.running && b.out && b.out[13] ? 1 : 0, on: !!sim.running, tx: sim.running && sim.txAt && performance.now() - sim.txAt < 80 };
   },
   render(c, s) {
-    let o = `<rect x="0" y="6" width="264" height="168" rx="6" fill="#0b6d8c" stroke="#064457" stroke-width="1.5"/>`;
-    o += `<rect x="-14" y="32" width="46" height="36" rx="2" fill="#c9ced6" stroke="#8b929c"/><rect x="-10" y="40" width="20" height="20" fill="#9ea5af"/>`;
-    o += `<rect x="-10" y="120" width="40" height="30" rx="3" fill="#1d1f24"/><circle cx="10" cy="135" r="6" fill="#3a3d44"/>`;
-    o += `<rect x="34" y="-6" width="120" height="12" fill="#1d1f24"/><rect x="160" y="-6" width="96" height="12" fill="#1d1f24"/>`;
-    o += `<rect x="70" y="174" width="84" height="12" fill="#1d1f24"/><rect x="166" y="174" width="72" height="12" fill="#1d1f24"/>`;
-    o += `<rect x="120" y="96" width="132" height="34" rx="2" fill="#1d1f24" stroke="#0a0b0d"/><path d="M120 106 a6 6 0 0 1 0 14" fill="#33363d"/>`;
-    o += `<text x="186" y="117" class="cs-tiny cs-light">ATmega328P</text>`;
-    o += `<text x="90" y="74" class="cs-uno-title">UNO</text><text x="90" y="88" class="cs-tiny cs-light">R3 · 16 MHz</text>`;
-    const led = (x, y, col, on, lbl) => `${glow(x, y, 7, col, on ? 0.75 : 0)}<rect x="${x - 4}" y="${y - 2}" width="8" height="4" rx="1" fill="${on ? col : '#2a3238'}"/><text x="${x + 10}" y="${y + 2}" class="cs-tiny cs-light" text-anchor="start">${lbl}</text>`;
-    o += led(118, 30, '#ffb020', s.L, 'L') + led(118, 42, '#ffb020', s.tx, 'TX') + led(118, 54, '#ffb020', false, 'RX') + led(222, 150, '#22c55e', s.on, 'ON');
+    let o = `<path d="M${UNO_OUTLINE.map((q) => q.join(' ')).join(' L')} Z" fill="#0b6d8c" stroke="#064457" stroke-width="1.2"/>`;
+    for (const [x, y] of UNO_HOLES) o += `<circle cx="${x}" cy="${y}" r="6.3" fill="var(--canvas)" stroke="#064457"/>`;
+    // USB-B socket and barrel jack (both overhang the left edge)
+    o += `<rect x="-25" y="36.5" width="63.5" height="49.5" rx="2" fill="#c9ced6" stroke="#8b929c"/><rect x="-21" y="46" width="24" height="30" fill="#9ea5af"/>`;
+    o += `<rect x="-6" y="164.5" width="55" height="31.5" rx="2" fill="#1d1f24"/><circle cx="6" cy="180" r="7" fill="#3a3d44"/>`;
+    for (const [x0, n, y] of UNO_HEADERS) o += `<rect x="${x0 - 5}" y="${y - 5}" width="${n * 10}" height="10" fill="#1d1f24"/>`;
+    // reset button, the USB chip (ATmega16U2) with its ICSP header and crystal, regulator, two capacitors
+    o += `<rect x="16" y="3" width="24" height="24" rx="2" fill="#cfd4dc" stroke="#8b929c" stroke-width=".8"/><circle cx="28" cy="15" r="6" fill="#a4372f"/>`;
+    for (const x of [64, 74, 84]) for (const y of [32, 42]) o += `<rect x="${x - 2}" y="${y - 2}" width="4" height="4" fill="#d8b24a"/>`;
+    o += `<rect x="86" y="52" width="28" height="28" rx="1" fill="#1d1f24" stroke="#0a0b0d" stroke-width=".6" transform="rotate(45 100 66)"/>`;
+    o += `<rect x="44" y="92" width="45" height="18" rx="9" fill="url(#cs-metal)" stroke="#7d8591" stroke-width=".8"/>`;
+    o += `<rect x="12" y="114" width="26" height="14" rx="1" fill="#1d1f24"/><rect x="19" y="110" width="12" height="4" fill="#aeb5c0"/>`;
+    for (const x of [72, 98]) o += `<rect x="${x - 13}" y="157" width="26" height="26" rx="2" fill="#1d1f24"/><circle cx="${x}" cy="170" r="12.4" fill="url(#cs-metal)" stroke="#7d8591" stroke-width=".8"/><path d="M${x - 12.4} 170 a12.4 12.4 0 0 1 12.4 -12.4 z" fill="#3a3d44"/>`;
+    // the ATmega328P (DIP-28) and its ICSP header
+    o += `<rect x="112" y="141" width="140" height="28" rx="1.5" fill="#1d1f24" stroke="#0a0b0d"/><path d="M112 150 a5 5 0 0 1 0 10" fill="#33363d"/>`;
+    o += `<text x="182" y="157.5" class="cs-tiny cs-light">ATmega328P</text>`;
+    for (const x of [250, 260]) for (const y of [85, 95, 105]) o += `<rect x="${x - 2}" y="${y - 2}" width="4" height="4" fill="#d8b24a"/>`;
+    o += `<text x="182" y="108" class="cs-uno-title">UNO</text><text x="182" y="121" class="cs-tiny cs-light">R3 · 16 MHz</text>`;
+    const led = (x, y, col, on, lbl) => `${glow(x, y, 7, col, on ? 0.75 : 0)}<rect x="${x - 4}" y="${y - 2}" width="8" height="4" rx="1" fill="${on ? col : '#2a3238'}"/><text x="${x + 8}" y="${y + 2}" class="cs-tiny cs-light" text-anchor="start">${lbl}</text>`;
+    o += led(128, 38, '#ffb020', s.L, 'L') + led(128, 50, '#ffb020', s.tx, 'TX') + led(128, 62, '#ffb020', false, 'RX') + led(224, 62, '#22c55e', s.on, 'ON');
     const short = { IOREF: 'IO', RESET: 'RS', AREF: 'AR', GND: 'G', '3V3': '3V' };
-    for (const p of unoPins) o += `<text x="${p.x}" y="${p.y === 0 ? 14 : 168}" class="cs-dip-pin" fill="#e6f3f7">${esc(short[p.label] || p.label)}</text>`;
+    for (const p of unoPins) o += `<text x="${p.x}" y="${p.y === UNO_TOP_Y ? 22 : 188}" class="cs-dip-pin" fill="#e6f3f7" style="font-size:5px">${esc(short[p.label] || p.label)}</text>`;
     return o;
   },
 };

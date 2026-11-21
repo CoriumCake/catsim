@@ -365,7 +365,7 @@ void loop() {
   },
   {
     key: 'keypad', name: 'Keypad door lock (Keypad + servo)',
-    components: [esp, { id: 'keypad1', type: 'keypad', x: 70, y: 120, props: {} },
+    components: [esp, { id: 'keypad1', type: 'keypad', x: 10, y: 120, props: {} },
       { id: 'servo1', type: 'servo', x: 560, y: 220, props: {} },
       res('r1', 500, 70), led('led1', 600, 0, 'green'), res('r2', 500, 110), led('led2', 640, 0, 'red')],
     wires: [W('keypad1:R1', 'esp:D13'), W('keypad1:R2', 'esp:D12'), W('keypad1:R3', 'esp:D14'), W('keypad1:R4', 'esp:D27'),
