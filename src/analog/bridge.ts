@@ -19,6 +19,7 @@ import { wireNets } from './nets.ts';
 import { breadboardContacts } from '../contacts.js';
 import { CHIPS, type ChipDef, type ChipCtx, type Level, type Out } from '../digital/chips.ts';
 import { volt } from './circuit.ts';
+import { fmtOhms } from '../util.ts';
 
 /** A logic chip instance during simulation. */
 interface ChipRun {
@@ -356,8 +357,9 @@ export class AnalogBridge {
       for (const id of this.pendingBurn) {
         const l = this.leds.get(id); if (!l) continue;
         const mA = Math.round(Math.max(l.heat, l.d.current(sim.x)) * 1000);
+        const sum = this.ledSum(id, l.d, sim.x); // a series resistor that is too small
         this.burnt.add(id); changed = true;
-        this.s.app.log(`${id} burned out: about ${mA} mA flowed through it (LEDs take 20–30 mA at most). Add a series resistor, e.g. 220 Ω. Restart to replace it.`, 'error');
+        this.s.app.log(`${id} burned out: about ${mA} mA flowed through it (LEDs take 20–30 mA at most).${sum ? ` The sum: ${sum}. Use a bigger series resistor` : ' Add a series resistor'}, e.g. 220 Ω. Restart to replace it.`, 'error');
       }
       this.pendingBurn = [];
       for (const id of this.burnt) this.leds.get(id)?.d.setModel(OPEN_JUNCTION);
@@ -439,6 +441,28 @@ export class AnalogBridge {
     this.warned.add(key); this.s.app.log(msg, level);
   }
 
+  /** The sum behind an LED's current when one resistor is in series with it: "(3.27 V − 1.84 V) ÷ 10 kΩ = 0.14 mA".
+   * The numbers are the solved voltages, so the sum can be checked with a calculator. */
+  private ledSum(id: string, d: Diode, x: Float64Array): string | null {
+    // the LED's two legs (a plain LED only: an RGB LED or a display has several junctions on shared legs)
+    const la = this.pinNode.get(`${id}:A`), lk = this.pinNode.get(`${id}:C`);
+    if (la === undefined || lk === undefined) return null;
+    const i = d.current(x), vf = volt(x, la) - volt(x, lk);
+    if (!(i > 1e-7)) return null;
+    for (const c of this.comps.values()) {
+      if (c.type !== 'resistor') continue;
+      const a = this.pinNode.get(`${c.id}:1`), b = this.pinNode.get(`${c.id}:2`);
+      if (a === undefined || b === undefined) continue;
+      // in series: it shares a node (not ground) with the LED and carries the same current
+      if (![la, lk].some((n) => n !== 0 && (n === a || n === b))) continue;
+      const ohms = Number(c.props.ohms) || 220, vr = Math.abs(volt(x, a) - volt(x, b));
+      if (Math.abs(vr / ohms - i) > 0.02 * i) continue;
+      const mA = (vr / ohms) * 1000;
+      return `(${(vr + vf).toFixed(2)} V − ${vf.toFixed(2)} V) ÷ ${fmtOhms(ohms)} = ${mA.toFixed(mA < 1 ? 2 : 1)} mA`;
+    }
+    return null;
+  }
+
   /** Problems a multimeter would find: shorted or overloaded supplies, LEDs the wrong way round or starved of
    * current, relay coils that can't pull in. Checked a few times per simulated second; each is reported once. */
   private diagnose(): void {
@@ -455,7 +479,11 @@ export class AnalogBridge {
       if (this.burnt.has(id)) continue;
       const rev = v(l.d.k) - v(l.d.a);
       if (rev > 1) this.warn(`rev:${id}`, `${id} is the wrong way round: its cathode (−, short leg) is ${rev.toFixed(1)} V above its anode, so no current flows and it stays dark. Swap its legs.`);
-      if (dt > 0 && t > 0.5 && l.peak > 2e-6 && l.peak < 1e-3) this.warn(`dim:${id}`, `${id} barely lights: only ${(l.peak * 1000).toFixed(2)} mA flows (an LED needs about 5–20 mA). Use a smaller series resistor, e.g. 220 Ω.`);
+      if (dt > 0 && t > 0.5 && l.peak > 2e-6 && l.peak < 1e-3) {
+        // show the sum only while the LED is at that current (not in the off half of a blink)
+        const sum = Math.abs(l.d.current(x) - l.peak) < 0.01 * l.peak ? this.ledSum(id, l.d, x) : null;
+        this.warn(`dim:${id}`, `${id} barely lights: only ${(l.peak * 1000).toFixed(2)} mA flows (an LED needs about 5–20 mA).${sum ? ` The sum: ${sum}.` : ''} Use a smaller series resistor, e.g. 220 Ω.`);
+      }
       l.peak = 0;
     }
     for (const [id, r] of this.relays) {

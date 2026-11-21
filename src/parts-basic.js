@@ -1,7 +1,7 @@
 /* CatSim — basic parts and power parts: RGB LED, 7-segment digit, slide switch, batteries, FSR, coin
  * vibration motor, TP4056 charger, 3.3 V buck-boost regulator, joystick, KY-040 encoder, L298N, sound /
  * soil / gas sensor modules, a half-size breadboard and the ESP32-C3 Super Mini board. */
-import { esc } from './util.ts';
+import { esc, fmtOhms } from './util.ts';
 import { BATTERIES, batteryVolts, fsrOhms, SEGMENTS, ENC_STEP_MS } from './analog/models-extra.ts';
 
 const lead = (d) => `<path d="${d}" stroke="#a7adb7" stroke-width="2" fill="none"/>`;
@@ -9,7 +9,6 @@ const glow = (cx, cy, r, color, o) => (o > 0.02 ? `<circle cx="${cx}" cy="${cy}"
 const leds = (sim, id) => (sim.running && sim.analog && sim.analog.leds) || {};
 const act = (sim, id) => (sim.running && sim.analog && sim.analog.parts ? sim.analog.parts[id] ?? 0 : 0);
 const burnt = (sim, key) => !!(sim.running && sim.analog && sim.analog.burnt && (sim.analog.burnt.has ? sim.analog.burnt.has(key) : sim.analog.burnt.includes(key)));
-const fmtOhms = (o) => (o >= 1e6 ? `${+(o / 1e6).toFixed(1)} MΩ` : o >= 1e3 ? `${+(o / 1e3).toFixed(1)} kΩ` : `${Math.round(o)} Ω`);
 
 // ---------- RGB LED (4 legs) ----------
 const rgbLed = {
