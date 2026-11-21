@@ -114,6 +114,10 @@ export interface PartDef {
   holes?: Array<[number, number]>;
   /** boards with socket strips: [x of the first socket, number of sockets, y] for each strip */
   headers?: Array<[number, number, number]>;
+  /** LM393 sensor boards: where the circuit board lies in the part, and which sensor is on its end */
+  module?: { x0: number; y0: number; W: number; H: number; color: string; bare: boolean; head: string };
+  /** the 3D view doesn't add its standard upright pin header (the part has its own, or none) */
+  noPinHeaders?: boolean;
   /** Live state derived from the simulator, passed to render() (and the 3D view) */
   state?: (c: Component, sim: SimView) => Record<string, unknown>;
   /** 2D SVG markup for the part body */

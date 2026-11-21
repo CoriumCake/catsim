@@ -839,9 +839,10 @@ void loop() {
   },
   {
     key: 'env-modules', name: 'Sound, soil moisture and gas sensor modules',
-    components: [esp, { id: 'mic1', type: 'sound', x: 560, y: 220, props: { level: 0.2, threshold: 0.6 } },
-      { id: 'soil1', type: 'soil', x: 660, y: 220, props: { moisture: 0.4, threshold: 0.5 } },
-      { id: 'gas1', type: 'mq2', x: 160, y: 330, props: { gas: 0.1, threshold: 0.5 } }],
+    // the modules lie to the left of the board, their header pins towards it
+    components: [esp, { id: 'mic1', type: 'sound', x: 40, y: 40, props: { level: 0.2, threshold: 0.6 } },
+      { id: 'soil1', type: 'soil', x: -190, y: 130, props: { moisture: 0.4, threshold: 0.5 } },
+      { id: 'gas1', type: 'mq2', x: 50, y: 240, props: { gas: 0.1, threshold: 0.5 } }],
     wires: [W('mic1:VCC', 'esp:3V3', 'red'), W('mic1:GND', 'esp:GND.R', 'black'), W('mic1:AO', 'esp:D34'), W('mic1:DO', 'esp:D23'),
       W('soil1:VCC', 'esp:3V3', 'red'), W('soil1:GND', 'esp:GND.R', 'black'), W('soil1:AO', 'esp:D35'), W('soil1:DO', 'esp:D22'),
       W('gas1:VCC', 'esp:3V3', 'red'), W('gas1:GND', 'esp:GND.L', 'black'), W('gas1:AO', 'esp:D32'), W('gas1:DO', 'esp:D33')],
@@ -860,6 +861,36 @@ void loop() {
   if (digitalRead(22) == LOW) Serial.println("soil is wet");
   if (digitalRead(33) == LOW) Serial.println("GAS ALARM");
   delay(200);
+}
+`,
+  },
+  {
+    key: 'detect-modules', name: 'Flame, light, line and rain sensor modules',
+    components: [esp, { id: 'flame1', type: 'flame', x: 20, y: 10, props: { flame: 0, threshold: 0.5 } },
+      { id: 'light1', type: 'light', x: 56, y: 90, props: { light: 0.3, threshold: 0.5 } },
+      { id: 'line1', type: 'line', x: 56, y: 170, props: { reflect: 0.9, threshold: 0.5 } },
+      { id: 'rain1', type: 'rain', x: -170, y: 250, props: { rain: 0, threshold: 0.5 } }],
+    wires: [W('flame1:VCC', 'esp:3V3', 'red'), W('flame1:GND', 'esp:GND.L', 'black'), W('flame1:AO', 'esp:D34'), W('flame1:DO', 'esp:D23'),
+      W('light1:VCC', 'esp:3V3', 'red'), W('light1:GND', 'esp:GND.L', 'black'), W('light1:AO', 'esp:D35'), W('light1:DO', 'esp:D22'),
+      W('line1:VCC', 'esp:3V3', 'red'), W('line1:GND', 'esp:GND.L', 'black'), W('line1:AO', 'esp:D32'), W('line1:DO', 'esp:D21'),
+      W('rain1:VCC', 'esp:3V3', 'red'), W('rain1:GND', 'esp:GND.L', 'black'), W('rain1:AO', 'esp:D33'), W('rain1:DO', 'esp:D19')],
+    code: `// Four more LM393 sensor modules. On these, AO goes DOWN as the thing they sense gets stronger,
+// and DO goes LOW past the blue trimmer's threshold. Drag their sliders while it runs.
+void setup() {
+  Serial.begin(115200);
+  pinMode(23, INPUT); pinMode(22, INPUT); pinMode(21, INPUT); pinMode(19, INPUT);
+}
+
+void loop() {
+  Serial.print("flame:"); Serial.print(analogRead(34));
+  Serial.print(" light:"); Serial.print(analogRead(35));
+  Serial.print(" line:"); Serial.print(analogRead(32));
+  Serial.print(" rain:"); Serial.println(analogRead(33));
+  if (digitalRead(23) == LOW) Serial.println("FIRE!");
+  if (digitalRead(22) == LOW) Serial.println("it is bright");
+  if (digitalRead(21) == HIGH) Serial.println("on the black line");
+  if (digitalRead(19) == LOW) Serial.println("it is raining");
+  delay(300);
 }
 `,
   },

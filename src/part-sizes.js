@@ -45,12 +45,6 @@ export const REAL_SIZES = {
   encoder: { w: 72, h: 122, pins: row(['CLK', 'DT', 'SW', 'VCC', 'GND'], 16, 122, 'b') },
   // L298N motor driver: 43 × 43 mm
   l298n: { w: 169, h: 169, pins: { OUT1: [0, 50, 'l'], OUT2: [0, 65, 'l'], OUT3: [169, 50, 'r'], OUT4: [169, 65, 'r'], ...row(['12V', 'GND', '5V', 'ENA', 'IN1', 'IN2', 'IN3', 'IN4', 'ENB'], 45, 169, 'b') } },
-  // KY-038 sound sensor: 35 × 15 mm
-  sound: { w: 138, h: 59, pins: row(['AO', 'GND', 'VCC', 'DO'], 44, 59, 'b') },
-  // soil moisture control board (YL-38): 30 × 15 mm
-  soil: { w: 118, h: 59, pins: row(['VCC', 'GND', 'DO', 'AO'], 44, 59, 'b') },
-  // MQ-2 gas sensor board: 32 × 22 mm
-  mq2: { w: 126, h: 87, pins: row(['VCC', 'GND', 'DO', 'AO'], 44, 87, 'b') },
   // ESP32-C3 Super Mini: 22.5 × 18 mm, 8 pins on each long side, the two rows 15.24 mm (60 units) apart
   esp32c3: { w: 71, h: 88, pins: { ...row(['IO5', 'IO6', 'IO7', 'IO8', 'IO9', 'IO10', 'IO20', 'IO21'], 5.5, 9, 'l', 0, 10), ...row(['5V', 'GND', '3V3', 'IO4', 'IO3', 'IO2', 'IO1', 'IO0'], 65.5, 9, 'r', 0, 10) } },
 };

@@ -279,7 +279,7 @@ class View3D {
       const g = new T.Group(); g.position.set(c.x + d.w / 2, this.lift.get(c.id) || 0, c.y + d.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
       const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot); g.userData.pivot = pivot;
       this.root.add(g); this.picks.push(g);
-      const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
+      const build = this['build_' + c.type] || (d.dip ? this.build_dip : d.module ? this.build_sensor_module : null);
       if (build) build.call(this, pivot, c, d);
       if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
         this.box(pivot, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
@@ -735,30 +735,58 @@ class View3D {
     this.cyl(g, 120, 20, 8, 6, 20, this.mat('#2a2d33'), 16);
   }
 
-  build_sound(g, c, d) {
-    // a KY-038 sound sensor: a 35 × 15 mm blue board with the electret microphone, a potentiometer and the LM393
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
-    this.cyl(g, 20, 30, 10, 6, 22, this.mat('#c9ced6', { metalness: 0.5, roughness: 0.4 }), 20);
-    this.box(g, 40, 20, 14, 18, 6, 12, this.mat('#1e5bb8'));
-    this.cyl(g, 47, 29, 5, 12, 16, this.mat('#eee'), 16);
-    this.box(g, 70, 22, 14, 14, 6, 9, this.mat('#15171c'));
-  }
-
-  build_soil(g, c, d) {
-    // a YL-69 soil sensor: the 30 × 15 mm control board, and the 60 mm probe from its edge
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1f6f3a', { roughness: 0.5 }));
-    this.box(g, 40, 20, 14, 18, 6, 9, this.mat('#15171c'));
-    this.box(g, 70, 18, 14, 16, 6, 12, this.mat('#1e5bb8'));
-    this.box(g, 40, 62, 8, 236, 0, 3, this.mat('#9a9ea6', { roughness: 0.4 }));
-    this.box(g, 64, 62, 8, 236, 0, 3, this.mat('#9a9ea6', { roughness: 0.4 }));
-  }
-
-  build_mq2(g, c, d) {
-    // an MQ-2 gas sensor: a 32 × 22 mm board with the sensor can (Ø14 mm) and its mesh cap
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
-    this.cyl(g, 63, 40, 30, 6, 8, this.mat('#222'), 32);
-    this.cyl(g, 63, 40, 28, 8, 76, this.M.metal, 32);
-    this.cyl(g, 63, 40, 27, 74, 76, this.mat('#2a2d33'), 24);
+  build_sensor_module(g, c, d) {
+    // An LM393 sensor board from above: the sensor at one end, the blue threshold trimmer, the comparator chip, a
+    // mounting hole, two LEDs, and a right-angle header whose pins point out of the other end.
+    const T = THREE, { x0, y0, W, H, color, bare, head } = d.module, r = x0 + W, cy = y0 + H / 2, top = PCB_T;
+    const dark = this.mat('#15171c', { roughness: 0.5 }), metal = this.mat('#c9ced6', { metalness: 0.55, roughness: 0.35 });
+    this.pcb(g, [[x0, y0], [r, y0], [r, y0 + H], [x0, y0 + H]], bare ? [] : [[r - 34, cy, 5.9]], 0, top, this.mat(color, { roughness: 0.5 }));
+    for (const p of d.pins) { this.box(g, r - 10, p.y - 5, 10, 10, top, top + 10, this.M.header); this.box(g, r - 2, p.y - 1.25, d.w - r + 2, 2.5, top + 2.5, top + 5, this.M.gold); }
+    const fired = this.mat('#4a1515', { emissive: '#ff3030', emissiveIntensity: 0 });
+    this.box(g, r - 23, y0 + H - 7.5, 6, 3.5, top, top + 2.4, fired);
+    this.live(c, (s) => { fired.emissiveIntensity = s.fired ? 1.8 : 0; });
+    if (!bare) {
+      this.box(g, r - 94, cy - 14, 26, 28, top, top + 19, this.mat('#2463c9', { roughness: 0.4 })); // 3362-style trimmer, 4.9 mm tall
+      this.cyl(g, r - 81, cy, 7, top + 19, top + 20, this.mat('#e8dfc8', { metalness: 0.3, roughness: 0.5 }), 16);
+      this.box(g, r - 86, cy - 0.7, 10, 1.4, top + 20, top + 20.3, this.mat('#6b6250'));
+      this.box(g, r - 63, cy - 7.5, 19, 15, top + 0.6, top + 6.5, dark); // LM393, SO-8
+      for (let i = 0; i < 4; i++) for (const z of [cy - 11, cy + 7.5]) this.box(g, r - 61.5 + i * 5, z, 2, 3.5, top, top + 1.6, this.M.lead);
+      this.box(g, r - 23, y0 + 4, 6, 3.5, top, top + 2.4, this.mat('#1c5a30', { emissive: '#3ddc6f', emissiveIntensity: 0.9 }));
+      for (const [x, z] of [[r - 106, cy - 12], [r - 106, cy + 9], [r - 42, y0 + 5], [r - 42, y0 + H - 8]]) this.box(g, x, z, 6.3, 3.2, top, top + 2, this.mat('#2a2c31'));
+    }
+    if (head === 'mic') { // electret capsule, Ø9.7 × 6.7 mm
+      this.cyl(g, x0 + 22, cy, 19, top, top + 26, metal, 28); this.cyl(g, x0 + 22, cy, 14, top + 26, top + 26.3, dark, 24);
+    } else if (head === 'ir') { // a 5 mm diode lying flat, its dome pointing away from the board
+      const body = this.mat('#2a2630', { roughness: 0.25 });
+      const b = this.mesh(new T.CylinderGeometry(10, 10, 24, 20), body, g, x0 - 14, top + 8, cy); b.rotation.z = Math.PI / 2;
+      this.mesh(new T.SphereGeometry(10, 20, 12), body, g, x0 - 26, top + 8, cy);
+      for (const z of [cy - 5, cy + 5]) this.rod(g, [x0 - 2, top + 8, z], [x0 + 8, top + 1, z], 0.9, this.M.lead);
+    } else if (head === 'ldr') { // a 5 mm photoresistor on its two legs
+      for (const z of [cy - 5, cy + 5]) this.cyl(g, x0 + 12, z, 0.9, top, top + 14, this.M.lead, 8);
+      this.cyl(g, x0 + 12, cy, 10, top + 14, top + 22, this.mat('#e9a25a', { roughness: 0.6 }), 24);
+      this.cyl(g, x0 + 12, cy, 8, top + 22, top + 22.3, this.mat('#8c2f1b'), 20);
+    } else if (head === 'tcrt') { // TCRT5000: 10.2 × 5.8 × 7 mm, the LED and the phototransistor under two small domes
+      this.box(g, x0 + 4, cy - 20, 23, 40, top, top + 24, dark);
+      this.cyl(g, x0 + 15.5, cy - 9.5, 6, top + 24, top + 28, this.mat('#9cc7f2', { roughness: 0.2, transparent: true, opacity: 0.85 }), 16);
+      this.cyl(g, x0 + 15.5, cy + 9.5, 6, top + 24, top + 28, this.mat('#0a0a0c', { roughness: 0.2 }), 16);
+    } else if (head === 'can') { // MQ gas sensor: bakelite base, steel can, mesh window
+      this.cyl(g, x0 + 46, cy, 37, top, top + 8, dark, 36); this.cyl(g, x0 + 46, cy, 33, top + 8, top + 67, metal, 36);
+      this.cyl(g, x0 + 46, cy, 19, top + 67, top + 67.4, this.mat('#6f7782', { metalness: 0.4, roughness: 0.7 }), 24);
+    } else if (head === 'fork' || head === 'plate') { // the sensor is its own board, joined to this one by two wires
+      const fork = head === 'fork', px = x0 - (fork ? 250 : 227), t = cy - (fork ? 39.5 : 78.5), green = this.mat('#1f6f3a', { roughness: 0.6 });
+      const nickel = this.mat('#c9cdd3', { metalness: 0.6, roughness: 0.35 });
+      if (fork) {
+        for (const o of [0, 51]) this.pcb(g, [[px + 2, t + 14 + o], [px + 14, t + 2 + o], [px + 180, t + 2 + o], [px + 180, t + 26 + o], [px + 14, t + 26 + o]], [], 0, top, nickel);
+        this.box(g, px + 177, t, 59, 79, 0, top, green);
+      } else {
+        this.box(g, px, t, 213, 157, 0, top, green);
+        for (let i = 0; i < 12; i++) this.box(g, i % 2 ? px + 22 : px + 10, t + 11.5 + i * 11.7, 164, 5, top, top + 0.3, nickel);
+        for (const x of [px + 7.5, px + 183.5]) this.box(g, x, t + 11.5, 5, 134, top, top + 0.3, nickel);
+      }
+      const hx = px + (fork ? 222 : 199);
+      this.box(g, hx, cy - 10, 10, 20, top, top + 10, this.M.header); this.box(g, x0, cy - 10, 10, 20, top, top + 10, this.M.header);
+      for (const [z, col] of [[cy - 5, '#d94a4a'], [cy + 5, '#2b2f37']]) this.rod(g, [hx + 5, top + 11, z], [x0 + 5, top + 11, z], 1.4, this.mat(col, { roughness: 0.7 }));
+    }
   }
 
   build_esp32c3(g, c, d) {

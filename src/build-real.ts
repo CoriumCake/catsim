@@ -12,6 +12,7 @@ const SPEC: Record<string, (p: Record<string, unknown>) => string> = {
   nmos: (p) => String(p.model ?? ''),
   diode: (p) => String(p.model ?? ''),
   bme280: (p) => String(p.model ?? ''),
+  mq2: (p) => String(p.model ?? ''),
 };
 
 export interface BuyLine { qty: number; name: string }

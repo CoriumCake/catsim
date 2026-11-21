@@ -650,7 +650,7 @@ const PALETTE = [
   { cat: 'Boards', types: ['esp32', 'esp32c3', 'uno'] }, // picking one switches the project's board
   { cat: 'Output', types: ['led', 'rgb_led', 'seg7', 'buzzer', 'servo', 'lcd', 'lcd_parallel', 'oled', 'tm1637', 'ws2812_strip', 'ws2812_ring'] },
   { cat: 'Input', types: ['button', 'slide_switch', 'pot', 'joystick', 'encoder', 'keypad', 'ir_remote'] },
-  { cat: 'Sensors', types: ['dht22', 'ldr', 'pir', 'fsr', 'sound', 'soil', 'mq2', 'bme280', 'mpu6050', 'ds18b20', 'hcsr04', 'ds3231', 'ir_receiver'] },
+  { cat: 'Sensors', types: ['dht22', 'ldr', 'light', 'pir', 'fsr', 'sound', 'soil', 'rain', 'mq2', 'flame', 'line', 'bme280', 'mpu6050', 'ds18b20', 'hcsr04', 'ds3231', 'ir_receiver'] },
   { cat: 'Power', types: ['battery', 'tp4056', 'buckboost'] },
   { cat: 'Semiconductors', types: ['npn', 'pnp', 'nmos', 'diode', 'opamp'] },
   { cat: 'Electromechanical', types: ['motor', 'vibmotor', 'relay', 'stepper', 'l298n'] },
