@@ -6,21 +6,29 @@ import { breadboardContacts } from './contacts.js';
 import { footprint } from './rotation.ts';
 const DIRS = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
 const BTN_COLORS = { red: '#e5484d', blue: '#3d8bff', green: '#2fbf71', yellow: '#f5c518', black: '#30343c' };
-const PIN_TOP = 10, ESP_PIN_TOP = 15, DEG = Math.PI / 180;
+const PIN_TOP = 10, DEG = Math.PI / 180;
+// Heights in part units (1 unit = 0.254 mm). A circuit board is 1.6 mm thick.
+// The ESP32 DevKit stands on its header pins: 6.1 mm of pin, the 2.54 mm plastic strip, then the board; the pins'
+// short ends stand 1.4 mm proud of the top. The Uno rests on its solder joints (2 mm); its sockets are 8.5 mm tall.
+const PCB_T = 6.3, ESP_PCB_Y0 = 34, ESP_PIN_TOP = ESP_PCB_Y0 + PCB_T + 5.5, UNO_PCB_Y0 = 8, UNO_SOCKET_TOP = UNO_PCB_Y0 + PCB_T + 33.5;
 
 // Three.js is code-split: it is only downloaded the first time someone opens the 3D view.
-let THREE = null, OrbitControls = null, libPromise = null;
-const loadLibs = () => libPromise || (libPromise = Promise.all([import('three'), import('three/examples/jsm/controls/OrbitControls.js')])
-  .then(([three, orbit]) => {
-    THREE = three; OrbitControls = orbit.OrbitControls;
-    THREE.ColorManagement.enabled = false; // keep the colours as authored (r128 look)
-  })
+let THREE = null, OrbitControls = null, RoomEnvironment = null, libPromise = null;
+// Light levels, set by eye against photos of parts on a desk under a lamp.
+const ENV_LIGHT = 0.55, HEMI_LIGHT = 1.1, SUN_LIGHT = 2.4;
+// Parts that stand on their own wire legs, with no pin header: how high each leg rises before it meets the body.
+// A wire to such a part meets its leg just above the bench (LEG_JOIN).
+const LEGS = { led: 16, rgb_led: 16, capacitor: 4, npn: 12, pnp: 12, nmos: 12, ds18b20: 12, resistor: 9, diode: 9, button: 7, buzzer: 2, seg7: 2, opamp: 2, slide_switch: 2 };
+const LEG_JOIN = 3, WIRE_R = 2.6; // a jumper wire's insulation is about 1.3 mm across
+const legTop = (c, d) => (c.type in LEGS ? LEGS[c.type] : d.dip ? 2 : null);
+const loadLibs = () => libPromise || (libPromise = Promise.all([import('three'), import('three/examples/jsm/controls/OrbitControls.js'), import('three/examples/jsm/environments/RoomEnvironment.js')])
+  .then(([three, orbit, room]) => { THREE = three; OrbitControls = orbit.OrbitControls; RoomEnvironment = room.RoomEnvironment; })
   .catch((e) => { libPromise = null; throw e; }));
 
 function canvasTex(w, h, draw) {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   draw(cv.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
@@ -55,7 +63,9 @@ class View3D {
     const T = THREE;
     this.renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    this.renderer.outputColorSpace = T.LinearSRGBColorSpace;
+    // Colours are authored in sRGB and lit in linear light; a neutral tone curve keeps them true under bright light.
+    this.renderer.outputColorSpace = T.SRGBColorSpace;
+    this.renderer.toneMapping = T.NeutralToneMapping; this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = T.PCFSoftShadowMap;
     this.el = this.renderer.domElement;
@@ -66,11 +76,14 @@ class View3D {
     this.scene = new T.Scene();
     this.scene.background = new T.Color('#fdf5e8');
     this.camera = new T.PerspectiveCamera(38, 1, 5, 20000);
-    this.scene.add(new T.HemisphereLight(0xffffff, 0xb9a98a, 0.75 * Math.PI));
-    const sun = this.sun = new T.DirectionalLight(0xffffff, 0.75 * Math.PI);
-    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.radius = 3;
+    // A soft studio around the bench: it is what metal legs, pins and glossy plastic reflect.
+    const pmrem = new T.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; pmrem.dispose();
+    this.scene.environmentIntensity = ENV_LIGHT;
+    this.scene.add(new T.HemisphereLight(0xffffff, 0xd9cdb8, HEMI_LIGHT));
+    const sun = this.sun = new T.DirectionalLight(0xfff6ea, SUN_LIGHT);
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.6; sun.shadow.radius = 5;
     this.scene.add(sun, sun.target);
-    const under = new T.DirectionalLight(0xfff4e0, 0.45 * Math.PI); under.position.set(0.3, -1, 0.4); this.scene.add(under); // fill light for the undersides
     this.root = new T.Group(); this.scene.add(this.root);
 
     this.glowTex = canvasTex(64, 64, (g) => {
@@ -187,6 +200,26 @@ class View3D {
     m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
     return m;
   }
+  /** A circuit board: an outline (points in part-local x/z) with round holes through it, from y0 to y1. */
+  pcb(g, pts, holes, y0, y1, mat) {
+    const T = THREE, s = new T.Shape(pts.map(([x, z]) => new T.Vector2(x, -z)));
+    for (const [x, z, r] of holes) { const h = new T.Path(); h.absarc(x, -z, r, 0, Math.PI * 2, true); s.holes.push(h); }
+    const m = this.mesh(new T.ExtrudeGeometry(s, { depth: y1 - y0, bevelEnabled: false, curveSegments: 20 }), mat, g, 0, y0, 0);
+    m.rotation.x = -Math.PI / 2;
+    return m;
+  }
+  /** Printing on a board: a see-through picture laid on its top (or, with `under`, its bottom) face. `draw` gets a
+   * canvas context scaled to part units; on the bottom face a point at z is drawn at row h - z. */
+  print(g, w, h, y, draw, under = false) {
+    const S = 8, t = this.tex(w * S, h * S, (x) => { x.scale(S, S); draw(x); });
+    const m = this.mesh(new THREE.PlaneGeometry(w, h), this.mat('#ffffff', { map: t, transparent: true, depthWrite: false, roughness: 0.6 }), g, w / 2, y, h / 2, false);
+    m.rotation.x = under ? Math.PI / 2 : -Math.PI / 2; m.raycast = () => {}; // (no depth: its clear parts must not hide what lies beyond the board's edge)
+    return m;
+  }
+  /** A male pin header on a board: a plastic base with square gold pins, standing from y0. pts are [x, z]. */
+  pinHeader(g, pts, y0, pinTop) {
+    for (const [x, z] of pts) { this.box(g, x - 5, z - 5, 10, 10, y0, y0 + 10, this.M.header); this.box(g, x - 1.25, z - 1.25, 2.5, 2.5, y0 + 10, pinTop, this.M.gold); }
+  }
   glow(g, x, y, z, size, color) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
     this.disp.push(s.material);
@@ -200,10 +233,11 @@ class View3D {
   /** Top of a pin; `at` is the pin's place in the diagram (canvas.pinPos), which already includes any turn. */
   pinTop(at) {
     const c = at.comp, p = at.pin;
-    if (c.type === 'esp32') return { x: c.x + (p.x === 0 ? 5 : 145), y: ESP_PIN_TOP, z: c.y + p.y };
-    if (c.type === 'uno') return { x: c.x + p.x, y: 17, z: c.y + (p.y === 0 ? 4 : 176) }; // into the header sockets
+    if (c.type === 'esp32') return { x: c.x + p.x, y: ESP_PIN_TOP, z: c.y + p.y };
+    if (c.type === 'uno') return { x: c.x + p.x, y: UNO_SOCKET_TOP, z: c.y + p.y }; // into the header sockets
     if (c.type === 'breadboard') return { x: at.x, y: BREADBOARD_H, z: at.y }; // the hole, on the top face: a target inside the block can't be clicked
-    return { x: at.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
+    const d = DEFS[c.type];
+    return { x: at.x, y: (legTop(c, d) === null ? PIN_TOP : LEG_JOIN) + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
   }
 
   // ---------- scene ----------
@@ -229,17 +263,17 @@ class View3D {
     const b = this.bounds(); const pad = 90;
     const mw = b.x1 - b.x0 + pad * 2, md = b.z1 - b.z0 + pad * 2;
     const grid = this.tex(128, 128, (g) => {
-      g.fillStyle = '#2f6d55'; g.fillRect(0, 0, 128, 128);
-      g.strokeStyle = 'rgba(255,255,255,.10)'; g.lineWidth = 2; g.strokeRect(0, 0, 128, 128);
-      g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 1;
+      g.fillStyle = '#2a5a48'; g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1.5; g.strokeRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1;
       for (let i = 32; i < 128; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 128); g.moveTo(0, i); g.lineTo(128, i); g.stroke(); }
     });
     grid.wrapS = grid.wrapT = T.RepeatWrapping; grid.repeat.set(mw / 80, md / 80);
     const mat = this.mesh(new T.BoxGeometry(mw, 2, md), this.mat('#ffffff', { map: grid, roughness: 0.95 }), this.root, (b.x0 + b.x1) / 2, -1, (b.z0 + b.z1) / 2, false);
     mat.userData.ground = true; this.matMesh = mat;
-    mat.material.transparent = true;
+    mat.material.transparent = true; mat.renderOrder = -1; // drawn before every other see-through thing (LED domes, printing), so they show the mat behind them
     const floor = this.mesh(new T.PlaneGeometry(20000, 20000), (() => { const m = new T.ShadowMaterial({ opacity: 0.12 }); this.disp.push(m); return m; })(), this.root, 0, -2.01, 0, false);
-    floor.rotation.x = -Math.PI / 2; this.floorMesh = floor;
+    floor.rotation.x = -Math.PI / 2; this.floorMesh = floor; floor.renderOrder = -2;
 
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, r = Math.max(mw, md) / 2 + 60;
     this.sun.position.set(cx - r * 0.5, r * 1.6, cz - r * 0.35); this.sun.target.position.set(cx, 0, cz);
@@ -255,9 +289,12 @@ class View3D {
       const g = new T.Group(); g.position.set(c.x + d.w / 2, this.lift.get(c.id) || 0, c.y + d.h / 2); g.rotation.y = -(c.rot || 0) * DEG; g.userData.compId = c.id;
       const pivot = new T.Group(); pivot.position.set(-d.w / 2, 0, -d.h / 2); g.add(pivot); g.userData.pivot = pivot;
       this.root.add(g); this.picks.push(g);
-      const build = this['build_' + c.type] || (d.dip ? this.build_dip : null);
+      const build = this['build_' + c.type] || (d.dip ? this.build_dip : d.module ? this.build_sensor_module : null);
       if (build) build.call(this, pivot, c, d);
-      if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
+      const leg = legTop(c, d);
+      // a part's own legs go straight down, into the breadboard hole under them; modules have a pin header instead
+      if (leg !== null) for (const p of d.pins) this.cyl(pivot, p.x, p.y, 0.9, -9, leg, this.M.lead, 8);
+      else if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
         this.box(pivot, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
         this.cyl(pivot, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
       }
@@ -283,21 +320,23 @@ class View3D {
       }
     }
 
-    // wires: tubes arching up between pin tops
+    // wires: each rises straight out of its pin on a short bare tip, then arches over to the other end
     P.wires.forEach((w, i) => {
       const pa = this.app.canvas.pinPos(w.from), pb = this.app.canvas.pinPos(w.to); if (!pa || !pb) return;
-      const a = this.pinTop(pa), z = this.pinTop(pb);
-      const A = new T.Vector3(a.x, a.y, a.z), B = new T.Vector3(z.x, z.y, z.z);
-      const dist = A.distanceTo(B);
-      const h = Math.min(90, Math.max(18, dist * 0.32)), d = Math.min(70, Math.max(10, dist * 0.25));
-      const da = DIRS[pa.dir] || [0, 0], db = DIRS[pb.dir] || [0, 0];
+      const a = this.pinTop(pa), z = this.pinTop(pb), TIP = 5;
+      const A = new T.Vector3(a.x, a.y + TIP, a.z), B = new T.Vector3(z.x, z.y + TIP, z.z);
+      const dist = A.distanceTo(B), h = Math.min(62, Math.max(22, dist * 0.24)), lean = Math.min(26, dist * 0.16);
+      const dir = B.clone().sub(A).setY(0); if (dir.lengthSq() > 0) dir.normalize();
       const curve = new T.CubicBezierCurve3(A,
-        new T.Vector3(a.x + da[0] * d, a.y + h, a.z + da[1] * d),
-        new T.Vector3(z.x + db[0] * d, z.y + h, z.z + db[1] * d), B);
-      const m = this.mesh(new T.TubeGeometry(curve, Math.max(24, Math.round(dist / 6)), 1.6, 8, false),
-        this.mat(this.app.canvas.wireColor(w, i), { roughness: 0.45 }), this.root);
+        new T.Vector3(A.x + dir.x * lean, A.y + h, A.z + dir.z * lean),
+        new T.Vector3(B.x - dir.x * lean, B.y + h, B.z - dir.z * lean), B);
+      const m = this.mesh(new T.TubeGeometry(curve, Math.max(28, Math.round(dist / 5)), WIRE_R, 10, false),
+        this.mat(this.app.canvas.wireColor(w, i), { roughness: 0.35, metalness: 0 }), this.root);
       m.userData.wireId = w.id; this.picks.push(m);
-      for (const e of [A, B]) this.mesh(new T.SphereGeometry(1.9, 10, 8), m.material, this.root, e.x, e.y, e.z, false);
+      for (const e of [a, z]) {
+        this.cyl(this.root, e.x, e.z, 1.1, e.y - 3, e.y + TIP + 0.5, this.M.lead, 8).castShadow = false;
+        this.mesh(new T.SphereGeometry(WIRE_R, 10, 8), m.material, this.root, e.x, e.y + TIP, e.z, false);
+      }
     });
     for (const o of this.root.children.slice(n0)) o.userData.link = true;
     this.linkDisp = this.disp.splice(d0); // kept apart from the scene's own resources, so a drag doesn't pile them up
@@ -315,74 +354,66 @@ class View3D {
   live(c, fn) { this.updaters.push({ c, fn }); }
 
   // ---------- parts ----------
-  build_esp32(g, c) {
-    const T = THREE;
-    const PCB_Y0 = 4, PCB_Y1 = 7;
-    const pins = DEFS.esp32.pins;
-    const top = this.tex(600, 1048, (x) => {
-      const k = 4; x.scale(k, k);
-      x.fillStyle = '#151b28'; x.fillRect(0, 0, 150, 262);
-      x.fillStyle = '#c4cbd8'; x.font = '600 6.5px ui-monospace, Menlo, monospace'; x.textBaseline = 'middle';
-      for (const p of pins) { x.textAlign = p.x === 0 ? 'left' : 'right'; x.fillText(p.label, p.x === 0 ? 11 : 139, p.y + 0.5); }
-      x.fillStyle = '#7f8aa3'; x.textAlign = 'center'; x.font = '600 7px system-ui, sans-serif'; x.fillText('DEVKIT V1', 75, 146);
-      x.font = '600 5px system-ui, sans-serif'; x.fillText('PWR', 62, 214); x.fillText('IO2', 90, 214); x.fillText('EN', 51, 230); x.fillText('BOOT', 101, 230);
-    });
-    // Back side. The -Y box face shows the image flipped about the X axis, so physical z maps to row 262 - z.
-    const back = this.tex(600, 1048, (x) => {
-      const k = 4; x.scale(k, k);
-      x.fillStyle = '#151b28'; x.fillRect(0, 0, 150, 262);
-      x.strokeStyle = 'rgba(201,162,39,.35)'; x.lineWidth = 1.1; x.lineCap = 'round';
-      const traces = [[[18, 70], [40, 70], [52, 82], [52, 150]], [[132, 90], [110, 90], [98, 102], [98, 170]], [[18, 160], [60, 160], [75, 175], [75, 220]], [[132, 200], [100, 200], [90, 210]], [[30, 230], [120, 230]]];
-      for (const t of traces) { x.beginPath(); t.forEach(([a, b], i) => (i ? x.lineTo(a, b) : x.moveTo(a, b))); x.stroke(); }
-      x.fillStyle = 'rgba(201,162,39,.5)';
-      for (const [a, b] of [[52, 150], [98, 170], [75, 220], [90, 210], [40, 120], [110, 60]]) { x.beginPath(); x.arc(a, b, 1.6, 0, Math.PI * 2); x.fill(); }
-      x.textBaseline = 'middle'; x.font = '600 6.5px ui-monospace, Menlo, monospace';
-      for (const p of pins) {
-        const row = 262 - p.y, px = p.x === 0 ? 5 : 145;
-        x.fillStyle = '#d8b24a'; x.beginPath(); x.arc(px, row, 3.4, 0, Math.PI * 2); x.fill();
-        x.fillStyle = '#151b28'; x.beginPath(); x.arc(px, row, 1.3, 0, Math.PI * 2); x.fill();
-        x.fillStyle = '#c4cbd8'; x.textAlign = p.x === 0 ? 'left' : 'right'; x.fillText(p.label, p.x === 0 ? 11 : 139, row + 0.5);
-      }
-      x.fillStyle = '#d8b24a'; x.fillRect(57, 262 - 266, 36, 14);
-      x.fillStyle = '#c4cbd8'; x.textAlign = 'center';
-      x.font = '700 9px system-ui, sans-serif'; x.fillText('ESP32 DEVKIT V1', 75, 118);
-      x.font = '600 6px system-ui, sans-serif'; x.fillText('CP2102 · AMS1117-3.3', 75, 130); x.fillText('sim.catcodehq.com', 75, 140);
-      x.strokeStyle = '#c4cbd8'; x.lineWidth = 0.8; x.strokeRect(46, 100, 58, 46);
-    });
-    const side = this.mat('#151b28', { roughness: 0.7 });
-    const pcb = this.mesh(new T.BoxGeometry(150, PCB_Y1 - PCB_Y0, 262),
-      [side, side, this.mat('#ffffff', { map: top, roughness: 0.7 }), this.mat('#ffffff', { map: back, roughness: 0.7 }), side, side], g, 75, (PCB_Y0 + PCB_Y1) / 2, 131);
-    pcb.material.forEach((m) => this.disp.includes(m) || this.disp.push(m));
-    // header strips (underneath, holding the board up) and pins on top
-    for (const x of [0, 140]) this.box(g, x, 30, 10, 212, 0, PCB_Y0, this.M.header);
-    for (const p of pins) {
-      const px = p.x === 0 ? 5 : 145;
-      this.box(g, px - 2.6, p.y - 2.6, 5.2, 5.2, PCB_Y1, PCB_Y1 + 2.5, this.M.header);
-      this.cyl(g, px, p.y, 0.9, PCB_Y1 + 2.5, ESP_PIN_TOP, this.M.gold, 8);
+  build_esp32(g, c, d) {
+    // A DOIT ESP32 DevKit V1 (30 pins), 28.2 × 51.8 mm: the WROOM-32 module with its antenna at one end, the micro-USB
+    // socket at the other with EN and BOOT beside it, the CP2102 USB chip and the 3.3 V regulator between them.
+    // It stands on its two rows of header pins, as it does on a desk.
+    const T = THREE, W = d.w, H = d.h, Y0 = ESP_PCB_Y0, Y1 = Y0 + PCB_T;
+    const dark = this.mat('#1d2027', { roughness: 0.5 }), chipM = this.mat('#23262c', { roughness: 0.4 });
+    const r = 4, corners = [[r, 0], [W - r, 0], [W, r], [W, H - r], [W - r, H], [r, H], [0, H - r], [0, r]];
+    this.pcb(g, corners, d.holes.map(([x, z]) => [x, z, 5.5]), Y0, Y1, this.mat('#151b28', { roughness: 0.7 }));
+    // pin headers: the plastic strip under the board, each pin from the desk up through its solder joint
+    for (const x of [d.pins[0].x, d.pins[d.pins.length - 1].x]) this.box(g, x - 5, d.pins[0].y - 5, 10, 150, Y0 - 10, Y0, this.M.header);
+    for (const p of d.pins) {
+      this.box(g, p.x - 1.25, p.y - 1.25, 2.5, 2.5, 0, ESP_PIN_TOP, this.M.gold);
+      this.mesh(new T.CylinderGeometry(1.6, 3.2, 2.4, 10), this.M.lead, g, p.x, Y1 + 1.2, p.y, false);
     }
-    // WROOM module: antenna PCB + metal shield
-    this.box(g, 34, 6, 82, 120, PCB_Y1, PCB_Y1 + 1.6, this.mat('#1f232d'));
-    const ant = this.tex(328, 112, (x) => { x.strokeStyle = '#c9a227'; x.lineWidth = 8; x.beginPath(); x.moveTo(24, 96); [[24, 20], [56, 20], [56, 96], [88, 96], [88, 20], [120, 20], [120, 96], [152, 96], [152, 20], [184, 20], [184, 96], [216, 96], [216, 20], [248, 20], [248, 96], [280, 96], [280, 20], [304, 20]].forEach(([a, b]) => x.lineTo(a, b)); x.stroke(); });
-    const antM = this.mesh(new T.PlaneGeometry(82, 28), this.mat('#ffffff', { map: ant, transparent: true, roughness: 0.4, metalness: 0.4 }), g, 75, PCB_Y1 + 1.65, 20, false);
-    antM.rotation.x = -Math.PI / 2;
-    const shieldTop = this.tex(280, 344, (x) => {
-      const gr = x.createLinearGradient(0, 0, 280, 344); gr.addColorStop(0, '#e6e9ed'); gr.addColorStop(0.5, '#bcc2cb'); gr.addColorStop(1, '#d7dbe1');
-      x.fillStyle = gr; x.fillRect(0, 0, 280, 344);
-      x.fillStyle = '#4b525c'; x.textAlign = 'center'; x.font = '700 44px system-ui, sans-serif'; x.fillText('ESP32', 140, 160);
-      x.font = '600 26px system-ui, sans-serif'; x.fillText('WROOM-32', 140, 205);
+    // WROOM-32 module (18 × 25.5 × 3.1 mm): its own thin board, the antenna trace, the metal can
+    this.box(g, 20, 0, 71, 100, Y1, Y1 + 3.2, this.mat('#1f232d'));
+    for (let i = 0; i < 14; i++) for (const x of [20, 91]) this.box(g, x - 1, 30 + i * 5 - 1.2, 2, 2.4, Y1, Y1 + 3.3, this.M.gold); // castellated pads
+    const shieldTop = this.tex(252, 280, (x) => {
+      const gr = x.createLinearGradient(0, 0, 252, 280); gr.addColorStop(0, '#e6e9ed'); gr.addColorStop(0.5, '#bcc2cb'); gr.addColorStop(1, '#d7dbe1');
+      x.fillStyle = gr; x.fillRect(0, 0, 252, 280);
+      x.fillStyle = '#4b525c'; x.textAlign = 'center'; x.font = '700 40px system-ui, sans-serif'; x.fillText('ESP32', 126, 130);
+      x.font = '600 24px system-ui, sans-serif'; x.fillText('WROOM-32', 126, 172);
     });
     const sm = this.M.metal;
-    const shield = this.mesh(new T.BoxGeometry(70, 3, 86), [sm, sm, this.mat('#ffffff', { map: shieldTop, metalness: 0.5, roughness: 0.35 }), sm, sm, sm], g, 75, PCB_Y1 + 3.1, 77);
+    const shield = this.mesh(new T.BoxGeometry(63, 9, 70), [sm, sm, this.mat('#ffffff', { map: shieldTop, metalness: 0.5, roughness: 0.35 }), sm, sm, sm], g, 55.5, Y1 + 3.2 + 4.5, 62);
     shield.material.forEach((m) => this.disp.includes(m) || this.disp.push(m));
+    this.print(g, W, H, Y1 + 3.25, (x) => { // the antenna, on the module
+      x.strokeStyle = '#c9a227'; x.lineWidth = 1.6; x.beginPath(); x.moveTo(27, 21);
+      let px = 27; x.lineTo(px, 6); for (let i = 0; i < 3; i++) { x.lineTo(px += 8, 6); x.lineTo(px, 18); x.lineTo(px += 8, 18); x.lineTo(px, 6); } x.lineTo(px + 9, 6); x.stroke();
+    });
+    // USB-serial chip, regulator (SOT-223) with its tab, tantalum capacitor, a few small resistors and capacitors
+    this.box(g, 45.5, 124, 20, 20, Y1, Y1 + 3.5, chipM);
+    this.box(g, 24, 152, 26, 14, Y1, Y1 + 6.3, chipM); this.box(g, 31, 147, 12, 5, Y1, Y1 + 1.6, sm);
+    for (const x of [28, 37, 46]) this.box(g, x - 1.5, 166, 3, 4, Y1, Y1 + 1.6, sm);
+    this.box(g, 60, 153, 14, 8, Y1, Y1 + 6, this.mat('#d9a441', { roughness: 0.5 }));
+    const smdR = this.mat('#2a2c31'), smdC = this.mat('#b08f63');
+    for (const [x, z, t, m] of [[24, 106, 0, smdR], [24, 114, 0, smdC], [48, 106, 1, smdC], [58, 106, 1, smdR], [84, 108, 0, smdR], [84, 118, 0, smdC], [72, 128, 1, smdC], [72, 138, 1, smdR], [34, 130, 1, smdR], [34, 140, 1, smdC], [82, 152, 0, smdC], [82, 162, 0, smdR]]) this.box(g, x, z, t ? 3.2 : 6.3, t ? 6.3 : 3.2, Y1, Y1 + 2, m);
     // LEDs
-    const ledY = PCB_Y1 + 1;
-    const pwr = this.box(g, 58, 200, 8, 5, PCB_Y1, ledY + 0.6, this.mat('#3a1418', { emissive: '#ff3344', emissiveIntensity: 0 }));
-    const io2 = this.box(g, 86, 200, 8, 5, PCB_Y1, ledY + 0.6, this.mat('#14233d', { emissive: '#3d8bff', emissiveIntensity: 0 }));
-    const gp = this.glow(g, 62, ledY + 3, 202.5, 26, '#ff3344'), gi = this.glow(g, 90, ledY + 3, 202.5, 34, '#3d8bff');
-    // EN / BOOT buttons and USB
-    for (const x of [44, 94]) { this.box(g, x, 236, 14, 10, PCB_Y1, PCB_Y1 + 3, this.M.metal); this.cyl(g, x + 7, 241, 3, PCB_Y1 + 3, PCB_Y1 + 4.5, this.mat('#2b2f38')); }
-    this.box(g, 58, 250, 34, 16, PCB_Y1, PCB_Y1 + 7, this.M.metal);
-    this.box(g, 63, 265.5, 24, 1, PCB_Y1 + 2, PCB_Y1 + 5, this.mat('#555c66'));
+    const pwr = this.box(g, 34, 108, 6, 4, Y1, Y1 + 2.4, this.mat('#3a1418', { emissive: '#ff3344', emissiveIntensity: 0 }));
+    const io2 = this.box(g, 71, 108, 6, 4, Y1, Y1 + 2.4, this.mat('#14233d', { emissive: '#3d8bff', emissiveIntensity: 0 }));
+    const gp = this.glow(g, 37, Y1 + 5, 110, 20, '#ff3344'), gi = this.glow(g, 74, Y1 + 5, 110, 26, '#3d8bff');
+    // EN / BOOT buttons and the micro-USB socket, which overhangs the end of the board
+    for (const x of [22, 77]) { this.box(g, x, 180, 12, 16, Y1, Y1 + 6.5, sm); this.cyl(g, x + 6, 188, 3.2, Y1 + 6.5, Y1 + 8.5, dark, 14); }
+    this.box(g, 40.5, 186, 30, 22, Y1, Y1 + 10.5, sm);
+    this.box(g, 43.5, 207.6, 24, 0.6, Y1 + 2.5, Y1 + 8, this.mat('#2b2f37'));
+    // silkscreen: each pin's name beside it, on both faces
+    const names = (x) => {
+      x.fillStyle = '#c4cbd8'; x.font = '600 5px ui-monospace, Menlo, monospace'; x.textBaseline = 'middle';
+      for (const p of d.pins) { const left = p.x < W / 2; x.textAlign = left ? 'left' : 'right'; x.fillText(p.label, left ? p.x + 5 : p.x - 5, p.y + 0.3); }
+    };
+    this.print(g, W, H, Y1 + 0.06, (x) => {
+      names(x);
+      x.fillStyle = '#7f8aa3'; x.textAlign = 'center'; x.font = '600 4.5px system-ui, sans-serif'; x.fillText('DEVKIT V1', 55.5, 173);
+      x.font = '600 4px system-ui, sans-serif'; x.fillText('PWR', 37, 118); x.fillText('IO2', 74, 118); x.fillText('EN', 28, 200.5); x.fillText('BOOT', 83, 200.5);
+    });
+    this.print(g, W, H, Y0 - 0.06, (x) => {
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = '700 7px system-ui, sans-serif'; x.fillText('ESP32 DEVKIT V1', 55.5, 96);
+      x.font = '600 4.5px system-ui, sans-serif'; x.fillText('CP2102 · AMS1117-3.3', 55.5, 106);
+    }, true);
     this.live(c, (s) => {
       pwr.material.emissiveIntensity = s.power ? 1.6 : 0; gp.material.opacity = s.power ? 0.7 : 0;
       const l = s.led2 || 0; io2.material.emissiveIntensity = l * 2; gi.material.opacity = l * 0.9;
@@ -390,33 +421,35 @@ class View3D {
   }
 
   build_led(g, c) {
-    const m = this.mat('#ff3b3b', { transparent: true, opacity: 0.88, roughness: 0.25, emissive: '#000000' });
-    this.cyl(g, 15, 16, 12.5, 12, 14.5, m);
-    this.cyl(g, 15, 16, 9.8, 14.5, 26, m); // a 5 mm LED: a 5.0 mm dome on a 2.54 mm lead pitch
-    const dome = this.mesh(new THREE.SphereGeometry(9.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 15, 26, 16);
-    dome.castShadow = true;
-    for (const x of [10, 20]) { this.rod(g, [x, 1, 16], [x, 12, 16], 0.9, this.M.lead); this.leg(g, x, 16, x, 56); }
-    const glow = this.glow(g, 15, 24, 16, 60, '#ff3b3b');
+    // A 5 mm LED standing on its two legs, over its pins: a Ø5.0 mm dome on a Ø5.8 mm flange, 8.6 mm tall, with the
+    // lead frame (the anode's post, the cathode's anvil and cup) showing through the tinted epoxy.
+    const T = THREE, X = 15, Z = 56, Y = LEGS.led;
+    const m = this.mat('#ff3b3b', { transparent: true, opacity: 0.62, roughness: 0.12, metalness: 0, emissive: '#000000' });
+    this.cyl(g, X, Z, 11.4, Y, Y + 4, m, 32);
+    this.cyl(g, X, Z, 9.84, Y + 4, Y + 24.2, m, 32);
+    this.mesh(new T.SphereGeometry(9.84, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), m, g, X, Y + 24.2, Z);
+    this.box(g, 8.6, Z - 1, 2.8, 2, Y, Y + 15, this.M.lead); this.box(g, 16.5, Z - 1, 6.5, 2, Y, Y + 12, this.M.lead);
+    this.box(g, 13, Z - 1.4, 9, 2.8, Y + 12, Y + 17, this.M.lead);
+    const glow = this.glow(g, X, Y + 20, Z, 60, '#ff3b3b');
     let last = '';
     this.live(c, (s) => {
       const col = s.burnt ? '#3b2f2a' : (LED_COLORS[c.props.color] || LED_COLORS.red); const b = s.b || 0;
-      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); m.opacity = s.burnt ? 1 : m.opacity; last = col; }
-      m.emissiveIntensity = b * 1.4; m.opacity = 0.72 + 0.28 * b;
+      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); last = col; }
+      m.emissiveIntensity = b * 1.6; m.opacity = s.burnt ? 0.95 : 0.6 + 0.35 * b;
       glow.material.opacity = b > 0.02 ? 0.25 + 0.6 * b : 0; glow.scale.setScalar(44 + 30 * b);
     });
   }
 
   build_resistor(g, c) {
-    const T = THREE;
-    this.rod(g, [15, 7, 8], [55, 7, 8], 0.9, this.M.lead);
-    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.9, this.M.lead);
-    const body = this.mesh(new T.CylinderGeometry(4.9, 4.9, 27, 20), this.mat('#d9c49a'), g, 35, 7, 8);
-    body.rotation.z = Math.PI / 2;
-    const bands = [];
-    for (const x of [24, 28, 32, 43.5]) {
-      const band = this.mesh(new T.CylinderGeometry(5.0, 5.0, 2.2, 20), this.mat('#000'), g, x, 7, 8);
-      band.rotation.z = Math.PI / 2; bands.push(band);
-    }
+    // a 1/4 W resistor: a 6.8 × 2.5 mm body that swells over its two end caps, on legs bent down 10.16 mm apart
+    const T = THREE, Y = LEGS.resistor, turn = (m) => { m.rotation.z = Math.PI / 2; return m; };
+    this.rod(g, [15, Y, 8], [55, Y, 8], 0.9, this.M.lead);
+    for (const x of [15, 55]) this.mesh(new T.SphereGeometry(0.9, 8, 6), this.M.lead, g, x, Y, 8, false);
+    const bm = this.mat('#d8c39a', { roughness: 0.45 });
+    turn(this.mesh(new T.CylinderGeometry(4.5, 4.5, 20, 24), bm, g, 35, Y, 8));
+    for (const x of [25.5, 44.5]) this.mesh(new T.SphereGeometry(5.3, 20, 14), bm, g, x, Y, 8).scale.set(0.85, 1, 1);
+    // three value bands (the first sits on the end cap) and the tolerance band on the other cap
+    const bands = [[25.5, 5.38, 2.4], [30.6, 4.58, 2.2], [34.8, 4.58, 2.2], [44.5, 5.38, 2.4]].map(([x, r, w]) => turn(this.mesh(new T.CylinderGeometry(r, r, w, 24), this.mat('#000', { roughness: 0.5 }), g, x, Y, 8, false)));
     let last = '';
     this.live(c, () => {
       const k = String(c.props.ohms); if (k === last) return; last = k;
@@ -428,16 +461,20 @@ class View3D {
   }
 
   build_button(g, c) {
-    // a 6 mm × 6 mm switch body, 4.3 mm tall, with a 3.5 mm cap
-    this.box(g, 1, 7, 24, 24, 0, 17, this.mat('#2a2e36'));
-    this.cyl(g, 13, 19, 4, 17, 17.6, this.mat('#1a1c21'), 20);
-    const capM = this.mat('#e5484d', { roughness: 0.4 });
-    const cap = this.cyl(g, 13, 19, 7, 17.6, 20, capM, 24);
+    // a 6 × 6 mm tactile switch, 4.3 mm tall: a black base, a pressed-steel cover with four studs, a round actuator
+    // carrying a coloured cap
+    const base = this.mat('#22252b', { roughness: 0.6 });
+    this.box(g, 1, 7, 24, 24, 0, 13.5, base);
+    this.box(g, 1.6, 7.6, 22.8, 22.8, 13.5, 14.6, this.M.metal);
+    for (const [x, z] of [[4.6, 10.6], [21.4, 10.6], [4.6, 27.4], [21.4, 27.4]]) this.cyl(g, x, z, 1.5, 14.6, 15.1, base, 10);
+    this.cyl(g, 13, 19, 4.5, 14.6, 17, this.mat('#1a1c21'), 20);
+    const capM = this.mat('#e5484d', { roughness: 0.35 });
+    const cap = this.cyl(g, 13, 19, 7.2, 17, 21, capM, 28);
     let last = '';
     this.live(c, (s) => {
       const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
       if (col !== last) { capM.color.set(col); last = col; }
-      cap.position.y = s.pressed ? -1.2 : 0;
+      cap.position.y = 19 + (s.pressed ? -1.4 : 0);
     });
   }
 
@@ -451,33 +488,35 @@ class View3D {
   }
 
   build_breadboard(g, c, d) {
-    // a half-size breadboard: an 8.5 mm block, holes on the top, a centre trench, red and blue rails
-    const T = THREE, w = d.w, h = d.h;
-    // the trench and the rail stripes are placed from the holes themselves, as in the 2D drawing: a stripe runs
-    // beside each rail (red outside the + holes, blue outside the − holes), never over the holes
-    const y = (id) => d.pins.find((p) => p.id === id).y, H = BREADBOARD_H;
-    this.box(g, 0, 0, w, h, 0, H, this.mat('#f4f1e8', { roughness: 0.8 }));
-    this.box(g, 0, y('1e') + 6, w, y('1f') - y('1e') - 12, H, H + 0.4, this.mat('#d6cfb8'));
+    // A half-size breadboard: an 8.5 mm white block with square holes on the 2.54 mm grid, a groove 1.5 mm deep
+    // between rows e and f, and a red and a blue line beside each pair of rails.
+    const T = THREE, w = d.w, h = d.h, H = BREADBOARD_H, G = 6;
+    const y = (id) => d.pins.find((p) => p.id === id).y, g0 = y('1e') + 6, g1 = y('1f') - 6;
+    const white = this.mat('#f2f0e9', { roughness: 0.5 });
+    this.box(g, 0, 0, w, h, 0, H - G, white);
+    this.box(g, 0, 0, w, g0, H - G, H, white); this.box(g, 0, g1, w, h - g1, H - G, H, white);
     const red = this.mat('#e5484d'), blue = this.mat('#3d8bff');
-    for (const [at, m] of [[y('T+1') - 6, red], [y('T-1') + 6, blue], [y('B+1') - 6, red], [y('B-1') + 6, blue]]) this.box(g, 8, at - 1, w - 16, 2, H, H + 0.4, m);
-    const geo = new T.CylinderGeometry(1.9, 1.9, 0.8, 10); this.disp.push(geo);
-    const holes = new T.InstancedMesh(geo, this.mat('#2b2f37'), d.pins.length), m4 = new T.Matrix4();
-    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.1, p.y); holes.setMatrixAt(i, m4); });
-    holes.instanceMatrix.needsUpdate = true; g.add(holes);
+    for (const [at, m] of [[y('T+1') - 6, red], [y('T-1') + 6, blue], [y('B+1') - 6, red], [y('B-1') + 6, blue]]) this.box(g, 8, at - 0.8, w - 16, 1.6, H, H + 0.2, m);
+    // the holes: a dark square mouth, a little below the top face
+    const geo = new T.BoxGeometry(4.1, 0.5, 4.1); this.disp.push(geo);
+    const holes = new T.InstancedMesh(geo, this.mat('#1b1c21', { roughness: 0.9 }), d.pins.length), m4 = new T.Matrix4();
+    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.15, p.y); holes.setMatrixAt(i, m4); });
+    holes.instanceMatrix.needsUpdate = true; holes.receiveShadow = true; g.add(holes);
     // printed on the top, as on the real board: the row letters a–j at both ends, the column numbers along
     // the outer rows, and + / − at the ends of the rails
-    const S = 4, pin = (id) => d.pins.find((p) => p.id === id), last = d.pins.filter((p) => /^\d+a$/.test(p.id)).length;
+    const S = 6, pin = (id) => d.pins.find((p) => p.id === id), last = d.pins.filter((p) => /^\d+a$/.test(p.id)).length;
     const print = this.tex(w * S, h * S, (x) => {
-      x.scale(S, S); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#5b6170';
-      x.font = '600 6.5px system-ui, sans-serif';
+      x.scale(S, S); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#7a808c';
+      x.font = '600 5.5px system-ui, sans-serif';
       for (const r of 'abcdefghij') for (const at of [6, w - 6]) x.fillText(r, at, pin('1' + r).y);
       for (let col = 1; col <= last; col += (col === 1 ? 4 : 5)) for (const at of [pin('1a').y - 7.5, pin('1j').y + 7.5]) x.fillText(String(col), pin(col + 'a').x, at);
-      x.font = '700 9px system-ui, sans-serif';
+      x.font = '700 8px system-ui, sans-serif';
       for (const [id, sign, color] of [['T+1', '+', '#e5484d'], ['T-1', '−', '#3d8bff'], ['B+1', '+', '#e5484d'], ['B-1', '−', '#3d8bff']]) {
         x.fillStyle = color; for (const at of [14, w - 6]) x.fillText(sign, at, pin(id).y);
       }
     });
-    this.mesh(new T.PlaneGeometry(w, h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.8 }), g, w / 2, H + 0.45, h / 2, false).rotation.x = -Math.PI / 2;
+    const pl = this.mesh(new T.PlaneGeometry(w, h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.8 }), g, w / 2, H + 0.12, h / 2, false);
+    pl.rotation.x = -Math.PI / 2; pl.raycast = () => {};
   }
 
   build_hcsr04(g, c, d) {
@@ -488,12 +527,11 @@ class View3D {
   }
 
   build_ds18b20(g, c) {
-    // a TO-92 package: 4.95 mm wide, the leads 1.27 mm apart, with the 18B20 mark on the flat face
-    const T = THREE;
-    this.mesh(new T.CylinderGeometry(9.75, 9.75, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#222', { roughness: 0.55 }), g, 15, 20, 22);
-    const face = this.tex(112, 56, (x) => { x.fillStyle = '#222'; x.fillRect(0, 0, 112, 56); x.fillStyle = '#ddd'; x.textAlign = 'center'; x.font = '600 18px system-ui, sans-serif'; x.fillText('18B20', 56, 34); });
-    this.mesh(new T.PlaneGeometry(14, 8), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
-    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
+    // a TO-92 package standing over its three legs, with the 18B20 mark on the flat face
+    const T = THREE, Z = 62, Y = LEGS.ds18b20, bm = this.mat('#222', { roughness: 0.5 });
+    this.mesh(new T.CylinderGeometry(9.75, 9.75, 19, 28, 1, false, Math.PI / 2, Math.PI), bm, g, 15, Y + 9.5, Z);
+    const face = this.tex(156, 152, (x) => { x.fillStyle = '#222'; x.fillRect(0, 0, 156, 152); x.fillStyle = '#ddd'; x.textAlign = 'center'; x.font = '600 28px system-ui, sans-serif'; x.fillText('DALLAS', 78, 60); x.fillText('18B20', 78, 96); });
+    this.mesh(new T.PlaneGeometry(19.5, 19), this.mat('#ffffff', { map: face, roughness: 0.5 }), g, 15, Y + 9.5, Z + 0.05, false);
   }
 
   build_oled(g, c, d) {
@@ -626,12 +664,14 @@ class View3D {
   }
 
   build_rgb_led(g, c, d) {
-    // a 5 mm RGB LED: a Ø9.8 mm dome on four 2.54 mm legs; its colour follows the three channels
-    const m = this.mat('#f5f5f5', { transparent: true, opacity: 0.85, roughness: 0.25 });
-    this.cyl(g, 22, 28, 9.8, 6, 24, m, 28);
-    this.mesh(new THREE.SphereGeometry(9.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 22, 24, 28);
-    for (const x of [7, 17, 27, 37]) this.leg(g, x, 28, x, 70);
-    this.live(c, (s) => { const r = (s.r || 0), gg = (s.g || 0), b = (s.b || 0); m.color.setRGB(0.25 + 0.75 * r, 0.25 + 0.75 * gg, 0.25 + 0.75 * b); m.emissive.setRGB(r, gg, b); m.emissiveIntensity = 1.2; });
+    // a 5 mm RGB LED standing over its four legs: a frosted Ø5 mm dome whose colour follows the three channels
+    const T = THREE, X = 22, Z = d.pins[0].y, Y = LEGS.rgb_led;
+    const m = this.mat('#f5f5f5', { transparent: true, opacity: 0.8, roughness: 0.3 });
+    this.cyl(g, X, Z, 11.4, Y, Y + 4, m, 32);
+    this.cyl(g, X, Z, 9.84, Y + 4, Y + 24.2, m, 32);
+    this.mesh(new T.SphereGeometry(9.84, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), m, g, X, Y + 24.2, Z);
+    this.box(g, X - 6, Z - 1.2, 12, 2.4, Y, Y + 14, this.M.lead);
+    this.live(c, (s) => { const r = (s.r || 0), gg = (s.g || 0), b = (s.b || 0); m.color.setRGB(0.25 + 0.75 * r, 0.25 + 0.75 * gg, 0.25 + 0.75 * b); m.emissive.setRGB(r, gg, b); m.emissiveIntensity = 1.4; });
   }
 
   build_seg7(g, c, d) {
@@ -645,10 +685,12 @@ class View3D {
   }
 
   build_slide_switch(g, c, d) {
-    // an SPDT slide switch: a 12 × 8 mm black body with a slider that moves to the ON or OFF side
-    this.box(g, 4, 8, 48, 30, 0, 7, this.mat('#1b1d22', { roughness: 0.5 }));
-    const knob = this.box(g, 14, 14, 12, 14, 7, 9, this.mat('#e5e7eb', { roughness: 0.4 }));
-    this.live(c, () => { knob.position.x = c.props.on ? 14 : 0; });
+    // an SPDT slide switch over its three legs: a pressed-steel case with a black slider that moves to the ON side
+    const Z = d.pins[0].y, Y = LEGS.slide_switch;
+    this.box(g, 4, Z - 15, 48, 30, Y, Y + 14, this.mat('#c3c8d0', { metalness: 0.7, roughness: 0.35 }));
+    this.box(g, 12, Z - 7, 32, 14, Y + 14, Y + 14.4, this.mat('#15171c'));
+    const knob = this.box(g, 14, Z - 5, 12, 10, Y + 14, Y + 26, this.mat('#1b1d22', { roughness: 0.5 }));
+    this.live(c, () => { knob.position.x = 20 + (c.props.on ? 16 : 0); });
   }
 
   build_battery(g, c, d) {
@@ -719,30 +761,58 @@ class View3D {
     this.cyl(g, 120, 20, 8, 6, 20, this.mat('#2a2d33'), 16);
   }
 
-  build_sound(g, c, d) {
-    // a KY-038 sound sensor: a 35 × 15 mm blue board with the electret microphone, a potentiometer and the LM393
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
-    this.cyl(g, 20, 30, 10, 6, 22, this.mat('#c9ced6', { metalness: 0.5, roughness: 0.4 }), 20);
-    this.box(g, 40, 20, 14, 18, 6, 12, this.mat('#1e5bb8'));
-    this.cyl(g, 47, 29, 5, 12, 16, this.mat('#eee'), 16);
-    this.box(g, 70, 22, 14, 14, 6, 9, this.mat('#15171c'));
-  }
-
-  build_soil(g, c, d) {
-    // a YL-69 soil sensor: the 30 × 15 mm control board, and the 60 mm probe from its edge
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1f6f3a', { roughness: 0.5 }));
-    this.box(g, 40, 20, 14, 18, 6, 9, this.mat('#15171c'));
-    this.box(g, 70, 18, 14, 16, 6, 12, this.mat('#1e5bb8'));
-    this.box(g, 40, 62, 8, 236, 0, 3, this.mat('#9a9ea6', { roughness: 0.4 }));
-    this.box(g, 64, 62, 8, 236, 0, 3, this.mat('#9a9ea6', { roughness: 0.4 }));
-  }
-
-  build_mq2(g, c, d) {
-    // an MQ-2 gas sensor: a 32 × 22 mm board with the sensor can (Ø14 mm) and its mesh cap
-    this.box(g, 0, 0, d.w, d.h, 0, 6, this.mat('#1d4ea8', { roughness: 0.5 }));
-    this.cyl(g, 63, 40, 30, 6, 8, this.mat('#222'), 32);
-    this.cyl(g, 63, 40, 28, 8, 76, this.M.metal, 32);
-    this.cyl(g, 63, 40, 27, 74, 76, this.mat('#2a2d33'), 24);
+  build_sensor_module(g, c, d) {
+    // An LM393 sensor board from above: the sensor at one end, the blue threshold trimmer, the comparator chip, a
+    // mounting hole, two LEDs, and a right-angle header whose pins point out of the other end.
+    const T = THREE, { x0, y0, W, H, color, bare, head } = d.module, r = x0 + W, cy = y0 + H / 2, top = PCB_T;
+    const dark = this.mat('#15171c', { roughness: 0.5 }), metal = this.mat('#c9ced6', { metalness: 0.55, roughness: 0.35 });
+    this.pcb(g, [[x0, y0], [r, y0], [r, y0 + H], [x0, y0 + H]], bare ? [] : [[r - 34, cy, 5.9]], 0, top, this.mat(color, { roughness: 0.5 }));
+    for (const p of d.pins) { this.box(g, r - 10, p.y - 5, 10, 10, top, top + 10, this.M.header); this.box(g, r - 2, p.y - 1.25, d.w - r + 2, 2.5, top + 2.5, top + 5, this.M.gold); }
+    const fired = this.mat('#4a1515', { emissive: '#ff3030', emissiveIntensity: 0 });
+    this.box(g, r - 23, y0 + H - 7.5, 6, 3.5, top, top + 2.4, fired);
+    this.live(c, (s) => { fired.emissiveIntensity = s.fired ? 1.8 : 0; });
+    if (!bare) {
+      this.box(g, r - 94, cy - 14, 26, 28, top, top + 19, this.mat('#2463c9', { roughness: 0.4 })); // 3362-style trimmer, 4.9 mm tall
+      this.cyl(g, r - 81, cy, 7, top + 19, top + 20, this.mat('#e8dfc8', { metalness: 0.3, roughness: 0.5 }), 16);
+      this.box(g, r - 86, cy - 0.7, 10, 1.4, top + 20, top + 20.3, this.mat('#6b6250'));
+      this.box(g, r - 63, cy - 7.5, 19, 15, top + 0.6, top + 6.5, dark); // LM393, SO-8
+      for (let i = 0; i < 4; i++) for (const z of [cy - 11, cy + 7.5]) this.box(g, r - 61.5 + i * 5, z, 2, 3.5, top, top + 1.6, this.M.lead);
+      this.box(g, r - 23, y0 + 4, 6, 3.5, top, top + 2.4, this.mat('#1c5a30', { emissive: '#3ddc6f', emissiveIntensity: 0.9 }));
+      for (const [x, z] of [[r - 106, cy - 12], [r - 106, cy + 9], [r - 42, y0 + 5], [r - 42, y0 + H - 8]]) this.box(g, x, z, 6.3, 3.2, top, top + 2, this.mat('#2a2c31'));
+    }
+    if (head === 'mic') { // electret capsule, Ø9.7 × 6.7 mm
+      this.cyl(g, x0 + 22, cy, 19, top, top + 26, metal, 28); this.cyl(g, x0 + 22, cy, 14, top + 26, top + 26.3, dark, 24);
+    } else if (head === 'ir') { // a 5 mm diode lying flat, its dome pointing away from the board
+      const body = this.mat('#2a2630', { roughness: 0.25 });
+      const b = this.mesh(new T.CylinderGeometry(10, 10, 24, 20), body, g, x0 - 14, top + 8, cy); b.rotation.z = Math.PI / 2;
+      this.mesh(new T.SphereGeometry(10, 20, 12), body, g, x0 - 26, top + 8, cy);
+      for (const z of [cy - 5, cy + 5]) this.rod(g, [x0 - 2, top + 8, z], [x0 + 8, top + 1, z], 0.9, this.M.lead);
+    } else if (head === 'ldr') { // a 5 mm photoresistor on its two legs
+      for (const z of [cy - 5, cy + 5]) this.cyl(g, x0 + 12, z, 0.9, top, top + 14, this.M.lead, 8);
+      this.cyl(g, x0 + 12, cy, 10, top + 14, top + 22, this.mat('#e9a25a', { roughness: 0.6 }), 24);
+      this.cyl(g, x0 + 12, cy, 8, top + 22, top + 22.3, this.mat('#8c2f1b'), 20);
+    } else if (head === 'tcrt') { // TCRT5000: 10.2 × 5.8 × 7 mm, the LED and the phototransistor under two small domes
+      this.box(g, x0 + 4, cy - 20, 23, 40, top, top + 24, dark);
+      this.cyl(g, x0 + 15.5, cy - 9.5, 6, top + 24, top + 28, this.mat('#9cc7f2', { roughness: 0.2, transparent: true, opacity: 0.85 }), 16);
+      this.cyl(g, x0 + 15.5, cy + 9.5, 6, top + 24, top + 28, this.mat('#0a0a0c', { roughness: 0.2 }), 16);
+    } else if (head === 'can') { // MQ gas sensor: bakelite base, steel can, mesh window
+      this.cyl(g, x0 + 46, cy, 37, top, top + 8, dark, 36); this.cyl(g, x0 + 46, cy, 33, top + 8, top + 67, metal, 36);
+      this.cyl(g, x0 + 46, cy, 19, top + 67, top + 67.4, this.mat('#6f7782', { metalness: 0.4, roughness: 0.7 }), 24);
+    } else if (head === 'fork' || head === 'plate') { // the sensor is its own board, joined to this one by two wires
+      const fork = head === 'fork', px = x0 - (fork ? 250 : 227), t = cy - (fork ? 39.5 : 78.5), green = this.mat('#1f6f3a', { roughness: 0.6 });
+      const nickel = this.mat('#c9cdd3', { metalness: 0.6, roughness: 0.35 });
+      if (fork) {
+        for (const o of [0, 51]) this.pcb(g, [[px + 2, t + 14 + o], [px + 14, t + 2 + o], [px + 180, t + 2 + o], [px + 180, t + 26 + o], [px + 14, t + 26 + o]], [], 0, top, nickel);
+        this.box(g, px + 177, t, 59, 79, 0, top, green);
+      } else {
+        this.box(g, px, t, 213, 157, 0, top, green);
+        for (let i = 0; i < 12; i++) this.box(g, i % 2 ? px + 22 : px + 10, t + 11.5 + i * 11.7, 164, 5, top, top + 0.3, nickel);
+        for (const x of [px + 7.5, px + 183.5]) this.box(g, x, t + 11.5, 5, 134, top, top + 0.3, nickel);
+      }
+      const hx = px + (fork ? 222 : 199);
+      this.box(g, hx, cy - 10, 10, 20, top, top + 10, this.M.header); this.box(g, x0, cy - 10, 10, 20, top, top + 10, this.M.header);
+      for (const [z, col] of [[cy - 5, '#d94a4a'], [cy + 5, '#2b2f37']]) this.rod(g, [hx + 5, top + 11, z], [x0 + 5, top + 11, z], 1.4, this.mat(col, { roughness: 0.7 }));
+    }
   }
 
   build_esp32c3(g, c, d) {
@@ -817,12 +887,13 @@ class View3D {
 
   build_buzzer(g, c) {
     const T = THREE;
-    this.cyl(g, 22, 22, 20, 0, 14, this.mat('#1c1e22', { roughness: 0.5 }), 36);
-    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, 14, 22, false); ring.rotation.x = Math.PI / 2;
-    this.cyl(g, 22, 22, 3.5, 13.6, 14.1, this.mat('#000'), 16);
-    for (const x of [16, 28]) this.leg(g, x, 42, x, 62);
+    // a Ø12 mm buzzer standing over its two legs
+    const Z = 62, Y = LEGS.buzzer;
+    this.cyl(g, 22, Z, 20, Y, Y + 14, this.mat('#1c1e22', { roughness: 0.45 }), 40);
+    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, Y + 14, Z, false); ring.rotation.x = Math.PI / 2;
+    this.cyl(g, 22, Z, 3.5, Y + 13.6, Y + 14.1, this.mat('#000'), 16);
     const wm = new T.MeshBasicMaterial({ color: '#ffd60a', transparent: true, opacity: 0, depthWrite: false }); this.disp.push(wm);
-    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 16, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
+    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, Y + 16, Z, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
     this.live(c, (s) => {
       const on = s.f > 0; const t = performance.now() / 700;
       waves.forEach((w, i) => {
@@ -850,20 +921,21 @@ class View3D {
 
   // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
   build_to92(g, c, mark) {
-    const T = THREE;
-    const body = this.mesh(new T.CylinderGeometry(9.25, 9.25, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#23262d', { roughness: 0.55 }), g, 15, 20, 22);
-    body.castShadow = true;
-    const face = this.tex(112, 88, (x) => {
-      x.fillStyle = '#2b2f37'; x.fillRect(0, 0, 112, 88);
-      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 20px system-ui, sans-serif'; x.fillText(mark, 56, 40);
-      x.font = '16px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 56, 66);
+    // a TO-92 package standing over its three legs (1.27 mm apart): a 4.7 mm wide, 4.8 mm tall half-round body with
+    // the type printed on its flat face
+    const T = THREE, Z = 62, Y = LEGS[c.type] ?? 12;
+    const bm = this.mat('#23262d', { roughness: 0.5 });
+    this.mesh(new T.CylinderGeometry(9.25, 9.25, 19, 28, 1, false, Math.PI / 2, Math.PI), bm, g, 15, Y + 9.5, Z);
+    this.box(g, 5.75, Z - 0.02, 18.5, 0.04, Y, Y + 19, bm);
+    const face = this.tex(148, 152, (x) => {
+      x.fillStyle = '#23262d'; x.fillRect(0, 0, 148, 152);
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 30px system-ui, sans-serif'; x.fillText(mark, 74, 62);
+      x.font = '22px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 74, 100);
     });
-    const plate = this.mesh(new T.PlaneGeometry(14, 10), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
-    plate.rotation.y = 0; // faces +z (toward the default camera)
-    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
+    this.mesh(new T.PlaneGeometry(18.5, 19), this.mat('#ffffff', { map: face, roughness: 0.5 }), g, 15, Y + 9.5, Z + 0.05, false);
     const dotM = this.mat('#0f3d1d', { emissive: '#22c55e', emissiveIntensity: 0 });
-    this.cyl(g, 21, 26, 1.2, 30, 30.6, dotM, 10);
-    const glow = this.glow(g, 21, 32, 26, 12, '#22c55e');
+    this.cyl(g, 21, Z - 4, 1.2, Y + 19, Y + 19.6, dotM, 10);
+    const glow = this.glow(g, 21, Y + 21, Z - 4, 12, '#22c55e');
     this.live(c, (s) => { const on = s.on || 0; dotM.emissiveIntensity = on * 2; glow.material.opacity = on * 0.8; });
   }
   build_npn(g, c) { this.build_to92(g, c, '2N2222'); }
@@ -871,18 +943,20 @@ class View3D {
   build_nmos(g, c) { this.build_to92(g, c, '2N7000'); }
 
   build_diode(g, c) {
-    const T = THREE;
-    this.rod(g, [15, 7, 8], [55, 7, 8], 0.8, this.M.lead);
-    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.8, this.M.lead);
-    const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.9, roughness: 0.2 });
-    const body = this.mesh(new T.CylinderGeometry(3.75, 3.75, 16, 20), bodyM, g, 35, 7, 8); body.rotation.z = Math.PI / 2;
+    // an axial diode on legs bent down over its pins: a glass 1N4148 (DO-35), or a black plastic body with a silver
+    // band for the rectifiers; the band marks the cathode
+    const T = THREE, Y = LEGS.diode;
+    this.rod(g, [15, Y, 8], [55, Y, 8], 0.8, this.M.lead);
+    for (const x of [15, 55]) this.mesh(new T.SphereGeometry(0.8, 8, 6), this.M.lead, g, x, Y, 8, false);
+    const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.85, roughness: 0.12 });
+    const body = this.mesh(new T.CylinderGeometry(3.75, 3.75, 16, 24), bodyM, g, 35, Y, 8); body.rotation.z = Math.PI / 2;
     const bandM = this.mat('#222');
-    const band = this.mesh(new T.CylinderGeometry(3.8, 3.8, 2.5, 20), bandM, g, 39.5, 7, 8); band.rotation.z = Math.PI / 2;
+    const band = this.mesh(new T.CylinderGeometry(3.8, 3.8, 2.5, 24), bandM, g, 39.5, Y, 8); band.rotation.z = Math.PI / 2;
     let last = '';
     this.live(c, () => {
       const m = String(c.props.model); if (m === last) return; last = m;
       const glass = m === '1N4148';
-      bodyM.color.set(glass ? '#c98a3a' : '#1d1f24'); bodyM.opacity = glass ? 0.85 : 1; bandM.color.set(glass ? '#222' : '#cfd4dc');
+      bodyM.color.set(glass ? '#c98a3a' : '#1d1f24'); bodyM.opacity = glass ? 0.85 : 1; bodyM.roughness = glass ? 0.12 : 0.5; bandM.color.set(glass ? '#222' : '#cfd4dc');
       body.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3); band.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3);
     });
   }
@@ -929,50 +1003,73 @@ class View3D {
   }
 
   build_capacitor(g, c) {
-    const T = THREE;
-    const elec = this.mat('#2457b8', { roughness: 0.4 }), stripe = this.mat('#9db7e6');
+    // over its two legs: an electrolytic can (Ø5 × 11 mm, blue sleeve, the stripe marks the − leg, a scored vent on
+    // top), or for 100 nF a ceramic disc (Ø5 mm, 2.5 mm thick)
+    const T = THREE, X = 15, Z = 56, Y = LEGS.capacitor;
+    const elec = this.mat('#1f4fa8', { roughness: 0.3 }), stripe = this.mat('#b8c9ea', { roughness: 0.4 });
     const can = new T.Group(); g.add(can);
-    this.cyl(can, 15, 18, 9.85, 8, 51, elec, 28); // Ø5 mm, 11 mm long
-    const st = this.mesh(new T.CylinderGeometry(9.95, 9.95, 43, 28, 1, true, -0.35, 0.7), stripe, can, 15, 29.5, 18); st.rotation.y = Math.PI / 2;
-    this.cyl(can, 15, 18, 9.5, 51, 51.6, this.M.metal, 28);
+    this.cyl(can, X, Z, 9.3, Y - 1, Y, this.mat('#17191d'), 28);
+    this.cyl(can, X, Z, 9.85, Y, Y + 43, elec, 32);
+    const st = this.mesh(new T.CylinderGeometry(9.95, 9.95, 41, 28, 1, true, -0.35, 0.7), stripe, can, X, Y + 21.5, Z); st.rotation.y = Math.PI / 2;
+    this.cyl(can, X, Z, 9.2, Y + 43, Y + 43.5, this.M.metal, 32);
+    for (const r of [0, Math.PI / 2]) { const v = this.mesh(new T.BoxGeometry(14, 0.2, 0.7), this.mat('#7d848e'), can, X, Y + 43.55, Z, false); v.rotation.y = r + Math.PI / 4; }
     const disc = new T.Group(); g.add(disc);
-    // a 100 nF ceramic disc: Ø5 mm, 2.5 mm thick
-    const dm = this.mesh(new T.SphereGeometry(10, 20, 12), this.mat('#e1a93b', { roughness: 0.6 }), disc, 15, 18, 18); dm.scale.set(1, 1, 0.5);
-    for (const x of [10, 20]) { this.rod(g, [x, 1, 18], [x, 8, 18], 0.8, this.M.lead); this.leg(g, x, 18, x, 56); }
+    const dm = this.mesh(new T.SphereGeometry(10, 24, 14), this.mat('#d99a2b', { roughness: 0.5 }), disc, X, Y + 18, Z); dm.scale.set(1, 1, 0.45);
+    for (const x of [10, 20]) this.cyl(disc, x, Z, 0.9, Y, Y + 12, this.M.lead, 8);
     let last = '';
     this.live(c, () => { const v = String(c.props.value); if (v === last) return; last = v; const ceramic = v === '100nF'; can.visible = !ceramic; disc.visible = ceramic; });
   }
 
   build_uno(g, c, d) {
-    const T = THREE;
-    const pcbTop = this.tex(1056, 720, (x) => {
-      x.scale(4, 4);
-      x.fillStyle = '#0b6d8c'; x.fillRect(0, 0, 264, 180);
-      x.fillStyle = '#e6f3f7'; x.textAlign = 'center'; x.font = '800 22px system-ui, sans-serif'; x.fillText('UNO', 90, 74);
-      x.font = '600 7px system-ui, sans-serif'; x.fillText('R3 · ATmega328P · 16 MHz', 90, 88);
-      x.font = '600 5.5px ui-monospace, monospace';
-      for (const p of d.pins) x.fillText(p.label.replace('GND', 'G'), p.x, p.y === 0 ? 16 : 166);
-      for (const [lx, ly, l] of [[118, 30, 'L'], [118, 42, 'TX'], [118, 54, 'RX'], [222, 150, 'ON']]) { x.textAlign = 'left'; x.fillText(l, lx + 8, ly + 2); }
-    });
-    const side = this.mat('#0b6d8c');
-    this.mesh(new T.BoxGeometry(264, 3, 168), [side, side, this.mat('#ffffff', { map: pcbTop }), side, side, side], g, 132, 5.5, 90);
-    for (const [x, z, w, dd] of [[8, 14, 6, 6], [256, 14, 6, 6], [8, 166, 6, 6], [256, 166, 6, 6]]) this.box(g, x - 3, z - 3, w, dd, 0, 4, this.M.header); // standoffs
-    // female headers: black sockets with a hole per pin
-    const sock = this.mat('#1d1f24', { roughness: 0.7 });
-    for (const [x0, x1, z] of [[34, 154, -2], [160, 256, -2], [70, 154, 172], [166, 238, 172]]) this.box(g, x0, z, x1 - x0, 10, 7, 17, sock);
-    for (const p of d.pins) this.box(g, p.x - 1.4, (p.y === 0 ? 3 : 177) - 1.4, 2.8, 2.8, 16.95, 17.05, this.mat('#050506'));
-    // ATmega328P (DIP-28), USB-B, barrel jack
-    this.box(g, 120, 96, 132, 34, 7, 14, this.mat('#1d1f24', { roughness: 0.5 }));
-    const chipTop = this.tex(528, 136, (x) => { x.fillStyle = '#1d1f24'; x.fillRect(0, 0, 528, 136); x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 38px system-ui, sans-serif'; x.fillText('ATmega328P', 264, 82); });
-    const cl = this.mesh(new T.PlaneGeometry(120, 30), this.mat('#ffffff', { map: chipTop }), g, 186, 14.05, 113, false); cl.rotation.x = -Math.PI / 2;
-    for (let i = 0; i < 14; i++) for (const z of [94, 130]) this.box(g, 124 + i * 9, z - 1, 3, 3, 4, 10, this.M.lead);
-    this.box(g, -14, 32, 46, 36, 7, 28, this.M.metal);
-    this.box(g, -10, 120, 40, 30, 7, 26, this.mat('#1d1f24'));
+    // An Arduino Uno R3, 68.6 × 53.4 mm, with the outline and mounting holes of Arduino's drawing: the USB-B socket and
+    // the barrel jack on the left, four socket strips along the long edges, the ATmega328P in its socket, the USB chip
+    // (ATmega16U2) turned 45° with its crystal, two capacitors, the regulator, two ICSP headers and the reset button.
+    const T = THREE, Y0 = UNO_PCB_Y0, Y1 = Y0 + PCB_T;
+    const black = this.mat('#1d1f24', { roughness: 0.6 }), sm = this.M.metal;
+    this.pcb(g, d.outline, d.holes.map(([x, z]) => [x, z, 6.3]), Y0, Y1, this.mat('#0b6d8c', { roughness: 0.6 }));
+    // socket strips, with a square hole per pin; the solder tails under the board are what it rests on
+    for (const [x0, n, z] of d.headers) {
+      this.box(g, x0 - 5, z - 5, n * 10, 10, Y1, UNO_SOCKET_TOP, black);
+      for (let i = 0; i < n; i++) { this.box(g, x0 + i * 10 - 1.6, z - 1.6, 3.2, 3.2, UNO_SOCKET_TOP - 0.05, UNO_SOCKET_TOP + 0.06, this.mat('#050506')); this.box(g, x0 + i * 10 - 1, z - 1, 2, 2, 0, Y0, this.M.lead); }
+    }
+    // USB-B socket (12 × 16 × 11 mm) and barrel jack (9 × 14 × 11 mm): both overhang the left edge
+    this.box(g, -25, 36.5, 63.5, 49.5, Y1, Y1 + 43, sm);
+    this.box(g, -25.3, 44, 0.6, 34.5, Y1 + 6, Y1 + 37, this.mat('#2b2f37'));
+    this.box(g, -6, 164.5, 55, 31.5, Y1, Y1 + 43, black);
+    const jack = this.mesh(new T.CylinderGeometry(12.5, 12.5, 0.8, 24), this.mat('#050506'), g, -6.2, Y1 + 25, 180.25, false); jack.rotation.z = Math.PI / 2;
+    const pinJ = this.mesh(new T.CylinderGeometry(4, 4, 24, 12), sm, g, 5.5, Y1 + 25, 180.25, false); pinJ.rotation.z = Math.PI / 2;
+    // ATmega328P (DIP-28) in its socket: legs on the 2.54 mm grid, the rows 7.62 mm apart
+    this.box(g, 112, 139, 140, 32, Y1, Y1 + 12, this.mat('#15171b', { roughness: 0.8 }));
+    this.box(g, 112, 141, 140, 28, Y1 + 14, Y1 + 27, black);
+    for (let i = 0; i < 14; i++) for (const z of [140, 170]) { this.box(g, 117 + i * 10 - 2, z - 0.6, 4, 1.2, Y1 + 12, Y1 + 21, this.M.lead); this.box(g, 117 + i * 10 - 2, Math.min(z, z + (z < 155 ? 1.5 : -1.5)), 4, 2.1, Y1 + 20, Y1 + 21.2, this.M.lead); }
+    this.print(g, d.w, d.h, Y1 + 27.06, (x) => { x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '600 8px system-ui, sans-serif'; x.fillText('ATmega328P', 182, 155.5); x.beginPath(); x.arc(112, 155, 4, -Math.PI / 2, Math.PI / 2); x.fillStyle = '#33363d'; x.fill(); });
+    // the USB chip (TQFP-32, 7 mm) turned 45°, the 16 MHz crystal (HC-49S), regulator (SOT-223), two 6.3 mm capacitors
+    const u2 = this.mesh(new T.BoxGeometry(28, 4, 28), black, g, 100, Y1 + 2, 66); u2.rotation.y = Math.PI / 4;
+    this.box(g, 53, 92, 27, 18, Y1, Y1 + 14, sm); for (const x of [53, 80]) this.cyl(g, x, 101, 9, Y1, Y1 + 14, sm, 20);
+    this.box(g, 12, 114, 26, 14, Y1, Y1 + 6.3, black); this.box(g, 19, 109, 12, 5, Y1, Y1 + 1.6, sm);
+    for (const x of [72, 98]) {
+      this.box(g, x - 13, 157, 26, 26, Y1, Y1 + 2, black);
+      this.cyl(g, x, 170, 12.4, Y1 + 2, Y1 + 23, this.mat('#d5d9df', { metalness: 0.8, roughness: 0.25 }), 28);
+      const mark = this.mesh(new T.CylinderGeometry(12.4, 12.4, 0.15, 28, 1, false, Math.PI, Math.PI / 2), this.mat('#2b2f37'), g, x, Y1 + 23.1, 170, false); mark.raycast = () => {};
+    }
+    // ICSP headers (2 × 3 pins) for the two chips, and the reset button
+    this.pinHeader(g, [64, 74, 84].flatMap((x) => [[x, 32], [x, 42]]), Y1, Y1 + 34);
+    this.pinHeader(g, [250, 260].flatMap((x) => [[x, 85], [x, 95], [x, 105]]), Y1, Y1 + 34);
+    this.box(g, 16, 3, 24, 24, Y1, Y1 + 13, sm); this.cyl(g, 28, 15, 6, Y1 + 13, Y1 + 17, this.mat('#a4372f', { roughness: 0.5 }), 16);
     // on-board LEDs
-    const leds = [[118, 30, '#ffb020', 'L'], [118, 42, '#ffb020', 'tx'], [118, 54, '#ffb020', 'rx'], [222, 150, '#22c55e', 'on']].map(([x, z, col, k]) => {
+    const leds = [[128, 38, '#ffb020', 'L'], [128, 50, '#ffb020', 'tx'], [128, 62, '#ffb020', 'rx'], [224, 62, '#22c55e', 'on']].map(([x, z, col, k]) => {
       const m = this.mat('#2a3238', { emissive: col, emissiveIntensity: 0 });
-      this.box(g, x - 4, z - 2, 8, 4, 7, 8.5, m);
-      return { k, m, glow: this.glow(g, x, 11, z, 18, col) };
+      this.box(g, x - 4, z - 2, 8, 4, Y1, Y1 + 2.4, m);
+      return { k, m, glow: this.glow(g, x, Y1 + 5, z, 18, col) };
+    });
+    // silkscreen
+    this.print(g, d.w, d.h, Y1 + 0.06, (x) => {
+      x.fillStyle = '#e6f3f7'; x.textAlign = 'center'; x.font = '800 22px system-ui, sans-serif'; x.fillText('UNO', 182, 108);
+      x.font = '600 6.5px system-ui, sans-serif'; x.fillText('R3 · ATmega328P · 16 MHz', 182, 121);
+      x.font = '600 5px ui-monospace, monospace';
+      for (const p of d.pins) x.fillText(p.label.replace('GND', 'G').replace('IOREF', 'IO').replace('RESET', 'RS').replace('AREF', 'AR'), p.x, p.y < d.h / 2 ? 23.5 : 189.5);
+      x.textAlign = 'left'; for (const [lx, lz, l] of [[136, 40, 'L'], [136, 52, 'TX'], [136, 64, 'RX'], [232, 64, 'ON']]) x.fillText(l, lx, lz);
+      x.textAlign = 'center'; x.font = '600 4px system-ui, sans-serif'; x.fillText('RESET', 28, 32); x.fillText('ICSP', 255, 116);
     });
     this.live(c, (s) => { for (const l of leds) { const on = l.k === 'L' ? s.L : l.k === 'tx' ? s.tx : l.k === 'on' ? s.on : 0; l.m.emissiveIntensity = on ? 1.8 : 0; l.glow.material.opacity = on ? 0.7 : 0; } });
   }
@@ -1073,11 +1170,20 @@ class View3D {
 
   hit(e) {
     this.setRay(e);
-    for (const h of this.ray.intersectObjects(this.picks, true)) {
+    const hits = this.ray.intersectObjects(this.picks, true);
+    for (const h of hits) {
       let o = h.object;
       if (o.userData.pinRef) return { kind: 'pin', ref: o.userData.pinRef };
       while (o && !o.userData.compId && !o.userData.wireId) o = o.parent;
-      if (o && o.userData.compId) { const p = o.userData.pivot.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z }; }
+      if (o && o.userData.compId) {
+        // A part that stands over its own legs hides them from above: a click in line with one of its pins is for
+        // that pin. (Not while the simulation runs, when a click on a button or a switch works it.)
+        const c = this.app.project.components.find((x) => x.id === o.userData.compId), d = c && DEFS[c.type];
+        const own = d && legTop(c, d) !== null && !(this.app.sim.running && d.interactive)
+          && hits.find((x) => x.object.userData.pinRef && x.object.userData.pinRef.startsWith(c.id + ':'));
+        if (own) return { kind: 'pin', ref: own.object.userData.pinRef };
+        const p = o.userData.pivot.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z };
+      }
       if (o) return { kind: 'wire', id: o.userData.wireId };
     }
     return null;

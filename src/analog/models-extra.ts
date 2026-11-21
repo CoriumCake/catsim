@@ -277,6 +277,11 @@ Object.assign(MODELS, {
   sound: sensorModule((p) => lvl(p.level), (p) => lvl(p.level) > lvl(p.threshold)),
   soil: sensorModule((p) => 1 - lvl(p.moisture), (p) => lvl(p.moisture) > lvl(p.threshold)), // dry soil reads high; DO LOW when wet
   mq2: sensorModule((p) => lvl(p.gas), (p) => lvl(p.gas) > lvl(p.threshold)),
+  // these four pull AO down as the thing they sense gets stronger, like the real boards
+  flame: sensorModule((p) => 1 - lvl(p.flame), (p) => lvl(p.flame) > lvl(p.threshold)),
+  light: sensorModule((p) => 1 - lvl(p.light), (p) => lvl(p.light) > lvl(p.threshold)),
+  line: sensorModule((p) => 1 - lvl(p.reflect), (p) => lvl(p.reflect) > lvl(p.threshold)), // white reflects: LOW
+  rain: sensorModule((p) => 1 - lvl(p.rain), (p) => lvl(p.rain) > lvl(p.threshold)),
 });
 
 // ---------- KY-040 quadrature (shared with the Encoder libraries) ----------

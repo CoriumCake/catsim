@@ -269,6 +269,28 @@ void loop() { delay(10); }`);
     expect(sim.analog.gpioVoltage(34)).toBeCloseTo(2.64, 1);
     expect(sim.readPin(4)).toBe(0);
   });
+  it('flame / light / line / rain modules: AO drops as the thing they sense gets stronger, DO goes LOW past the threshold', async () => {
+    for (const [type, key] of [['flame', 'flame'], ['light', 'light'], ['line', 'reflect'], ['rain', 'rain']]) {
+      const { sim, set, host } = run([comp('m1', type, { [key]: 0.2, threshold: 0.5 })], [['m1:VCC', 'esp:3V3'], ['m1:GND', 'esp:GND.L'], ['m1:AO', 'esp:D34'], ['m1:DO', 'esp:D4']],
+        `void setup() { pinMode(4, INPUT); }\n${LOOP}`);
+      await settle(sim);
+      expect(sim.analog.gpioVoltage(34), type).toBeCloseTo(2.64, 1);
+      expect(sim.readPin(4), type).toBe(1);
+      set('m1', { [key]: 0.8 }); await settle(sim);
+      expect(sim.analog.gpioVoltage(34), type).toBeCloseTo(0.66, 1);
+      expect(sim.readPin(4), type).toBe(0);
+      expect(host.errors, type).toEqual([]);
+      sim.stop(true);
+    }
+  });
+  it('the sensor boards are drawn at their real size: pins in a row at the end, on the 2.54 mm grid', () => {
+    for (const [type, w, h] of [['sound', 162, 59], ['flame', 186, 55], ['light', 150, 55], ['line', 150, 55], ['mq2', 150, 87], ['soil', 392, 79], ['rain', 369, 157]] as const) {
+      const d = DEFS[type];
+      expect([type, d.w, d.h]).toEqual([type, w, h]);
+      expect(d.pins.map((p: { x: number }) => p.x), type).toEqual([w, w, w, w]);
+      expect(d.pins.map((p: { y: number }, i: number) => p.y - d.pins[0].y), type).toEqual([0, 10, 20, 30]);
+    }
+  });
   it('breadboard: a resistor and an LED plugged into it (no wires to their legs) light up', async () => {
     // breadboard at (0, 0): column k is at x = 16 + 10·(k−1); rows a–e at y = 40…80, f–j at y = 110…150
     const bb = comp('bb1', 'breadboard');

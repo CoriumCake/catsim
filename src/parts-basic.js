@@ -1,7 +1,7 @@
 /* CatSim — basic parts and power parts: RGB LED, 7-segment digit, slide switch, batteries, FSR, coin
  * vibration motor, TP4056 charger, 3.3 V buck-boost regulator, joystick, KY-040 encoder, L298N, sound /
  * soil / gas sensor modules, a half-size breadboard and the ESP32-C3 Super Mini board. */
-import { esc } from './util.ts';
+import { esc, fmtOhms } from './util.ts';
 import { BATTERIES, batteryVolts, fsrOhms, SEGMENTS, ENC_STEP_MS } from './analog/models-extra.ts';
 
 const lead = (d) => `<path d="${d}" stroke="#a7adb7" stroke-width="2" fill="none"/>`;
@@ -9,7 +9,6 @@ const glow = (cx, cy, r, color, o) => (o > 0.02 ? `<circle cx="${cx}" cy="${cy}"
 const leds = (sim, id) => (sim.running && sim.analog && sim.analog.leds) || {};
 const act = (sim, id) => (sim.running && sim.analog && sim.analog.parts ? sim.analog.parts[id] ?? 0 : 0);
 const burnt = (sim, key) => !!(sim.running && sim.analog && sim.analog.burnt && (sim.analog.burnt.has ? sim.analog.burnt.has(key) : sim.analog.burnt.includes(key)));
-const fmtOhms = (o) => (o >= 1e6 ? `${+(o / 1e6).toFixed(1)} MΩ` : o >= 1e3 ? `${+(o / 1e3).toFixed(1)} kΩ` : `${Math.round(o)} Ω`);
 
 // ---------- RGB LED (4 legs) ----------
 const rgbLed = {
@@ -266,34 +265,93 @@ const l298n = {
 };
 
 // ---------- sensor modules (LM393 comparator boards) ----------
-function sensorModule(type, name, level, pinsOrder, hint, draw, labelFn) {
+// The real boards seen from above (1 unit = 0.254 mm): the sensor at the left end, then the blue threshold trimmer, the
+// LM393, a Ø3 mm mounting hole, two LEDs, and a 4-pin right-angle header whose pins stand 6 mm out of the right end.
+// These boards have no datasheet. The sizes are the ones sellers list: 32 × 14 mm for the common small board,
+// 35 × 15 mm for the KY-038, 30 × 15 mm for the YL-38 (soil, rain), 32 × 22 mm for the MQ gas boards (whose trimmer,
+// LM393 and LEDs are really on the underside: only the signal LED is drawn on top, so that it can be seen), 60 × 20 mm
+// for the soil fork, 54 × 40 mm for the rain plate. The place of each part on the board is read from photos. The pin
+// order differs between makers: check the print on a real board before wiring it.
+const MOD_PIN = 24;
+const MOD_TITLE = { AO: 'AO — analog output', DO: 'DO — digital output (LOW when the threshold is crossed)', VCC: 'VCC — 3.3 V or 5 V', GND: 'GND' };
+const pct = (v) => `${Math.round(v * 100)} %`;
+// What the sensor itself looks like from above. x, y: the board's top-left corner; cy: its centre line.
+const HEADS = {
+  // electret microphone capsule (Ø9.7 mm) on the end of the board
+  mic: (x, y, cy) => `<circle cx="${x + 22}" cy="${cy}" r="19" fill="#c9ced6" stroke="#7d848e"/><circle cx="${x + 22}" cy="${cy}" r="14" fill="#2b2f37"/>`,
+  // a 5 mm infrared diode lying off the end of the board
+  ir: (x, y, cy) => `<path d="M${x + 6} ${cy - 5} H${x - 4} M${x + 6} ${cy + 5} H${x - 4}" stroke="#a7adb7" stroke-width="2"/><path d="M${x - 2} ${cy - 10} H${x - 26} a10 10 0 0 0 0 20 H${x - 2} Z" fill="#2a2630" stroke="#111"/>`,
+  // a 5 mm photoresistor standing on the end of the board, its face up
+  ldr: (x, y, cy) => `<circle cx="${x + 12}" cy="${cy}" r="10" fill="#e9a25a" stroke="#8a5a2b"/><path d="M${x + 6} ${cy - 5} h12 v3.3 h-12 v3.3 h12 v3.3 h-12" fill="none" stroke="#8c2f1b" stroke-width="1.1"/>`,
+  // TCRT5000 (10.2 × 5.8 mm): an infrared LED and a phototransistor side by side
+  tcrt: (x, y, cy) => `<rect x="${x + 4}" y="${cy - 20}" width="23" height="40" rx="2" fill="#15171c"/><circle cx="${x + 15.5}" cy="${cy - 9.5}" r="6" fill="#9cc7f2"/><circle cx="${x + 15.5}" cy="${cy + 9.5}" r="6" fill="#0a0a0c" stroke="#3a3d44" stroke-width=".6"/>`,
+  // MQ gas sensor: a Ø19 mm base and a steel can with a mesh window
+  can: (x, y, cy) => `<circle cx="${x + 46}" cy="${cy}" r="37" fill="#23262c"/><circle cx="${x + 46}" cy="${cy}" r="33" fill="url(#cs-metal)" stroke="#7d848e"/><circle cx="${x + 46}" cy="${cy}" r="19" fill="#8b929c"/>
+    <path d="M${x + 30} ${cy - 8} h32 M${x + 27} ${cy} h38 M${x + 30} ${cy + 8} h32 M${x + 38} ${cy - 17} v34 M${x + 46} ${cy - 19} v38 M${x + 54} ${cy - 17} v34" stroke="#5c636e" stroke-width=".8"/>`,
+  // soil fork YL-69 (60 × 20 mm): two nickel-plated prongs, joined to the board by two wires
+  fork: (x, y, cy) => { const px = x - 250, t = cy - 39.5; return `<path d="M${px + 2} ${t + 14} L${px + 14} ${t + 2} H${px + 180} V${t + 26} H${px + 14} Z M${px + 2} ${t + 65} L${px + 14} ${t + 53} H${px + 180} V${t + 77} H${px + 14} Z" fill="#c9cdd3" stroke="#8b929c"/>
+    <rect x="${px + 177}" y="${t}" width="59" height="79" rx="2" fill="#1f6f3a" stroke="#0f3d1f"/><rect x="${px + 222}" y="${cy - 10}" width="10" height="20" fill="#1b1d22"/><rect x="${x}" y="${cy - 10}" width="10" height="20" fill="#1b1d22"/>
+    <path d="M${px + 227} ${cy - 5} H${x + 5}" stroke="#d94a4a" stroke-width="2.4"/><path d="M${px + 227} ${cy + 5} H${x + 5}" stroke="#2b2f37" stroke-width="2.4"/>`; },
+  // rain plate FC-37 (54 × 40 mm): two combs of nickel tracks
+  plate: (x, y, cy) => { const px = x - 227, t = cy - 78.5; let o = `<rect x="${px}" y="${t}" width="213" height="157" rx="3" fill="#1f6f3a" stroke="#0f3d1f"/>`;
+    for (let i = 0; i < 12; i++) o += `<path d="M${i % 2 ? px + 22 : px + 10} ${t + 14 + i * 11.7} H${i % 2 ? px + 186 : px + 174}" stroke="#c9cdd3" stroke-width="5"/>`;
+    return `${o}<path d="M${px + 10} ${t + 11.5} V${t + 145.5} M${px + 186} ${t + 11.5} V${t + 145.5}" stroke="#c9cdd3" stroke-width="5"/>
+      <rect x="${px + 199}" y="${cy - 10}" width="10" height="20" fill="#1b1d22"/><rect x="${x}" y="${cy - 10}" width="10" height="20" fill="#1b1d22"/>
+      <path d="M${px + 204} ${cy - 5} H${x + 5}" stroke="#d94a4a" stroke-width="2.4"/><path d="M${px + 204} ${cy + 5} H${x + 5}" stroke="#2b2f37" stroke-width="2.4"/>`; },
+};
+/** board: W × H of the circuit board; reach: how far the sensor reaches out on the left; tall: the part's whole height
+ * when the sensor is taller than the board; bare: nothing but the sensor and the signal LED on the top face. */
+function sensorModule(type, name, level, pinsOrder, hint, board, head, labelFn, more = {}) {
+  const { W, H, color = '#1d3f8f', reach = 0, tall = H, bare = false } = board;
+  const x0 = reach, y0 = (tall - H) / 2, w = reach + W + MOD_PIN, cy = y0 + H / 2, r = x0 + W, py = (i) => cy - 15 + i * 10;
   return {
-    type, name, category: 'Sensors', w: 64, h: 84, pulled: ['DO'],
-    pins: pinsOrder.map((id, i) => ({ id, label: id, x: 11 + i * 14, y: 84, dir: 'b', title: { AO: 'AO — analog output', DO: 'DO — digital output (LOW when the threshold is crossed)', VCC: 'VCC — 3.3 V or 5 V', GND: 'GND' }[id] })),
-    props: { [level.key]: level.def, threshold: 0.5 },
+    type, name, category: 'Sensors', w, h: tall, pulled: ['DO'], noPinHeaders: true,
+    module: { x0, y0, W, H, color, bare, head },
+    pins: pinsOrder.map((id, i) => ({ id, label: id, x: w, y: py(i), dir: 'r', title: MOD_TITLE[id] })),
+    props: { [level.key]: level.def, threshold: 0.5, ...more.props },
     optional: ['AO', 'DO'],
     controls: [
       { key: level.key, label: level.label, type: 'range', min: 0, max: 1, step: 0.01, fmt: labelFn },
-      { key: 'threshold', label: 'Threshold (blue trimmer)', type: 'range', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)} %` },
+      { key: 'threshold', label: 'Threshold (blue trimmer)', type: 'range', min: 0, max: 1, step: 0.01, fmt: pct },
+      ...(more.controls || []),
     ],
     hint,
     state: (c, sim) => ({ fired: act(sim, c.id) > 0.5 }),
     render(c, s) {
-      return `${lead(pinsOrder.map((_, i) => `M${11 + i * 14} 70 V84`).join(' '))}<rect x="2" y="30" width="60" height="40" rx="3" fill="#1d3f8f" stroke="#10275c"/>
-        <rect x="40" y="38" width="12" height="12" rx="2" fill="#2f6fe0"/><circle cx="46" cy="44" r="4" fill="#f1f1f1"/>
-        ${glow(12, 60, 5, '#ef4444', s.fired ? 0.8 : 0)}<circle cx="12" cy="60" r="2.5" fill="${s.fired ? '#ff4545' : '#4a1515'}"/>${draw(c)}`;
+      const pins = pinsOrder.map((id, i) => `<rect x="${r - 4}" y="${py(i) - 1.3}" width="${MOD_PIN + 4}" height="2.6" fill="#d8b24a"/>`).join('');
+      const names = pinsOrder.map((id, i) => `<text x="${r - 12}" y="${py(i) + 1.5}" class="cs-tiny cs-light" style="font-size:4px;text-anchor:end">${id === 'VCC' ? '+' : id === 'GND' ? 'G' : id}</text>`).join('');
+      const top = bare ? '' : `<rect x="${r - 94}" y="${cy - 14}" width="26" height="28" rx="2" fill="#2f6fe0" stroke="#1b3f8a" stroke-width=".6"/><circle cx="${r - 81}" cy="${cy}" r="7" fill="#e8dfc8" stroke="#8a7f66" stroke-width=".6"/>
+        <path d="M${r - 86} ${cy} h10 M${r - 81} ${cy - 5} v10" stroke="#6b6250" stroke-width="1.4"/><rect x="${r - 63}" y="${cy - 7.5}" width="19" height="15" rx="1" fill="#15171c"/>
+        <circle cx="${r - 34}" cy="${cy}" r="5.9" fill="var(--canvas)" stroke="#0c1d47" stroke-width=".8"/><rect x="${r - 23}" y="${y0 + 4}" width="6" height="3.5" rx=".6" fill="#3ddc6f"/>`;
+      return `${pins}<rect x="${x0}" y="${y0}" width="${W}" height="${H}" rx="2" fill="${color}" stroke="#0c1d47"/><rect x="${r - 10}" y="${py(0) - 5}" width="10" height="40" fill="#1b1d22"/>${top}${names}
+        ${glow(r - 20, y0 + H - 5.7, 5, '#ef4444', s.fired ? 0.8 : 0)}<rect x="${r - 23}" y="${y0 + H - 7.5}" width="6" height="3.5" rx=".6" fill="${s.fired ? '#ff4545' : '#4a1515'}"/>
+        ${HEADS[head](x0, y0, cy)}`;
     },
   };
 }
 const sound = sensorModule('sound', 'Sound Sensor (KY-038)', { key: 'level', label: 'Sound level', def: 0.1 }, ['AO', 'GND', 'VCC', 'DO'],
   'AO rises with loudness; DO goes LOW when the sound is louder than the threshold (set with the trimmer). Drag the level while it runs to make noise.',
-  () => '<circle cx="22" cy="20" r="16" fill="#c9ced6" stroke="#7d848e"/><circle cx="22" cy="20" r="11" fill="#2b2f37"/>', (v) => `${Math.round(v * 100)} %`);
+  { W: 138, H: 59 }, 'mic', pct);
 const soil = sensorModule('soil', 'Soil Moisture Sensor', { key: 'moisture', label: 'Moisture', def: 0.3 }, ['VCC', 'GND', 'DO', 'AO'],
   'AO is high in dry soil and drops as it gets wetter; DO goes LOW when the soil is wetter than the threshold.',
-  () => '<path d="M14 30 V2 M30 30 V2" stroke="#c9a24a" stroke-width="5" stroke-linecap="round"/>', (v) => `${Math.round(v * 100)} % wet`);
-const mq2 = sensorModule('mq2', 'Gas Sensor (MQ-2)', { key: 'gas', label: 'Gas / smoke', def: 0.1 }, ['VCC', 'GND', 'DO', 'AO'],
-  'Smoke, LPG and methane: AO rises with concentration, DO goes LOW above the threshold. The real sensor has a heater that draws ~150 mA and needs a minute to warm up.',
-  () => '<circle cx="22" cy="18" r="16" fill="#c9ced6" stroke="#7d848e"/><circle cx="22" cy="18" r="11" fill="#9aa1ae"/><path d="M14 18 h16 M22 10 v16" stroke="#7d848e"/>', (v) => `${Math.round(v * 100)} %`);
+  { W: 118, H: 59, reach: 250, tall: 79 }, 'fork', (v) => `${Math.round(v * 100)} % wet`);
+const MQ = { 'MQ-2': 'smoke, LPG, methane', 'MQ-3': 'alcohol vapour', 'MQ-7': 'carbon monoxide', 'MQ-135': 'air quality (ammonia, benzene, smoke)' };
+const mq2 = sensorModule('mq2', 'Gas Sensor (MQ-2 / MQ-3 / MQ-7 / MQ-135)', { key: 'gas', label: 'Gas', def: 0.1 }, ['VCC', 'GND', 'DO', 'AO'],
+  'AO rises with the gas concentration, DO goes LOW above the threshold. Pick the sensor: MQ-2 smoke and LPG, MQ-3 alcohol, MQ-7 carbon monoxide, MQ-135 air quality. A real one has a heater that draws about 150 mA and needs a minute to warm up.',
+  { W: 126, H: 87, bare: true }, 'can', pct,
+  { props: { model: 'MQ-2' }, controls: [{ key: 'model', label: 'Sensor', type: 'select', options: Object.keys(MQ), fmt: (v) => `${v}: ${MQ[v]}` }] });
+const flame = sensorModule('flame', 'Flame Sensor (infrared)', { key: 'flame', label: 'Flame', def: 0 }, ['AO', 'GND', 'VCC', 'DO'],
+  'Its infrared diode sees a flame (760–1100 nm) up to about 80 cm away. AO drops as the flame gets stronger; DO goes LOW when it passes the threshold.',
+  { W: 126, H: 55, reach: 36 }, 'ir', pct);
+const light = sensorModule('light', 'Light Sensor Module (LM393 + LDR)', { key: 'light', label: 'Light', def: 0.6 }, ['VCC', 'GND', 'DO', 'AO'],
+  'AO is high in the dark and drops as it gets brighter; DO goes LOW when the light passes the threshold.',
+  { W: 126, H: 55 }, 'ldr', (v) => `${Math.round(v * 100)} % bright`);
+const line = sensorModule('line', 'Line Sensor (TCRT5000)', { key: 'reflect', label: 'Surface under it', def: 0.9 }, ['VCC', 'GND', 'DO', 'AO'],
+  'It shines infrared light down and measures what comes back. Over a white surface AO is low and DO is LOW; over a black line (or nothing) AO is high and DO is HIGH. It works a few millimetres above the surface.',
+  { W: 126, H: 55 }, 'tcrt', (v) => `${Math.round(v * 100)} % reflected (${v > 0.5 ? 'white' : 'black line'})`);
+const rain = sensorModule('rain', 'Rain Sensor (FC-37)', { key: 'rain', label: 'Water on the plate', def: 0 }, ['VCC', 'GND', 'DO', 'AO'],
+  'Drops of water bridge the tracks on the plate. AO is high when it is dry and drops as it gets wetter; DO goes LOW when it passes the threshold.',
+  { W: 118, H: 59, reach: 227, tall: 157 }, 'plate', (v) => `${Math.round(v * 100)} % wet`);
 
 // ---------- half-size breadboard (400 holes) ----------
 const BB_COLS = 30, BB_P = 10, BB_X0 = 16; // 10 units = 0.1", the legs of most parts
@@ -368,5 +426,5 @@ const esp32c3 = {
   },
 };
 
-export const BASIC_PARTS = { rgb_led: rgbLed, seg7, slide_switch: slideSwitch, battery, fsr, vibmotor, tp4056, buckboost, joystick, encoder, l298n, sound, soil, mq2, breadboard, esp32c3 };
+export const BASIC_PARTS = { rgb_led: rgbLed, seg7, slide_switch: slideSwitch, battery, fsr, vibmotor, tp4056, buckboost, joystick, encoder, l298n, sound, soil, mq2, flame, light, line, rain, breadboard, esp32c3 };
 export { ENC_STEP_MS };

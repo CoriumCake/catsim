@@ -1,4 +1,4 @@
-/* CatSim — example projects. ESP32 sits at (300, 80): left pins x=300, right pins x=450. */
+/* CatSim — example projects. ESP32 sits at (300, 80): its left pins are at x≈305, its right pins at x≈405. */
 import unoBlinkIno from './sketches/uno-blink.ino?raw';
 import unoFadeIno from './sketches/uno-fade.ino?raw';
 import unoButtonIno from './sketches/uno-button.ino?raw';

@@ -46,6 +46,27 @@ describe('wiring and current alerts', () => {
   it('an LED starved of current by a huge resistor', async () => {
     has(await run([comp('r1', 'resistor', { ohms: 100000 }), comp('l1', 'led')], [['esp:D23', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'esp:GND.R']], high(23), 900), /l1 barely lights: only 0\.0\d mA/);
   });
+  // "(3.29 V − 1.52 V) ÷ 100 kΩ = 0.02 mA": the numbers printed must really make that sum
+  const checkSum = (logs: string[], ohms: number) => {
+    const m = logs.join('\n').match(/The sum: \(([\d.]+) V − ([\d.]+) V\) ÷ ([\d.]+) (k?Ω) = ([\d.]+) mA/);
+    expect(m, logs.join('\n')).not.toBeNull();
+    const [vs, vf, r, unit, mA] = [Number(m![1]), Number(m![2]), Number(m![3]), m![4], Number(m![5])];
+    expect(r * (unit === 'kΩ' ? 1000 : 1)).toBe(ohms);
+    expect(mA).toBeCloseTo(((vs - vf) / ohms) * 1000, mA < 1 ? 2 : 0);
+  };
+  it('a starved LED shows the sum behind its current', async () => {
+    checkSum(await run([comp('r1', 'resistor', { ohms: 100000 }), comp('l1', 'led')], [['esp:D23', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'esp:GND.R']], high(23), 900), 100000);
+  });
+  it('an LED burnt through a resistor that is too small shows the sum, and is told to use a bigger one', async () => {
+    const logs = await run([comp('r1', 'resistor', { ohms: 22 }), comp('l1', 'led')], [['esp:VIN', 'r1:1'], ['r1:2', 'l1:A'], ['l1:C', 'esp:GND.R']], 'void setup() {}\nvoid loop() { delay(10); }', 1500);
+    has(logs, /l1 burned out: .*Use a bigger series resistor/);
+    checkSum(logs, 22);
+  });
+  it('an LED burnt with no resistor is told to add one (no sum to show)', async () => {
+    const logs = await run([comp('l1', 'led')], [['esp:VIN', 'l1:A'], ['l1:C', 'esp:GND.R']], 'void setup() {}\nvoid loop() { delay(10); }', 1500);
+    has(logs, /l1 burned out: .*\. Add a series resistor, e\.g\. 220 Ω/);
+    expect(logs.join('\n')).not.toMatch(/The sum:/);
+  });
   it('a relay coil driven straight from a pin', async () => {
     const logs = await run([comp('k1', 'relay')], [['esp:D23', 'k1:C1'], ['k1:C2', 'esp:GND.R']], high(23));
     has(logs, /k1's coil gets only \d+ mA but needs 50 mA/);
