@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeProject, encodeShare, decodeShare } from '../../src/project.ts';
+import { partsList, inoFile } from '../../src/build-real.ts';
 import { DEFS } from '../../src/components.js';
 import { EXAMPLES } from '../../src/examples.js';
 
@@ -119,5 +120,35 @@ describe('share links', () => {
     await expect(decodeShare('#z=!!!')).resolves.toBeNull();
     await expect(decodeShare('#z=AAAA')).rejects.toThrow();
     expect(await decodeShare('#other')).toBeNull();
+  });
+});
+
+describe('building it for real: the .ino export', () => {
+  const blink = EXAMPLES.find((e) => e.key === 'blink')!;
+  const project = { name: 'Blink', code: blink.code, components: blink.components, wires: blink.wires.map((w, i) => ({ id: 'w' + (i + 1), ...w })) };
+
+  it('lists the parts to buy: board first, equal parts counted together, one jumper wire per wire', () => {
+    expect(partsList(project, DEFS)).toEqual([
+      { qty: 1, name: 'ESP32 DevKit V1' }, { qty: 1, name: 'Resistor, 220 Ω' }, { qty: 1, name: 'LED, green' }, { qty: 3, name: 'jumper wire' },
+    ]);
+    const three = { ...project, components: [...project.components,
+      { id: 'r2', type: 'resistor', x: 0, y: 0, props: { ohms: 220 } }, { id: 'r3', type: 'resistor', x: 0, y: 0, props: { ohms: 10000 } }] };
+    expect(partsList(three, DEFS).map((l) => `${l.qty} × ${l.name}`)).toEqual(['1 × ESP32 DevKit V1', '2 × Resistor, 220 Ω', '1 × LED, green', '1 × Resistor, 10 kΩ', '3 × jumper wire']);
+  });
+  it('every example gets a parts list that accounts for every part', () => {
+    for (const ex of EXAMPLES) {
+      const list = partsList({ name: ex.name, code: ex.code, components: ex.components, wires: ex.wires.map((w, i) => ({ id: 'w' + i, ...w })) }, DEFS);
+      const parts = list.filter((l) => l.name !== 'jumper wire');
+      expect([ex.key, parts.reduce((n, l) => n + l.qty, 0)]).toEqual([ex.key, ex.components.length]);
+      for (const l of parts) expect(l.name).not.toMatch(/undefined|, $/);
+    }
+  });
+  it('the sketch file carries the board, the parts, every wire (not only the board\'s) and then the code', () => {
+    const ino = inoFile(project, 'esp', project.code, DEFS);
+    expect(ino).toContain('// Board: ESP32 DevKit V1  (Tools → Board → ESP32 Dev Module)');
+    expect(ino).toContain('// Parts to build it:\n//   1 × ESP32 DevKit V1\n//   1 × Resistor, 220 Ω\n//   1 × LED, green\n//   3 × jumper wire\n');
+    expect(ino).toContain('//   r1:2  ->  led1:A\n'); // a wire between two parts, away from the board
+    expect(ino.endsWith(project.code)).toBe(true);
+    expect(ino.split('\n').filter((l) => l && !l.startsWith('//')).join('\n')).toBe(project.code.split('\n').filter((l) => l && !l.startsWith('//')).join('\n'));
   });
 });

@@ -7,6 +7,7 @@ import { Canvas, WIRE_COLORS } from './canvas.js';
 import { View3D } from './view3d.js';
 import { createEditor } from './editor.ts';
 import { normalizeProject, encodeShare, decodeShare } from './project.ts';
+import { inoFile } from './build-real.ts';
 import { Scope } from './scope.ts';
 import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
@@ -738,19 +739,14 @@ $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
       a.download = (this.project.name || 'catsim').replace(/[^\w-]+/g, '_') + '.catsim.json'; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
-    // the sketch of the board open in the editor, ready for the Arduino IDE (File → Open), with the wiring as a comment
+    // the sketch of the board open in the editor, ready for the Arduino IDE (File → Open), with the parts to buy and the wiring as comments
     $('#btnIno').onclick = () => {
-      const id = this.activeBoard || this.primaryId(), board = this.project.components.find((c) => c.id === id);
-      const code = this.editor.get();
-      const wiring = this.project.wires.filter((w) => w.from.startsWith(id + ':') || w.to.startsWith(id + ':')).map((w) => `//   ${w.from}  ->  ${w.to}`);
-      const boardName = board ? DEFS[board.type].name : 'board';
-      const ide = board && board.type === 'uno' ? 'Arduino Uno' : board && board.type === 'esp32c3' ? 'ESP32C3 Dev Module (or "Nologo ESP32C3 Super Mini")' : 'ESP32 Dev Module';
-      const head = `// ${this.project.name} — exported from CatSim for the Arduino IDE\n// Board: ${boardName}  (Tools → Board → ${ide})\n// Libraries used by #include lines: install them with Tools → Manage Libraries.\n${wiring.length ? `// Wiring:\n${wiring.join('\n')}\n` : ''}\n`;
+      const id = this.activeBoard || this.primaryId();
       const name = (this.project.name || 'sketch').replace(/[^\w-]+/g, '_');
-      const blob = new Blob([head + code], { type: 'text/plain' });
+      const blob = new Blob([inoFile(this.project, id, this.editor.get(), DEFS)], { type: 'text/plain' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${name}.ino`; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      this.toast('Sketch downloaded: open it in the Arduino IDE and press Upload');
+      this.toast('Sketch downloaded with its parts list and wiring: open it in the Arduino IDE and press Upload');
     };
     $('#btnImport').onclick = () => $('#fileInput').click();
     $('#fileInput').onchange = async (e) => {
