@@ -53,20 +53,24 @@ seen.add(id);
     const c = byId.get(ref.slice(0, i));
     return !!c && defs[c.type].pins.some((pin) => pin.id === ref.slice(i + 1));
   };
-  const wids = new Set<string>();
-  const wires: Wire[] = [];
-  let n = 0;
-  for (const w of Array.isArray(src.wires) ? src.wires : []) {
-    if (!w || typeof w !== 'object') continue;
-    const ww = w as Record<string, unknown>;
-    if (!validPin(ww.from) || !validPin(ww.to) || ww.from === ww.to) continue;
-    let id = typeof ww.id === 'string' && ID.test(ww.id) && !wids.has(ww.id) ? ww.id : null;
-    while (!id || wids.has(id)) id = 'w' + ++n;
-    wids.add(id);
-    const wire: Wire = { id, from: ww.from, to: ww.to };
-    if (typeof ww.color === 'string' && COLOR.test(ww.color)) wire.color = ww.color;
-    wires.push(wire);
-  }
+  const cleanWires = (list: unknown): Wire[] => {
+    const wids = new Set<string>();
+    const wires: Wire[] = [];
+    let n = 0;
+    for (const w of Array.isArray(list) ? list : []) {
+      if (!w || typeof w !== 'object') continue;
+      const ww = w as Record<string, unknown>;
+      if (!validPin(ww.from) || !validPin(ww.to) || ww.from === ww.to) continue;
+      let id = typeof ww.id === 'string' && ID.test(ww.id) && !wids.has(ww.id) ? ww.id : null;
+      while (!id || wids.has(id)) id = 'w' + ++n;
+      wids.add(id);
+      const wire: Wire = { id, from: ww.from, to: ww.to };
+      if (typeof ww.color === 'string' && COLOR.test(ww.color)) wire.color = ww.color;
+      wires.push(wire);
+    }
+    return wires;
+  };
+  const wires = cleanWires(src.wires);
   const out: Project = {
     name: String(typeof src.name === 'string' && src.name ? src.name : 'Untitled project').slice(0, 120),
     code: typeof src.code === 'string' ? src.code.slice(0, MAX_CODE) : '',
@@ -74,6 +78,9 @@ seen.add(id);
     wires,
   };
   if (src.wireStyle === 'tidy') out.wireStyle = 'tidy';
+  // a "build it yourself" in progress: its goal wires get the same checks as the wires on the canvas
+  const guide = src.guide && typeof src.guide === 'object' ? cleanWires((src.guide as Record<string, unknown>).wires) : [];
+  if (guide.length) out.guide = { wires: guide };
   // (old projects may carry compiled Uno firmware: it is dropped, the board runs its sketch)
   // programs of the other boards
   const boards = comps.filter((c) => defs[c.type].board);

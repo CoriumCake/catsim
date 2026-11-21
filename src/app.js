@@ -8,6 +8,7 @@ import { View3D } from './view3d.js';
 import { createEditor } from './editor.ts';
 import { normalizeProject, encodeShare, decodeShare } from './project.ts';
 import { inoFile } from './build-real.ts';
+import { guideProgress, startGuide, stopGuide, showAnswer } from './steps.ts';
 import { Scope } from './scope.ts';
 import { Plotter } from './plotter.js';
 import { wireNets } from './analog/nets.ts';
@@ -144,6 +145,7 @@ const App = {
     this.view3d.dirty = true; this.view3d.camFitted = false;
     if (this.view3d.active) requestAnimationFrame(() => this.view3d.fit());
     this.refreshScopeNets(); this.scope.clear(); this.refreshBoardUi(); this.refreshTidy();
+    this._guideRan = false; this._guideCheered = false; this.renderSteps();
     this.renderIot(); this.save();
   },
 
@@ -153,7 +155,10 @@ const App = {
   },
 
   changed({ structure = true } = {}) {
-    if (structure) { this.sim.invalidate(); this.canvas.renderAll(); this.refreshScopeNets(); }
+    if (structure) {
+      this.sim.invalidate(); this.canvas.renderAll(); this.refreshScopeNets();
+      this._guideRan = false; this._guideSince = this.sim.running ? this.sim.millis() : 0; this.renderSteps();
+    }
     this.sim.syncProject();
     this.view3d.dirty = true;
     this.save();
@@ -227,6 +232,7 @@ const App = {
     this.editor.clear();
     this.term = {}; this.renderTerminal(); this.plotter.clear();
     this.clearConsole(); this.clearAlerts();
+    this._runProblem = false; this._guideRan = false; this._guideSince = 0; this.renderSteps();
     this.setProgram(this.activeBoard || this.primaryId(), { code: this.editor.get() });
     this.sim.start(this.project.code).then((ok) => { if (ok === false) this.showTab('bottom', 'consolePane'); });
   },
@@ -300,6 +306,7 @@ const App = {
 
   frame() {
     if (this.sim.running) {
+      if (this.project.guide && !this._guideRan && !this._runProblem && this.sim.millis() - (this._guideSince || 0) >= 2000) { this._guideRan = true; this.renderSteps(); }
       this.canvas.renderDynamic();
       for (const c of this.project.components) {
         if (c.type === 'buzzer') { const s = DEFS.buzzer.state(c, this.sim); Audio.set(c.id, c.props.muted ? 0 : s.f); }
@@ -355,6 +362,26 @@ const App = {
     return found.length ? `Found ${found.join(', ')}` : 'No .model or .subckt found.';
   },
   // ---------- boards and their programs ----------
+  /** "Build it yourself" (the Steps tab): a checklist of the wires that were taken out. Each ticks itself when its
+   * two pins are joined; the last step ticks when the finished circuit has run for two seconds without a warning. */
+  renderSteps() {
+    const pane = $('#stepsPane'), badge = $('#stepsBadge');
+    const g = guideProgress(this.project, DEFS);
+    if (!g) {
+      badge.hidden = true;
+      pane.innerHTML = `<p>Build it yourself: CatSim takes the wires out of this project and keeps them as the goal. Each wire ticks itself when you put it back.</p>
+        <div class="steps-actions"><button class="btn" data-act="start"${this.project.wires.length ? '' : ' disabled'}>Take the wires out</button></div>`;
+      return;
+    }
+    const wired = g.done === g.steps.length && !g.wrong.length, ran = wired && !!this._guideRan;
+    const total = g.steps.length + 1, done = g.done + (ran ? 1 : 0);
+    badge.hidden = false; badge.textContent = `${done}/${total}`;
+    pane.innerHTML = `<p class="steps-head">${done} of ${total} steps done${done === total ? ': you built it!' : ''}</p>`
+      + g.wrong.map((w) => `<p class="steps-wrong">This wire is not part of the circuit: ${esc(w)}. Remove it.</p>`).join('')
+      + `<ol class="steps-list">${g.steps.map((s) => `<li${s.done ? ' class="done"' : ''}><span>${esc(s.text)}</span></li>`).join('')}<li${ran ? ' class="done"' : ''}><span>Press Start: it runs for 2 seconds with no warning</span></li></ol>`
+      + `<div class="steps-actions"><button class="btn" data-act="answer"${g.done === g.steps.length ? ' disabled' : ''}>Show the answer</button><button class="btn" data-act="stop">Stop building</button></div>`;
+    if (done === total && !this._guideCheered) { this._guideCheered = true; this.toast('All steps done: you built it!'); }
+  },
   boards() { return this.project.components.filter((c) => DEFS[c.type] && DEFS[c.type].board); },
   primaryId() { const b = this.boards()[0]; return b ? b.id : ''; },
   /** type of the board whose program is open in the editor */
@@ -492,7 +519,7 @@ const App = {
     }
     out.appendChild(d); while (out.children.length > 300) out.firstChild.remove();
     out.parentElement.scrollTop = out.parentElement.scrollHeight;
-    if (level !== 'info') this.alert(msg, level, board);
+    if (level !== 'info') { this._runProblem = true; this.alert(msg, level, board); }
     if (level !== 'info' && !$('#consolePane').classList.contains('active')) {
       this._unseen = (this._unseen || 0) + 1;
       const b = $('#consoleBadge'); b.hidden = false; b.textContent = this._unseen;
@@ -748,6 +775,13 @@ $('#simSpeed').onchange = (e) => this.sim.setSpeed(+e.target.value);
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       this.toast('Sketch downloaded with its parts list and wiring: open it in the Arduino IDE and press Upload');
     };
+    $('#stepsPane').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-act]'); if (!btn) return;
+      if (btn.dataset.act === 'start') { startGuide(this.project); this._guideCheered = false; }
+      else if (btn.dataset.act === 'answer') showAnswer(this.project, DEFS);
+      else stopGuide(this.project);
+      this.canvas.select(null); this.changed();
+    });
     $('#btnImport').onclick = () => $('#fileInput').click();
     $('#fileInput').onchange = async (e) => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;

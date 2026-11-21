@@ -30,6 +30,8 @@ export interface Project {
    * `code`, so single-board projects (and old share links) are unchanged.
    */
   programs?: Record<string, { code?: string }>;
+  /** "Build it yourself" in progress: the wires that were taken out, kept as the goal (src/steps.ts). */
+  guide?: { wires: Wire[] };
 }
 
 /** Direction a wire leaves the pin: left, right, top, bottom. */

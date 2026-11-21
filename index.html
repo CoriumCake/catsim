@@ -54,6 +54,7 @@
       <div class="tabs" data-group="editor">
         <button class="tab active" data-tab="editorPane">sketch.ino</button>
         <button class="tab" data-tab="partsPane">Parts</button>
+        <button class="tab" data-tab="stepsPane" title="Build it yourself: a checklist that ticks each wire as you connect it">Steps <span id="stepsBadge" class="steps-badge" hidden></span></button>
       </div>
       <div class="editor-wrap">
         <div id="editorPane" class="tabpane active"><div id="boardTabs" class="board-tabs" role="tablist" aria-label="Board programs" hidden></div><div id="code" class="code-host"></div></div>
@@ -62,6 +63,7 @@
         <div id="paletteList" class="palette-list"></div>
         <p class="palette-hint">Click or drag a part onto the canvas.<br>Click a pin, then another pin, to add a wire.<br><kbd>Del</kbd> removes the selection.</p>
       </div>
+      <div id="stepsPane" class="tabpane steps" aria-live="polite"></div>
       </div>
     </section>
     <div class="splitter-v" id="splitV" title="Drag to resize"></div>
