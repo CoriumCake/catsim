@@ -13,18 +13,22 @@ const PIN_TOP = 10, DEG = Math.PI / 180;
 const PCB_T = 6.3, ESP_PCB_Y0 = 34, ESP_PIN_TOP = ESP_PCB_Y0 + PCB_T + 5.5, UNO_PCB_Y0 = 8, UNO_SOCKET_TOP = UNO_PCB_Y0 + PCB_T + 33.5;
 
 // Three.js is code-split: it is only downloaded the first time someone opens the 3D view.
-let THREE = null, OrbitControls = null, libPromise = null;
-const loadLibs = () => libPromise || (libPromise = Promise.all([import('three'), import('three/examples/jsm/controls/OrbitControls.js')])
-  .then(([three, orbit]) => {
-    THREE = three; OrbitControls = orbit.OrbitControls;
-    THREE.ColorManagement.enabled = false; // keep the colours as authored (r128 look)
-  })
+let THREE = null, OrbitControls = null, RoomEnvironment = null, libPromise = null;
+// Light levels, set by eye against photos of parts on a desk under a lamp.
+const ENV_LIGHT = 0.55, HEMI_LIGHT = 1.1, SUN_LIGHT = 2.4;
+// Parts that stand on their own wire legs, with no pin header: how high each leg rises before it meets the body.
+// A wire to such a part meets its leg just above the bench (LEG_JOIN).
+const LEGS = { led: 16, rgb_led: 16, capacitor: 4, npn: 12, pnp: 12, nmos: 12, ds18b20: 12, resistor: 9, diode: 9, button: 7, buzzer: 2, seg7: 2, opamp: 2, slide_switch: 2 };
+const LEG_JOIN = 3, WIRE_R = 2.6; // a jumper wire's insulation is about 1.3 mm across
+const legTop = (c, d) => (c.type in LEGS ? LEGS[c.type] : d.dip ? 2 : null);
+const loadLibs = () => libPromise || (libPromise = Promise.all([import('three'), import('three/examples/jsm/controls/OrbitControls.js'), import('three/examples/jsm/environments/RoomEnvironment.js')])
+  .then(([three, orbit, room]) => { THREE = three; OrbitControls = orbit.OrbitControls; RoomEnvironment = room.RoomEnvironment; })
   .catch((e) => { libPromise = null; throw e; }));
 
 function canvasTex(w, h, draw) {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   draw(cv.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
@@ -59,7 +63,9 @@ class View3D {
     const T = THREE;
     this.renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    this.renderer.outputColorSpace = T.LinearSRGBColorSpace;
+    // Colours are authored in sRGB and lit in linear light; a neutral tone curve keeps them true under bright light.
+    this.renderer.outputColorSpace = T.SRGBColorSpace;
+    this.renderer.toneMapping = T.NeutralToneMapping; this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = T.PCFSoftShadowMap;
     this.el = this.renderer.domElement;
@@ -70,11 +76,14 @@ class View3D {
     this.scene = new T.Scene();
     this.scene.background = new T.Color('#fdf5e8');
     this.camera = new T.PerspectiveCamera(38, 1, 5, 20000);
-    this.scene.add(new T.HemisphereLight(0xffffff, 0xb9a98a, 0.75 * Math.PI));
-    const sun = this.sun = new T.DirectionalLight(0xffffff, 0.75 * Math.PI);
-    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.radius = 3;
+    // A soft studio around the bench: it is what metal legs, pins and glossy plastic reflect.
+    const pmrem = new T.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; pmrem.dispose();
+    this.scene.environmentIntensity = ENV_LIGHT;
+    this.scene.add(new T.HemisphereLight(0xffffff, 0xd9cdb8, HEMI_LIGHT));
+    const sun = this.sun = new T.DirectionalLight(0xfff6ea, SUN_LIGHT);
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.6; sun.shadow.radius = 5;
     this.scene.add(sun, sun.target);
-    const under = new T.DirectionalLight(0xfff4e0, 0.45 * Math.PI); under.position.set(0.3, -1, 0.4); this.scene.add(under); // fill light for the undersides
     this.root = new T.Group(); this.scene.add(this.root);
 
     this.glowTex = canvasTex(64, 64, (g) => {
@@ -203,8 +212,8 @@ class View3D {
    * canvas context scaled to part units; on the bottom face a point at z is drawn at row h - z. */
   print(g, w, h, y, draw, under = false) {
     const S = 8, t = this.tex(w * S, h * S, (x) => { x.scale(S, S); draw(x); });
-    const m = this.mesh(new THREE.PlaneGeometry(w, h), this.mat('#ffffff', { map: t, transparent: true, roughness: 0.6 }), g, w / 2, y, h / 2, false);
-    m.rotation.x = under ? Math.PI / 2 : -Math.PI / 2; m.raycast = () => {};
+    const m = this.mesh(new THREE.PlaneGeometry(w, h), this.mat('#ffffff', { map: t, transparent: true, depthWrite: false, roughness: 0.6 }), g, w / 2, y, h / 2, false);
+    m.rotation.x = under ? Math.PI / 2 : -Math.PI / 2; m.raycast = () => {}; // (no depth: its clear parts must not hide what lies beyond the board's edge)
     return m;
   }
   /** A male pin header on a board: a plastic base with square gold pins, standing from y0. pts are [x, z]. */
@@ -227,7 +236,8 @@ class View3D {
     if (c.type === 'esp32') return { x: c.x + p.x, y: ESP_PIN_TOP, z: c.y + p.y };
     if (c.type === 'uno') return { x: c.x + p.x, y: UNO_SOCKET_TOP, z: c.y + p.y }; // into the header sockets
     if (c.type === 'breadboard') return { x: at.x, y: BREADBOARD_H, z: at.y }; // the hole, on the top face: a target inside the block can't be clicked
-    return { x: at.x, y: PIN_TOP + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
+    const d = DEFS[c.type];
+    return { x: at.x, y: (legTop(c, d) === null ? PIN_TOP : LEG_JOIN) + ((this.lift && this.lift.get(c.id)) || 0), z: at.y };
   }
 
   // ---------- scene ----------
@@ -253,17 +263,17 @@ class View3D {
     const b = this.bounds(); const pad = 90;
     const mw = b.x1 - b.x0 + pad * 2, md = b.z1 - b.z0 + pad * 2;
     const grid = this.tex(128, 128, (g) => {
-      g.fillStyle = '#2f6d55'; g.fillRect(0, 0, 128, 128);
-      g.strokeStyle = 'rgba(255,255,255,.10)'; g.lineWidth = 2; g.strokeRect(0, 0, 128, 128);
-      g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 1;
+      g.fillStyle = '#2a5a48'; g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1.5; g.strokeRect(0, 0, 128, 128);
+      g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1;
       for (let i = 32; i < 128; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 128); g.moveTo(0, i); g.lineTo(128, i); g.stroke(); }
     });
     grid.wrapS = grid.wrapT = T.RepeatWrapping; grid.repeat.set(mw / 80, md / 80);
     const mat = this.mesh(new T.BoxGeometry(mw, 2, md), this.mat('#ffffff', { map: grid, roughness: 0.95 }), this.root, (b.x0 + b.x1) / 2, -1, (b.z0 + b.z1) / 2, false);
     mat.userData.ground = true; this.matMesh = mat;
-    mat.material.transparent = true;
+    mat.material.transparent = true; mat.renderOrder = -1; // drawn before every other see-through thing (LED domes, printing), so they show the mat behind them
     const floor = this.mesh(new T.PlaneGeometry(20000, 20000), (() => { const m = new T.ShadowMaterial({ opacity: 0.12 }); this.disp.push(m); return m; })(), this.root, 0, -2.01, 0, false);
-    floor.rotation.x = -Math.PI / 2; this.floorMesh = floor;
+    floor.rotation.x = -Math.PI / 2; this.floorMesh = floor; floor.renderOrder = -2;
 
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, r = Math.max(mw, md) / 2 + 60;
     this.sun.position.set(cx - r * 0.5, r * 1.6, cz - r * 0.35); this.sun.target.position.set(cx, 0, cz);
@@ -281,7 +291,10 @@ class View3D {
       this.root.add(g); this.picks.push(g);
       const build = this['build_' + c.type] || (d.dip ? this.build_dip : d.module ? this.build_sensor_module : null);
       if (build) build.call(this, pivot, c, d);
-      if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
+      const leg = legTop(c, d);
+      // a part's own legs go straight down, into the breadboard hole under them; modules have a pin header instead
+      if (leg !== null) for (const p of d.pins) this.cyl(pivot, p.x, p.y, 0.9, -9, leg, this.M.lead, 8);
+      else if ((!d.board || c.type === 'esp32c3') && !d.noPinHeaders) for (const p of d.pins) {
         this.box(pivot, p.x - 2.5, p.y - 2.5, 5, 5, 0, 3.5, this.M.header);
         this.cyl(pivot, p.x, p.y, 0.9, 3.5, PIN_TOP, this.M.gold, 8);
       }
@@ -307,21 +320,23 @@ class View3D {
       }
     }
 
-    // wires: tubes arching up between pin tops
+    // wires: each rises straight out of its pin on a short bare tip, then arches over to the other end
     P.wires.forEach((w, i) => {
       const pa = this.app.canvas.pinPos(w.from), pb = this.app.canvas.pinPos(w.to); if (!pa || !pb) return;
-      const a = this.pinTop(pa), z = this.pinTop(pb);
-      const A = new T.Vector3(a.x, a.y, a.z), B = new T.Vector3(z.x, z.y, z.z);
-      const dist = A.distanceTo(B);
-      const h = Math.min(90, Math.max(18, dist * 0.32)), d = Math.min(70, Math.max(10, dist * 0.25));
-      const da = DIRS[pa.dir] || [0, 0], db = DIRS[pb.dir] || [0, 0];
+      const a = this.pinTop(pa), z = this.pinTop(pb), TIP = 5;
+      const A = new T.Vector3(a.x, a.y + TIP, a.z), B = new T.Vector3(z.x, z.y + TIP, z.z);
+      const dist = A.distanceTo(B), h = Math.min(62, Math.max(22, dist * 0.24)), lean = Math.min(26, dist * 0.16);
+      const dir = B.clone().sub(A).setY(0); if (dir.lengthSq() > 0) dir.normalize();
       const curve = new T.CubicBezierCurve3(A,
-        new T.Vector3(a.x + da[0] * d, a.y + h, a.z + da[1] * d),
-        new T.Vector3(z.x + db[0] * d, z.y + h, z.z + db[1] * d), B);
-      const m = this.mesh(new T.TubeGeometry(curve, Math.max(24, Math.round(dist / 6)), 1.6, 8, false),
-        this.mat(this.app.canvas.wireColor(w, i), { roughness: 0.45 }), this.root);
+        new T.Vector3(A.x + dir.x * lean, A.y + h, A.z + dir.z * lean),
+        new T.Vector3(B.x - dir.x * lean, B.y + h, B.z - dir.z * lean), B);
+      const m = this.mesh(new T.TubeGeometry(curve, Math.max(28, Math.round(dist / 5)), WIRE_R, 10, false),
+        this.mat(this.app.canvas.wireColor(w, i), { roughness: 0.35, metalness: 0 }), this.root);
       m.userData.wireId = w.id; this.picks.push(m);
-      for (const e of [A, B]) this.mesh(new T.SphereGeometry(1.9, 10, 8), m.material, this.root, e.x, e.y, e.z, false);
+      for (const e of [a, z]) {
+        this.cyl(this.root, e.x, e.z, 1.1, e.y - 3, e.y + TIP + 0.5, this.M.lead, 8).castShadow = false;
+        this.mesh(new T.SphereGeometry(WIRE_R, 10, 8), m.material, this.root, e.x, e.y + TIP, e.z, false);
+      }
     });
     for (const o of this.root.children.slice(n0)) o.userData.link = true;
     this.linkDisp = this.disp.splice(d0); // kept apart from the scene's own resources, so a drag doesn't pile them up
@@ -406,33 +421,35 @@ class View3D {
   }
 
   build_led(g, c) {
-    const m = this.mat('#ff3b3b', { transparent: true, opacity: 0.88, roughness: 0.25, emissive: '#000000' });
-    this.cyl(g, 15, 16, 12.5, 12, 14.5, m);
-    this.cyl(g, 15, 16, 9.8, 14.5, 26, m); // a 5 mm LED: a 5.0 mm dome on a 2.54 mm lead pitch
-    const dome = this.mesh(new THREE.SphereGeometry(9.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 15, 26, 16);
-    dome.castShadow = true;
-    for (const x of [10, 20]) { this.rod(g, [x, 1, 16], [x, 12, 16], 0.9, this.M.lead); this.leg(g, x, 16, x, 56); }
-    const glow = this.glow(g, 15, 24, 16, 60, '#ff3b3b');
+    // A 5 mm LED standing on its two legs, over its pins: a Ø5.0 mm dome on a Ø5.8 mm flange, 8.6 mm tall, with the
+    // lead frame (the anode's post, the cathode's anvil and cup) showing through the tinted epoxy.
+    const T = THREE, X = 15, Z = 56, Y = LEGS.led;
+    const m = this.mat('#ff3b3b', { transparent: true, opacity: 0.62, roughness: 0.12, metalness: 0, emissive: '#000000' });
+    this.cyl(g, X, Z, 11.4, Y, Y + 4, m, 32);
+    this.cyl(g, X, Z, 9.84, Y + 4, Y + 24.2, m, 32);
+    this.mesh(new T.SphereGeometry(9.84, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), m, g, X, Y + 24.2, Z);
+    this.box(g, 8.6, Z - 1, 2.8, 2, Y, Y + 15, this.M.lead); this.box(g, 16.5, Z - 1, 6.5, 2, Y, Y + 12, this.M.lead);
+    this.box(g, 13, Z - 1.4, 9, 2.8, Y + 12, Y + 17, this.M.lead);
+    const glow = this.glow(g, X, Y + 20, Z, 60, '#ff3b3b');
     let last = '';
     this.live(c, (s) => {
       const col = s.burnt ? '#3b2f2a' : (LED_COLORS[c.props.color] || LED_COLORS.red); const b = s.b || 0;
-      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); m.opacity = s.burnt ? 1 : m.opacity; last = col; }
-      m.emissiveIntensity = b * 1.4; m.opacity = 0.72 + 0.28 * b;
+      if (col !== last) { m.color.set(col); m.emissive.set(col); glow.material.color.set(col); last = col; }
+      m.emissiveIntensity = b * 1.6; m.opacity = s.burnt ? 0.95 : 0.6 + 0.35 * b;
       glow.material.opacity = b > 0.02 ? 0.25 + 0.6 * b : 0; glow.scale.setScalar(44 + 30 * b);
     });
   }
 
   build_resistor(g, c) {
-    const T = THREE;
-    this.rod(g, [15, 7, 8], [55, 7, 8], 0.9, this.M.lead);
-    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.9, this.M.lead);
-    const body = this.mesh(new T.CylinderGeometry(4.9, 4.9, 27, 20), this.mat('#d9c49a'), g, 35, 7, 8);
-    body.rotation.z = Math.PI / 2;
-    const bands = [];
-    for (const x of [24, 28, 32, 43.5]) {
-      const band = this.mesh(new T.CylinderGeometry(5.0, 5.0, 2.2, 20), this.mat('#000'), g, x, 7, 8);
-      band.rotation.z = Math.PI / 2; bands.push(band);
-    }
+    // a 1/4 W resistor: a 6.8 × 2.5 mm body that swells over its two end caps, on legs bent down 10.16 mm apart
+    const T = THREE, Y = LEGS.resistor, turn = (m) => { m.rotation.z = Math.PI / 2; return m; };
+    this.rod(g, [15, Y, 8], [55, Y, 8], 0.9, this.M.lead);
+    for (const x of [15, 55]) this.mesh(new T.SphereGeometry(0.9, 8, 6), this.M.lead, g, x, Y, 8, false);
+    const bm = this.mat('#d8c39a', { roughness: 0.45 });
+    turn(this.mesh(new T.CylinderGeometry(4.5, 4.5, 20, 24), bm, g, 35, Y, 8));
+    for (const x of [25.5, 44.5]) this.mesh(new T.SphereGeometry(5.3, 20, 14), bm, g, x, Y, 8).scale.set(0.85, 1, 1);
+    // three value bands (the first sits on the end cap) and the tolerance band on the other cap
+    const bands = [[25.5, 5.38, 2.4], [30.6, 4.58, 2.2], [34.8, 4.58, 2.2], [44.5, 5.38, 2.4]].map(([x, r, w]) => turn(this.mesh(new T.CylinderGeometry(r, r, w, 24), this.mat('#000', { roughness: 0.5 }), g, x, Y, 8, false)));
     let last = '';
     this.live(c, () => {
       const k = String(c.props.ohms); if (k === last) return; last = k;
@@ -444,16 +461,20 @@ class View3D {
   }
 
   build_button(g, c) {
-    // a 6 mm × 6 mm switch body, 4.3 mm tall, with a 3.5 mm cap
-    this.box(g, 1, 7, 24, 24, 0, 17, this.mat('#2a2e36'));
-    this.cyl(g, 13, 19, 4, 17, 17.6, this.mat('#1a1c21'), 20);
-    const capM = this.mat('#e5484d', { roughness: 0.4 });
-    const cap = this.cyl(g, 13, 19, 7, 17.6, 20, capM, 24);
+    // a 6 × 6 mm tactile switch, 4.3 mm tall: a black base, a pressed-steel cover with four studs, a round actuator
+    // carrying a coloured cap
+    const base = this.mat('#22252b', { roughness: 0.6 });
+    this.box(g, 1, 7, 24, 24, 0, 13.5, base);
+    this.box(g, 1.6, 7.6, 22.8, 22.8, 13.5, 14.6, this.M.metal);
+    for (const [x, z] of [[4.6, 10.6], [21.4, 10.6], [4.6, 27.4], [21.4, 27.4]]) this.cyl(g, x, z, 1.5, 14.6, 15.1, base, 10);
+    this.cyl(g, 13, 19, 4.5, 14.6, 17, this.mat('#1a1c21'), 20);
+    const capM = this.mat('#e5484d', { roughness: 0.35 });
+    const cap = this.cyl(g, 13, 19, 7.2, 17, 21, capM, 28);
     let last = '';
     this.live(c, (s) => {
       const col = BTN_COLORS[c.props.color] || BTN_COLORS.red;
       if (col !== last) { capM.color.set(col); last = col; }
-      cap.position.y = s.pressed ? -1.2 : 0;
+      cap.position.y = 19 + (s.pressed ? -1.4 : 0);
     });
   }
 
@@ -467,33 +488,35 @@ class View3D {
   }
 
   build_breadboard(g, c, d) {
-    // a half-size breadboard: an 8.5 mm block, holes on the top, a centre trench, red and blue rails
-    const T = THREE, w = d.w, h = d.h;
-    // the trench and the rail stripes are placed from the holes themselves, as in the 2D drawing: a stripe runs
-    // beside each rail (red outside the + holes, blue outside the − holes), never over the holes
-    const y = (id) => d.pins.find((p) => p.id === id).y, H = BREADBOARD_H;
-    this.box(g, 0, 0, w, h, 0, H, this.mat('#f4f1e8', { roughness: 0.8 }));
-    this.box(g, 0, y('1e') + 6, w, y('1f') - y('1e') - 12, H, H + 0.4, this.mat('#d6cfb8'));
+    // A half-size breadboard: an 8.5 mm white block with square holes on the 2.54 mm grid, a groove 1.5 mm deep
+    // between rows e and f, and a red and a blue line beside each pair of rails.
+    const T = THREE, w = d.w, h = d.h, H = BREADBOARD_H, G = 6;
+    const y = (id) => d.pins.find((p) => p.id === id).y, g0 = y('1e') + 6, g1 = y('1f') - 6;
+    const white = this.mat('#f2f0e9', { roughness: 0.5 });
+    this.box(g, 0, 0, w, h, 0, H - G, white);
+    this.box(g, 0, 0, w, g0, H - G, H, white); this.box(g, 0, g1, w, h - g1, H - G, H, white);
     const red = this.mat('#e5484d'), blue = this.mat('#3d8bff');
-    for (const [at, m] of [[y('T+1') - 6, red], [y('T-1') + 6, blue], [y('B+1') - 6, red], [y('B-1') + 6, blue]]) this.box(g, 8, at - 1, w - 16, 2, H, H + 0.4, m);
-    const geo = new T.CylinderGeometry(1.9, 1.9, 0.8, 10); this.disp.push(geo);
-    const holes = new T.InstancedMesh(geo, this.mat('#2b2f37'), d.pins.length), m4 = new T.Matrix4();
-    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.1, p.y); holes.setMatrixAt(i, m4); });
-    holes.instanceMatrix.needsUpdate = true; g.add(holes);
+    for (const [at, m] of [[y('T+1') - 6, red], [y('T-1') + 6, blue], [y('B+1') - 6, red], [y('B-1') + 6, blue]]) this.box(g, 8, at - 0.8, w - 16, 1.6, H, H + 0.2, m);
+    // the holes: a dark square mouth, a little below the top face
+    const geo = new T.BoxGeometry(4.1, 0.5, 4.1); this.disp.push(geo);
+    const holes = new T.InstancedMesh(geo, this.mat('#1b1c21', { roughness: 0.9 }), d.pins.length), m4 = new T.Matrix4();
+    d.pins.forEach((p, i) => { m4.makeTranslation(p.x, H - 0.15, p.y); holes.setMatrixAt(i, m4); });
+    holes.instanceMatrix.needsUpdate = true; holes.receiveShadow = true; g.add(holes);
     // printed on the top, as on the real board: the row letters a–j at both ends, the column numbers along
     // the outer rows, and + / − at the ends of the rails
-    const S = 4, pin = (id) => d.pins.find((p) => p.id === id), last = d.pins.filter((p) => /^\d+a$/.test(p.id)).length;
+    const S = 6, pin = (id) => d.pins.find((p) => p.id === id), last = d.pins.filter((p) => /^\d+a$/.test(p.id)).length;
     const print = this.tex(w * S, h * S, (x) => {
-      x.scale(S, S); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#5b6170';
-      x.font = '600 6.5px system-ui, sans-serif';
+      x.scale(S, S); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#7a808c';
+      x.font = '600 5.5px system-ui, sans-serif';
       for (const r of 'abcdefghij') for (const at of [6, w - 6]) x.fillText(r, at, pin('1' + r).y);
       for (let col = 1; col <= last; col += (col === 1 ? 4 : 5)) for (const at of [pin('1a').y - 7.5, pin('1j').y + 7.5]) x.fillText(String(col), pin(col + 'a').x, at);
-      x.font = '700 9px system-ui, sans-serif';
+      x.font = '700 8px system-ui, sans-serif';
       for (const [id, sign, color] of [['T+1', '+', '#e5484d'], ['T-1', '−', '#3d8bff'], ['B+1', '+', '#e5484d'], ['B-1', '−', '#3d8bff']]) {
         x.fillStyle = color; for (const at of [14, w - 6]) x.fillText(sign, at, pin(id).y);
       }
     });
-    this.mesh(new T.PlaneGeometry(w, h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.8 }), g, w / 2, H + 0.45, h / 2, false).rotation.x = -Math.PI / 2;
+    const pl = this.mesh(new T.PlaneGeometry(w, h), this.mat('#ffffff', { map: print, transparent: true, roughness: 0.8 }), g, w / 2, H + 0.12, h / 2, false);
+    pl.rotation.x = -Math.PI / 2; pl.raycast = () => {};
   }
 
   build_hcsr04(g, c, d) {
@@ -504,12 +527,11 @@ class View3D {
   }
 
   build_ds18b20(g, c) {
-    // a TO-92 package: 4.95 mm wide, the leads 1.27 mm apart, with the 18B20 mark on the flat face
-    const T = THREE;
-    this.mesh(new T.CylinderGeometry(9.75, 9.75, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#222', { roughness: 0.55 }), g, 15, 20, 22);
-    const face = this.tex(112, 56, (x) => { x.fillStyle = '#222'; x.fillRect(0, 0, 112, 56); x.fillStyle = '#ddd'; x.textAlign = 'center'; x.font = '600 18px system-ui, sans-serif'; x.fillText('18B20', 56, 34); });
-    this.mesh(new T.PlaneGeometry(14, 8), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
-    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
+    // a TO-92 package standing over its three legs, with the 18B20 mark on the flat face
+    const T = THREE, Z = 62, Y = LEGS.ds18b20, bm = this.mat('#222', { roughness: 0.5 });
+    this.mesh(new T.CylinderGeometry(9.75, 9.75, 19, 28, 1, false, Math.PI / 2, Math.PI), bm, g, 15, Y + 9.5, Z);
+    const face = this.tex(156, 152, (x) => { x.fillStyle = '#222'; x.fillRect(0, 0, 156, 152); x.fillStyle = '#ddd'; x.textAlign = 'center'; x.font = '600 28px system-ui, sans-serif'; x.fillText('DALLAS', 78, 60); x.fillText('18B20', 78, 96); });
+    this.mesh(new T.PlaneGeometry(19.5, 19), this.mat('#ffffff', { map: face, roughness: 0.5 }), g, 15, Y + 9.5, Z + 0.05, false);
   }
 
   build_oled(g, c, d) {
@@ -642,12 +664,14 @@ class View3D {
   }
 
   build_rgb_led(g, c, d) {
-    // a 5 mm RGB LED: a Ø9.8 mm dome on four 2.54 mm legs; its colour follows the three channels
-    const m = this.mat('#f5f5f5', { transparent: true, opacity: 0.85, roughness: 0.25 });
-    this.cyl(g, 22, 28, 9.8, 6, 24, m, 28);
-    this.mesh(new THREE.SphereGeometry(9.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m, g, 22, 24, 28);
-    for (const x of [7, 17, 27, 37]) this.leg(g, x, 28, x, 70);
-    this.live(c, (s) => { const r = (s.r || 0), gg = (s.g || 0), b = (s.b || 0); m.color.setRGB(0.25 + 0.75 * r, 0.25 + 0.75 * gg, 0.25 + 0.75 * b); m.emissive.setRGB(r, gg, b); m.emissiveIntensity = 1.2; });
+    // a 5 mm RGB LED standing over its four legs: a frosted Ø5 mm dome whose colour follows the three channels
+    const T = THREE, X = 22, Z = d.pins[0].y, Y = LEGS.rgb_led;
+    const m = this.mat('#f5f5f5', { transparent: true, opacity: 0.8, roughness: 0.3 });
+    this.cyl(g, X, Z, 11.4, Y, Y + 4, m, 32);
+    this.cyl(g, X, Z, 9.84, Y + 4, Y + 24.2, m, 32);
+    this.mesh(new T.SphereGeometry(9.84, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), m, g, X, Y + 24.2, Z);
+    this.box(g, X - 6, Z - 1.2, 12, 2.4, Y, Y + 14, this.M.lead);
+    this.live(c, (s) => { const r = (s.r || 0), gg = (s.g || 0), b = (s.b || 0); m.color.setRGB(0.25 + 0.75 * r, 0.25 + 0.75 * gg, 0.25 + 0.75 * b); m.emissive.setRGB(r, gg, b); m.emissiveIntensity = 1.4; });
   }
 
   build_seg7(g, c, d) {
@@ -661,10 +685,12 @@ class View3D {
   }
 
   build_slide_switch(g, c, d) {
-    // an SPDT slide switch: a 12 × 8 mm black body with a slider that moves to the ON or OFF side
-    this.box(g, 4, 8, 48, 30, 0, 7, this.mat('#1b1d22', { roughness: 0.5 }));
-    const knob = this.box(g, 14, 14, 12, 14, 7, 9, this.mat('#e5e7eb', { roughness: 0.4 }));
-    this.live(c, () => { knob.position.x = c.props.on ? 14 : 0; });
+    // an SPDT slide switch over its three legs: a pressed-steel case with a black slider that moves to the ON side
+    const Z = d.pins[0].y, Y = LEGS.slide_switch;
+    this.box(g, 4, Z - 15, 48, 30, Y, Y + 14, this.mat('#c3c8d0', { metalness: 0.7, roughness: 0.35 }));
+    this.box(g, 12, Z - 7, 32, 14, Y + 14, Y + 14.4, this.mat('#15171c'));
+    const knob = this.box(g, 14, Z - 5, 12, 10, Y + 14, Y + 26, this.mat('#1b1d22', { roughness: 0.5 }));
+    this.live(c, () => { knob.position.x = 20 + (c.props.on ? 16 : 0); });
   }
 
   build_battery(g, c, d) {
@@ -861,12 +887,13 @@ class View3D {
 
   build_buzzer(g, c) {
     const T = THREE;
-    this.cyl(g, 22, 22, 20, 0, 14, this.mat('#1c1e22', { roughness: 0.5 }), 36);
-    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, 14, 22, false); ring.rotation.x = Math.PI / 2;
-    this.cyl(g, 22, 22, 3.5, 13.6, 14.1, this.mat('#000'), 16);
-    for (const x of [16, 28]) this.leg(g, x, 42, x, 62);
+    // a Ø12 mm buzzer standing over its two legs
+    const Z = 62, Y = LEGS.buzzer;
+    this.cyl(g, 22, Z, 20, Y, Y + 14, this.mat('#1c1e22', { roughness: 0.45 }), 40);
+    const ring = this.mesh(new T.TorusGeometry(13, 1, 8, 36), this.mat('#33363d'), g, 22, Y + 14, Z, false); ring.rotation.x = Math.PI / 2;
+    this.cyl(g, 22, Z, 3.5, Y + 13.6, Y + 14.1, this.mat('#000'), 16);
     const wm = new T.MeshBasicMaterial({ color: '#ffd60a', transparent: true, opacity: 0, depthWrite: false }); this.disp.push(wm);
-    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, 16, 22, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
+    const waves = [0, 1, 2].map(() => { const w = this.mesh(new T.TorusGeometry(1, 0.06, 6, 40), wm.clone(), g, 22, Y + 16, Z, false); this.disp.push(w.material); w.rotation.x = Math.PI / 2; return w; });
     this.live(c, (s) => {
       const on = s.f > 0; const t = performance.now() / 700;
       waves.forEach((w, i) => {
@@ -894,20 +921,21 @@ class View3D {
 
   // TO-92: half-cylinder standing on three legs, flat (marked) face toward the viewer.
   build_to92(g, c, mark) {
-    const T = THREE;
-    const body = this.mesh(new T.CylinderGeometry(9.25, 9.25, 20, 24, 1, false, Math.PI / 2, Math.PI), this.mat('#23262d', { roughness: 0.55 }), g, 15, 20, 22);
-    body.castShadow = true;
-    const face = this.tex(112, 88, (x) => {
-      x.fillStyle = '#2b2f37'; x.fillRect(0, 0, 112, 88);
-      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 20px system-ui, sans-serif'; x.fillText(mark, 56, 40);
-      x.font = '16px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 56, 66);
+    // a TO-92 package standing over its three legs (1.27 mm apart): a 4.7 mm wide, 4.8 mm tall half-round body with
+    // the type printed on its flat face
+    const T = THREE, Z = 62, Y = LEGS[c.type] ?? 12;
+    const bm = this.mat('#23262d', { roughness: 0.5 });
+    this.mesh(new T.CylinderGeometry(9.25, 9.25, 19, 28, 1, false, Math.PI / 2, Math.PI), bm, g, 15, Y + 9.5, Z);
+    this.box(g, 5.75, Z - 0.02, 18.5, 0.04, Y, Y + 19, bm);
+    const face = this.tex(148, 152, (x) => {
+      x.fillStyle = '#23262d'; x.fillRect(0, 0, 148, 152);
+      x.fillStyle = '#c4cbd8'; x.textAlign = 'center'; x.font = '600 30px system-ui, sans-serif'; x.fillText(mark, 74, 62);
+      x.font = '22px system-ui, sans-serif'; x.fillText(c.type.toUpperCase(), 74, 100);
     });
-    const plate = this.mesh(new T.PlaneGeometry(14, 10), this.mat('#ffffff', { map: face }), g, 15, 20, 22.05, false);
-    plate.rotation.y = 0; // faces +z (toward the default camera)
-    for (const x of [10, 15, 20]) { this.rod(g, [x, 10, 22], [x, 1, 22], 0.6, this.M.lead); this.leg(g, x, 22, x, 62); }
+    this.mesh(new T.PlaneGeometry(18.5, 19), this.mat('#ffffff', { map: face, roughness: 0.5 }), g, 15, Y + 9.5, Z + 0.05, false);
     const dotM = this.mat('#0f3d1d', { emissive: '#22c55e', emissiveIntensity: 0 });
-    this.cyl(g, 21, 26, 1.2, 30, 30.6, dotM, 10);
-    const glow = this.glow(g, 21, 32, 26, 12, '#22c55e');
+    this.cyl(g, 21, Z - 4, 1.2, Y + 19, Y + 19.6, dotM, 10);
+    const glow = this.glow(g, 21, Y + 21, Z - 4, 12, '#22c55e');
     this.live(c, (s) => { const on = s.on || 0; dotM.emissiveIntensity = on * 2; glow.material.opacity = on * 0.8; });
   }
   build_npn(g, c) { this.build_to92(g, c, '2N2222'); }
@@ -915,18 +943,20 @@ class View3D {
   build_nmos(g, c) { this.build_to92(g, c, '2N7000'); }
 
   build_diode(g, c) {
-    const T = THREE;
-    this.rod(g, [15, 7, 8], [55, 7, 8], 0.8, this.M.lead);
-    for (const x of [15, 55]) this.rod(g, [x, PIN_TOP - 1, 8], [x, 7, 8], 0.8, this.M.lead);
-    const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.9, roughness: 0.2 });
-    const body = this.mesh(new T.CylinderGeometry(3.75, 3.75, 16, 20), bodyM, g, 35, 7, 8); body.rotation.z = Math.PI / 2;
+    // an axial diode on legs bent down over its pins: a glass 1N4148 (DO-35), or a black plastic body with a silver
+    // band for the rectifiers; the band marks the cathode
+    const T = THREE, Y = LEGS.diode;
+    this.rod(g, [15, Y, 8], [55, Y, 8], 0.8, this.M.lead);
+    for (const x of [15, 55]) this.mesh(new T.SphereGeometry(0.8, 8, 6), this.M.lead, g, x, Y, 8, false);
+    const bodyM = this.mat('#c98a3a', { transparent: true, opacity: 0.85, roughness: 0.12 });
+    const body = this.mesh(new T.CylinderGeometry(3.75, 3.75, 16, 24), bodyM, g, 35, Y, 8); body.rotation.z = Math.PI / 2;
     const bandM = this.mat('#222');
-    const band = this.mesh(new T.CylinderGeometry(3.8, 3.8, 2.5, 20), bandM, g, 39.5, 7, 8); band.rotation.z = Math.PI / 2;
+    const band = this.mesh(new T.CylinderGeometry(3.8, 3.8, 2.5, 24), bandM, g, 39.5, Y, 8); band.rotation.z = Math.PI / 2;
     let last = '';
     this.live(c, () => {
       const m = String(c.props.model); if (m === last) return; last = m;
       const glass = m === '1N4148';
-      bodyM.color.set(glass ? '#c98a3a' : '#1d1f24'); bodyM.opacity = glass ? 0.85 : 1; bandM.color.set(glass ? '#222' : '#cfd4dc');
+      bodyM.color.set(glass ? '#c98a3a' : '#1d1f24'); bodyM.opacity = glass ? 0.85 : 1; bodyM.roughness = glass ? 0.12 : 0.5; bandM.color.set(glass ? '#222' : '#cfd4dc');
       body.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3); band.scale.set(glass ? 1 : 1.3, 1, glass ? 1 : 1.3);
     });
   }
@@ -973,16 +1003,19 @@ class View3D {
   }
 
   build_capacitor(g, c) {
-    const T = THREE;
-    const elec = this.mat('#2457b8', { roughness: 0.4 }), stripe = this.mat('#9db7e6');
+    // over its two legs: an electrolytic can (Ø5 × 11 mm, blue sleeve, the stripe marks the − leg, a scored vent on
+    // top), or for 100 nF a ceramic disc (Ø5 mm, 2.5 mm thick)
+    const T = THREE, X = 15, Z = 56, Y = LEGS.capacitor;
+    const elec = this.mat('#1f4fa8', { roughness: 0.3 }), stripe = this.mat('#b8c9ea', { roughness: 0.4 });
     const can = new T.Group(); g.add(can);
-    this.cyl(can, 15, 18, 9.85, 8, 51, elec, 28); // Ø5 mm, 11 mm long
-    const st = this.mesh(new T.CylinderGeometry(9.95, 9.95, 43, 28, 1, true, -0.35, 0.7), stripe, can, 15, 29.5, 18); st.rotation.y = Math.PI / 2;
-    this.cyl(can, 15, 18, 9.5, 51, 51.6, this.M.metal, 28);
+    this.cyl(can, X, Z, 9.3, Y - 1, Y, this.mat('#17191d'), 28);
+    this.cyl(can, X, Z, 9.85, Y, Y + 43, elec, 32);
+    const st = this.mesh(new T.CylinderGeometry(9.95, 9.95, 41, 28, 1, true, -0.35, 0.7), stripe, can, X, Y + 21.5, Z); st.rotation.y = Math.PI / 2;
+    this.cyl(can, X, Z, 9.2, Y + 43, Y + 43.5, this.M.metal, 32);
+    for (const r of [0, Math.PI / 2]) { const v = this.mesh(new T.BoxGeometry(14, 0.2, 0.7), this.mat('#7d848e'), can, X, Y + 43.55, Z, false); v.rotation.y = r + Math.PI / 4; }
     const disc = new T.Group(); g.add(disc);
-    // a 100 nF ceramic disc: Ø5 mm, 2.5 mm thick
-    const dm = this.mesh(new T.SphereGeometry(10, 20, 12), this.mat('#e1a93b', { roughness: 0.6 }), disc, 15, 18, 18); dm.scale.set(1, 1, 0.5);
-    for (const x of [10, 20]) { this.rod(g, [x, 1, 18], [x, 8, 18], 0.8, this.M.lead); this.leg(g, x, 18, x, 56); }
+    const dm = this.mesh(new T.SphereGeometry(10, 24, 14), this.mat('#d99a2b', { roughness: 0.5 }), disc, X, Y + 18, Z); dm.scale.set(1, 1, 0.45);
+    for (const x of [10, 20]) this.cyl(disc, x, Z, 0.9, Y, Y + 12, this.M.lead, 8);
     let last = '';
     this.live(c, () => { const v = String(c.props.value); if (v === last) return; last = v; const ceramic = v === '100nF'; can.visible = !ceramic; disc.visible = ceramic; });
   }
@@ -1137,11 +1170,20 @@ class View3D {
 
   hit(e) {
     this.setRay(e);
-    for (const h of this.ray.intersectObjects(this.picks, true)) {
+    const hits = this.ray.intersectObjects(this.picks, true);
+    for (const h of hits) {
       let o = h.object;
       if (o.userData.pinRef) return { kind: 'pin', ref: o.userData.pinRef };
       while (o && !o.userData.compId && !o.userData.wireId) o = o.parent;
-      if (o && o.userData.compId) { const p = o.userData.pivot.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z }; }
+      if (o && o.userData.compId) {
+        // A part that stands over its own legs hides them from above: a click in line with one of its pins is for
+        // that pin. (Not while the simulation runs, when a click on a button or a switch works it.)
+        const c = this.app.project.components.find((x) => x.id === o.userData.compId), d = c && DEFS[c.type];
+        const own = d && legTop(c, d) !== null && !(this.app.sim.running && d.interactive)
+          && hits.find((x) => x.object.userData.pinRef && x.object.userData.pinRef.startsWith(c.id + ':'));
+        if (own) return { kind: 'pin', ref: own.object.userData.pinRef };
+        const p = o.userData.pivot.worldToLocal(h.point.clone()); return { kind: 'comp', id: o.userData.compId, lx: p.x, ly: p.z };
+      }
       if (o) return { kind: 'wire', id: o.userData.wireId };
     }
     return null;
